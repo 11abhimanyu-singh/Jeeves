@@ -840,6 +840,16 @@ private struct AddBooksView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
                 }
+                // Always present — the API-key banner below only shows when
+                // the Anthropic key is missing, which left no way back into
+                // Settings at all once that one key was already saved.
+                ToolbarItem(placement: .confirmationAction) {
+                    NavigationLink {
+                        SettingsSheet()
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                    }
+                }
             }
         }
     }
