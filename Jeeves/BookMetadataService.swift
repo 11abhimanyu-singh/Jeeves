@@ -2,24 +2,24 @@
 //  BookMetadataService.swift
 //  Jeeves
 //
-//  Looks up ISBN and a cover thumbnail for a book by title/author. Open
-//  Library is tried first (no key, no quota). If it has no match — common
-//  for small regional presses — and a Google Books API key is saved, that's
-//  tried as a fallback (anonymous Google Books requests reliably return a
-//  429 quota error, which is why a key is required for it at all). Both are
-//  best-effort: a miss on both just leaves the fields empty rather than
-//  blocking anything.
+//  Looks up ISBN and a cover thumbnail for a book by title/author. Google
+//  Books is tried first when a key is saved (better cover art/metadata for
+//  mainstream titles) — anonymous Google Books requests reliably return a
+//  429 quota error, which is why a key is required for it at all, and why
+//  it silently falls through to Open Library (no key, no quota) when no key
+//  is set or Google has no match. Both are best-effort: a miss on both just
+//  leaves the fields empty rather than blocking anything.
 //
 
 import Foundation
 
 enum BookMetadataService {
     static func fetch(title: String, author: String) async -> (isbn: String?, thumbnailURLString: String?) {
-        let openLibraryResult = await fetchFromOpenLibrary(title: title, author: author)
-        if openLibraryResult.isbn != nil || openLibraryResult.thumbnailURLString != nil {
-            return openLibraryResult
+        let googleResult = await fetchFromGoogleBooks(title: title, author: author)
+        if googleResult.isbn != nil || googleResult.thumbnailURLString != nil {
+            return googleResult
         }
-        return await fetchFromGoogleBooks(title: title, author: author)
+        return await fetchFromOpenLibrary(title: title, author: author)
     }
 
     // MARK: Open Library

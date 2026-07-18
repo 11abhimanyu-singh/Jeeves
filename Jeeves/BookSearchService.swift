@@ -3,9 +3,9 @@
 //  Jeeves
 //
 //  Free-text book search, used by the "Add Books" page as a third ingestion
-//  path alongside shelf-photo scans and manual entry. Open Library (no key)
-//  is tried first; if it returns nothing and a Google Books API key is
-//  saved, that's tried as a fallback.
+//  path alongside shelf-photo scans and manual entry. Google Books is tried
+//  first when a key is saved; Open Library (no key) is the fallback when no
+//  key is set or Google returns nothing.
 //
 
 import Foundation
@@ -23,9 +23,9 @@ enum BookSearchService {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
-        let openLibraryResults = await searchOpenLibrary(query: trimmed)
-        if !openLibraryResults.isEmpty { return openLibraryResults }
-        return await searchGoogleBooks(query: trimmed)
+        let googleResults = await searchGoogleBooks(query: trimmed)
+        if !googleResults.isEmpty { return googleResults }
+        return await searchOpenLibrary(query: trimmed)
     }
 
     // MARK: Open Library
