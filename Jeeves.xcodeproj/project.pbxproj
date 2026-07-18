@@ -6,8 +6,19 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		E5604700300A2D6300BFD008 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E5604629300A2D6300BFD88F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E5604630300A2D6300BFD88F;
+			remoteInfo = Jeeves;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		E5604631300A2D6300BFD88F /* Jeeves.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Jeeves.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E5604700300A2D6300BFD002 /* JeevesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = JeevesTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -16,10 +27,22 @@
 			path = Jeeves;
 			sourceTree = "<group>";
 		};
+		E5604700300A2D6300BFD006 /* JeevesTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = JeevesTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		E560462E300A2D6300BFD88F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E5604700300A2D6300BFD004 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -33,7 +56,9 @@
 			isa = PBXGroup;
 			children = (
 				E5604633300A2D6300BFD88F /* Jeeves */,
+				E5604700300A2D6300BFD006 /* JeevesTests */,
 				E5604631300A2D6300BFD88F /* Jeeves.app */,
+				E5604700300A2D6300BFD002 /* JeevesTests.xctest */,
 			);
 			sourceTree = "<group>";
 		};
@@ -62,7 +87,38 @@
 			productReference = E5604631300A2D6300BFD88F /* Jeeves.app */;
 			productType = "com.apple.product-type.application";
 		};
+		E5604700300A2D6300BFD001 /* JeevesTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E5604700300A2D6300BFD00B /* Build configuration list for PBXNativeTarget "JeevesTests" */;
+			buildPhases = (
+				E5604700300A2D6300BFD003 /* Sources */,
+				E5604700300A2D6300BFD004 /* Frameworks */,
+				E5604700300A2D6300BFD005 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				E5604700300A2D6300BFD007 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				E5604700300A2D6300BFD006 /* JeevesTests */,
+			);
+			name = JeevesTests;
+			packageProductDependencies = (
+			);
+			productName = JeevesTests;
+			productReference = E5604700300A2D6300BFD002 /* JeevesTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXTargetDependency section */
+		E5604700300A2D6300BFD007 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E5604630300A2D6300BFD88F /* Jeeves */;
+			targetProxy = E5604700300A2D6300BFD008 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXProject section */
 		E5604629300A2D6300BFD88F /* Project object */ = {
@@ -74,6 +130,10 @@
 				TargetAttributes = {
 					E5604630300A2D6300BFD88F = {
 						CreatedOnToolsVersion = 26.6;
+					};
+					E5604700300A2D6300BFD001 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = E5604630300A2D6300BFD88F;
 					};
 				};
 			};
@@ -92,6 +152,7 @@
 			projectRoot = "";
 			targets = (
 				E5604630300A2D6300BFD88F /* Jeeves */,
+				E5604700300A2D6300BFD001 /* JeevesTests */,
 			);
 		};
 /* End PBXProject section */
@@ -104,10 +165,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E5604700300A2D6300BFD005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		E560462D300A2D6300BFD88F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E5604700300A2D6300BFD003 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -300,6 +375,44 @@
 			};
 			name = Release;
 		};
+		E5604700300A2D6300BFD009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = abhimanyusingh.me.JeevesTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Jeeves.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Jeeves";
+			};
+			name = Debug;
+		};
+		E5604700300A2D6300BFD00A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = abhimanyusingh.me.JeevesTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Jeeves.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Jeeves";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -317,6 +430,15 @@
 			buildConfigurations = (
 				E560463F300A2D6400BFD88F /* Debug */,
 				E5604640300A2D6400BFD88F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E5604700300A2D6300BFD00B /* Build configuration list for PBXNativeTarget "JeevesTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E5604700300A2D6300BFD009 /* Debug */,
+				E5604700300A2D6300BFD00A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

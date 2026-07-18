@@ -80,22 +80,17 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider().overlay(Color.textPrimary.opacity(0.14))
-
             Group {
                 switch tab {
                 case .planner: DayPlannerView()
-                case .checkin: checkinView
+                case .checkin: checkinTab
                 case .library: LibraryView()
-                case .progress: progressView
-                case .history: historyView
+                case .progress: progressTab
+                case .history: historyTab
                 }
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
-            Spacer(minLength: 0)
             Divider().overlay(Color.textPrimary.opacity(0.14))
             tabBar
         }
@@ -104,28 +99,65 @@ struct ContentView: View {
         .onChange(of: selectedDate) { _, newDate in loadFields(for: newDate) }
     }
 
-    // MARK: Header
+    // MARK: Per-tab chrome
 
-    private var header: some View {
+    /// One slim header per tab. Replaces the old global "Fitness" header,
+    /// which stacked above each module's own header and burned ~15% of every
+    /// screen on chrome before content started.
+    private func moduleHeader(_ title: String, _ icon: String, @ViewBuilder trailing: () -> some View) -> some View {
         HStack {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Circle()
                     .fill(Color.accent)
-                    .frame(width: 36, height: 36)
-                    .overlay(Image(systemName: "flame.fill").foregroundStyle(.white).font(.system(size: 16)))
-                Text("Fitness").font(.heading(20)).foregroundStyle(Color.textPrimary)
+                    .frame(width: 30, height: 30)
+                    .overlay(Image(systemName: icon).foregroundStyle(.white).font(.system(size: 13)))
+                Text(title).font(.heading(18)).foregroundStyle(Color.textPrimary)
             }
             Spacer()
-            if streak > 0 {
-                HStack(spacing: 4) {
-                    Image(systemName: "flame.fill").font(.system(size: 12)).foregroundStyle(Color.sageDeep)
-                    Text("\(streak) day streak").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Color.sageDeep)
-                }
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(Capsule().fill(Color.sageLight))
+            trailing()
+        }
+        .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 10)
+    }
+
+    private var streakChip: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "flame.fill").font(.system(size: 12)).foregroundStyle(Color.sageDeep)
+            Text("\(streak) day streak").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Color.sageDeep)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(Capsule().fill(Color.sageLight))
+    }
+
+    private var checkinTab: some View {
+        VStack(spacing: 0) {
+            moduleHeader("Check-in", "flame.fill") {
+                if streak > 0 { streakChip }
+            }
+            Divider().overlay(Color.textPrimary.opacity(0.14))
+            ScrollView {
+                checkinView.padding(20)
             }
         }
-        .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 16)
+    }
+
+    private var progressTab: some View {
+        VStack(spacing: 0) {
+            moduleHeader("Progress", "chart.bar.fill") {
+                if streak > 0 { streakChip }
+            }
+            Divider().overlay(Color.textPrimary.opacity(0.14))
+            ScrollView {
+                progressView.padding(20)
+            }
+        }
+    }
+
+    private var historyTab: some View {
+        VStack(spacing: 0) {
+            moduleHeader("History", "clock.fill") { EmptyView() }
+            Divider().overlay(Color.textPrimary.opacity(0.14))
+            historyView
+        }
     }
 
     // MARK: Check-in tab
@@ -269,7 +301,9 @@ struct ContentView: View {
                         )
                     VStack(alignment: .leading, spacing: 2) {
                         Text(e.workedOut ? "Logged" : "Rest day").font(.system(size: 14.5, weight: .bold)).foregroundStyle(Color.textPrimary)
-                        Text(summary(for: e)).font(.system(size: 12.5)).foregroundStyle(Color.textSoft)
+                        if e.workedOut {
+                            Text(summary(for: e)).font(.system(size: 12.5)).foregroundStyle(Color.textSoft)
+                        }
                     }
                     Spacer()
                 }
@@ -482,6 +516,14 @@ struct ContentView: View {
                     Text("No check-ins yet").font(.system(size: 13.5)).foregroundStyle(Color.textMuted)
                         .padding(.vertical, 32)
                 }
+                historyRows
+            }
+            .padding(20)
+        }
+    }
+
+    @ViewBuilder
+    private var historyRows: some View {
                 ForEach(checkins) { e in
                     HStack(spacing: 12) {
                         Circle()
@@ -503,8 +545,6 @@ struct ContentView: View {
                     }
                     .padding(.horizontal, 12).padding(.vertical, 10)
                     .background(RoundedRectangle(cornerRadius: 16).fill(Color.surface))
-                }
-            }
         }
     }
 

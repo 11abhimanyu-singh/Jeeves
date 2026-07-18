@@ -86,14 +86,7 @@ struct LibraryView: View {
     private var today: Date { Date().startOfDay }
 
     private func isDuplicate(title: String, author: String, excluding: UUID? = nil) -> Bool {
-        let t = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let a = author.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !t.isEmpty else { return false }
-        return books.contains {
-            $0.id != excluding
-                && $0.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == t
-                && $0.author.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == a
-        }
+        LibraryLogic.isDuplicate(title: title, author: author, in: books, excluding: excluding)
     }
 
     private var currentlyReadingBooks: [Book] { books.filter { $0.status == .currentlyReading } }
@@ -102,13 +95,7 @@ struct LibraryView: View {
     private var abandoned: [Book] { books.filter { $0.status == .abandoned } }
 
     private var recommendedNextBook: Book? {
-        guard currentlyReadingBooks.isEmpty, !unread.isEmpty else { return nil }
-        let lastFinished = finished.first
-        if let wantFiction = lastFinished?.isFiction.map({ !$0 }),
-           let match = unread.first(where: { $0.isFiction == wantFiction }) {
-            return match
-        }
-        return unread.first
+        LibraryLogic.recommendedNext(unread: unread, lastFinished: finished.first, currentlyReadingCount: currentlyReadingBooks.count)
     }
 
     var body: some View {
@@ -228,19 +215,19 @@ struct LibraryView: View {
 
     private var header: some View {
         HStack {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Circle()
                     .fill(Color.accent)
-                    .frame(width: 36, height: 36)
-                    .overlay(Image(systemName: "books.vertical.fill").foregroundStyle(.white).font(.system(size: 15)))
-                Text("Library").font(.heading(20)).foregroundStyle(Color.textPrimary)
+                    .frame(width: 30, height: 30)
+                    .overlay(Image(systemName: "books.vertical.fill").foregroundStyle(.white).font(.system(size: 13)))
+                Text("Library").font(.heading(18)).foregroundStyle(Color.textPrimary)
             }
             Spacer()
             Button { showAddBooksPage = true } label: {
-                Image(systemName: "plus.circle.fill").font(.system(size: 23)).foregroundStyle(Color.accent)
+                Image(systemName: "plus.circle.fill").font(.system(size: 22)).foregroundStyle(Color.accent)
             }
         }
-        .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 16)
+        .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 10)
     }
 
     // MARK: Currently reading carousel
@@ -266,11 +253,17 @@ struct LibraryView: View {
             } else {
                 TabView(selection: $carouselIndex) {
                     ForEach(Array(currentlyReadingBooks.enumerated()), id: \.element.id) { index, book in
-                        currentlyReadingRow(book).tag(index)
+                        // Top-align inside the fixed-height page — TabView centers
+                        // its pages by default, which read as dead space.
+                        VStack(spacing: 0) {
+                            currentlyReadingRow(book)
+                            Spacer(minLength: 0)
+                        }
+                        .tag(index)
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
-                .frame(height: 300)
+                .frame(height: 185)
                 .onChange(of: currentlyReadingBooks.count) { _, newCount in
                     if carouselIndex >= newCount { carouselIndex = max(0, newCount - 1) }
                 }

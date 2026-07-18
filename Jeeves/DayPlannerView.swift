@@ -62,16 +62,16 @@ struct DayPlannerView: View {
 
     private var header: some View {
         HStack {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Circle()
                     .fill(Color.accent)
-                    .frame(width: 36, height: 36)
-                    .overlay(Image(systemName: "calendar").foregroundStyle(.white).font(.system(size: 15)))
-                Text("Day Planner").font(.heading(20)).foregroundStyle(Color.textPrimary)
+                    .frame(width: 30, height: 30)
+                    .overlay(Image(systemName: "calendar").foregroundStyle(.white).font(.system(size: 13)))
+                Text("Day Planner").font(.heading(18)).foregroundStyle(Color.textPrimary)
             }
             Spacer()
         }
-        .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 16)
+        .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 10)
     }
 
     private var gymInput: some View {
