@@ -2,9 +2,9 @@
 //  KeychainService.swift
 //  Jeeves
 //
-//  Minimal Keychain wrapper for the user's own Anthropic API key, entered
-//  in the Library's Settings sheet. Never hardcoded, never leaves the
-//  device except in direct HTTPS calls to api.anthropic.com.
+//  Minimal Keychain wrapper for the user's own API keys (Anthropic, Google
+//  Books), entered in the Library's Settings sheet. Never hardcoded, never
+//  leave the device except in direct HTTPS calls to their respective APIs.
 //
 
 import Foundation
@@ -12,9 +12,8 @@ import Security
 
 enum KeychainService {
     private static let service = "com.abhimanyusingh.Jeeves"
-    private static let account = "anthropicAPIKey"
 
-    static func saveAPIKey(_ key: String) {
+    private static func save(_ key: String, account: String) {
         let data = Data(key.utf8)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -28,7 +27,7 @@ enum KeychainService {
         SecItemAdd(attributes as CFDictionary, nil)
     }
 
-    static func loadAPIKey() -> String? {
+    private static func load(account: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -42,7 +41,7 @@ enum KeychainService {
         return String(data: data, encoding: .utf8)
     }
 
-    static func deleteAPIKey() {
+    private static func delete(account: String) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -51,7 +50,21 @@ enum KeychainService {
         SecItemDelete(query as CFDictionary)
     }
 
-    static var hasAPIKey: Bool {
-        !(loadAPIKey() ?? "").isEmpty
-    }
+    // MARK: Anthropic (shelf scanning, book summaries)
+
+    private static let anthropicAccount = "anthropicAPIKey"
+
+    static func saveAPIKey(_ key: String) { save(key, account: anthropicAccount) }
+    static func loadAPIKey() -> String? { load(account: anthropicAccount) }
+    static func deleteAPIKey() { delete(account: anthropicAccount) }
+    static var hasAPIKey: Bool { !(loadAPIKey() ?? "").isEmpty }
+
+    // MARK: Google Books (ISBN/cover fallback when Open Library has no match)
+
+    private static let googleBooksAccount = "googleBooksAPIKey"
+
+    static func saveGoogleBooksAPIKey(_ key: String) { save(key, account: googleBooksAccount) }
+    static func loadGoogleBooksAPIKey() -> String? { load(account: googleBooksAccount) }
+    static func deleteGoogleBooksAPIKey() { delete(account: googleBooksAccount) }
+    static var hasGoogleBooksAPIKey: Bool { !(loadGoogleBooksAPIKey() ?? "").isEmpty }
 }

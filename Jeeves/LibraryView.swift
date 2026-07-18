@@ -1090,6 +1090,9 @@ private struct SettingsSheet: View {
     @State private var keyInput = ""
     @State private var hasSavedKey = KeychainService.hasAPIKey
 
+    @State private var googleKeyInput = ""
+    @State private var hasSavedGoogleKey = KeychainService.hasGoogleBooksAPIKey
+
     var body: some View {
         Form {
             Section {
@@ -1100,6 +1103,8 @@ private struct SettingsSheet: View {
                     keyInput = ""
                 }
                 .disabled(keyInput.trimmingCharacters(in: .whitespaces).isEmpty)
+            } header: {
+                Text("Claude")
             } footer: {
                 Text(hasSavedKey ? "A key is currently saved in Keychain." : "Used for shelf-photo scanning and book summaries, stored in Keychain on this device.")
             }
@@ -1108,6 +1113,28 @@ private struct SettingsSheet: View {
                     Button("Remove saved key", role: .destructive) {
                         KeychainService.deleteAPIKey()
                         hasSavedKey = false
+                    }
+                }
+            }
+
+            Section {
+                SecureField("Google Books API key", text: $googleKeyInput)
+                Button("Save") {
+                    KeychainService.saveGoogleBooksAPIKey(googleKeyInput)
+                    hasSavedGoogleKey = true
+                    googleKeyInput = ""
+                }
+                .disabled(googleKeyInput.trimmingCharacters(in: .whitespaces).isEmpty)
+            } header: {
+                Text("Google Books")
+            } footer: {
+                Text(hasSavedGoogleKey ? "A key is currently saved in Keychain." : "Optional — only used as a fallback when Open Library has no cover or ISBN for a book. Get a key from Google Cloud Console (enable the Books API, then create an API key).")
+            }
+            if hasSavedGoogleKey {
+                Section {
+                    Button("Remove saved key", role: .destructive) {
+                        KeychainService.deleteGoogleBooksAPIKey()
+                        hasSavedGoogleKey = false
                     }
                 }
             }
