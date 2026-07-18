@@ -59,6 +59,104 @@ private func libraryScanButtonLabel(_ icon: String, _ label: String) -> some Vie
     .background(RoundedRectangle(cornerRadius: 16).fill(Color.accent))
 }
 
+private func libraryBadge(_ text: String, _ fg: Color, _ bg: Color) -> some View {
+    Text(text).font(.system(size: 10, weight: .semibold)).foregroundStyle(fg)
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(Capsule().fill(bg))
+}
+
+/// Full-width status control — the label matches the width of whatever's
+/// below it (Pages-read + Log, or nothing) rather than a narrow pill, per
+/// the confirmed mockup. Uses an SF Symbol for the chevron rather than a
+/// Unicode character — the mockup's "⌄" sat on its text baseline instead of
+/// centering in its box (font-dependent); SF Symbols center correctly by
+/// default, so that fix doesn't need to be replicated here.
+private func statusMenuFullWidth(current: ReadingStatus, onSelect: @escaping (ReadingStatus) -> Void) -> some View {
+    Menu {
+        ForEach(ReadingStatus.allCases.filter { $0 != current }, id: \.self) { status in
+            Button(status.rawValue) { onSelect(status) }
+        }
+    } label: {
+        HStack {
+            Text(current.rawValue).font(.system(size: 13.5, weight: .semibold))
+            Spacer()
+            Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
+        }
+        .foregroundStyle(Color.textSoft)
+        .padding(.horizontal, 12).padding(.vertical, 7)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.bg))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.textPrimary.opacity(0.14), lineWidth: 1.5))
+    }
+    .buttonStyle(.plain)
+}
+
+// MARK: - Height-matching cover art
+
+/// Two distinct keys for two distinct concerns, kept separate on purpose:
+/// TextHeightKey matches a cover to its own row's text column (read and
+/// consumed locally, inside each row). RowHeightKey matches the Currently
+/// Reading carousel's frame to its tallest page (read by the carousel
+/// itself). Using one key for both would conflate "this row's text height"
+/// with "this row's total height" as they bubble up through the view tree.
+private struct TextHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+private struct RowHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+private extension View {
+    /// Reports this view's rendered height via the given preference key,
+    /// without affecting its own layout (GeometryReader in the background).
+    func reportHeight<Key: PreferenceKey>(_ key: Key.Type) -> some View where Key.Value == CGFloat {
+        background(
+            GeometryReader { geo in
+                Color.clear.preference(key: key, value: geo.size.height)
+            }
+        )
+    }
+}
+
+/// Cover art that grows to match `matchedHeight` (preserving aspect ratio),
+/// floored at baseWidth × baseWidth×1.5. matchedHeight is fed in from an
+/// explicit GeometryReader measurement of the sibling text column, not from
+/// implicit flex/stretch layout — an earlier attempt at the same behavior in
+/// the CSS mockup (aspect-ratio + align-self:stretch + width/height:auto)
+/// created a circular sizing dependency that inflated a cover to 3× its
+/// intended size and crushed the text column next to it. Explicit
+/// measure-then-set has no such failure mode; verified in Simulator with a
+/// deliberately long title before shipping, the same way the mockup was
+/// verified by measuring the rendered DOM rather than eyeballing it.
+private struct GrowableThumbnail: View {
+    let urlString: String?
+    let baseWidth: CGFloat
+    var matchedHeight: CGFloat = 0
+
+    var body: some View {
+        let baseHeight = baseWidth * 1.5
+        let height = max(baseHeight, matchedHeight)
+        let width = height / 1.5
+
+        Group {
+            if let urlString, let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        libraryThumbnailPlaceholder
+                    }
+                }
+            } else {
+                libraryThumbnailPlaceholder
+            }
+        }
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
 // MARK: - LibraryView
 
 struct LibraryView: View {
@@ -82,11 +180,19 @@ struct LibraryView: View {
 
     @State private var pagesInputByBook: [UUID: String] = [:]
     @State private var carouselIndex = 0
+    @State private var carouselHeight: CGFloat = 185
 
     private var today: Date { Date().startOfDay }
 
     private func isDuplicate(title: String, author: String, excluding: UUID? = nil) -> Bool {
         LibraryLogic.isDuplicate(title: title, author: author, in: books, excluding: excluding)
+    }
+
+    private func pagesInputBinding(for book: Book) -> Binding<String> {
+        Binding(
+            get: { pagesInputByBook[book.id] ?? "" },
+            set: { pagesInputByBook[book.id] = $0 }
+        )
     }
 
     private var currentlyReadingBooks: [Book] { books.filter { $0.status == .currentlyReading } }
@@ -233,9 +339,14 @@ struct LibraryView: View {
     // MARK: Currently reading carousel
 
     /// Always visible — swipeable carousel of every book marked "Currently
-    /// Reading" (any number, no longer capped at one), each with an inline
-    /// page-log field and a status-change menu. An empty state explains what
-    /// to do when nothing's marked yet, so this tile is never just missing.
+    /// Reading" (any number, no longer capped at one). An empty state
+    /// explains what to do when nothing's marked yet, so this tile is never
+    /// just missing.
+    ///
+    /// The carousel's height is measured from its tallest page (RowHeightKey,
+    /// bubbled up from each CurrentlyReadingRow) rather than fixed — a book
+    /// with a long title/author needs more room, and per the confirmed
+    /// design there's no line cap forcing it to fit a fixed box.
     private var currentlyReadingTile: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -253,17 +364,26 @@ struct LibraryView: View {
             } else {
                 TabView(selection: $carouselIndex) {
                     ForEach(Array(currentlyReadingBooks.enumerated()), id: \.element.id) { index, book in
-                        // Top-align inside the fixed-height page — TabView centers
-                        // its pages by default, which read as dead space.
-                        VStack(spacing: 0) {
-                            currentlyReadingRow(book)
-                            Spacer(minLength: 0)
-                        }
+                        CurrentlyReadingRow(
+                            book: book,
+                            todaysPages: todaysPages(for: book),
+                            pagesInput: pagesInputBinding(for: book),
+                            onLog: { pages in
+                                logPages(pages, for: book)
+                                pagesInputByBook[book.id] = ""
+                            },
+                            onStatusChange: { status in setStatus(status, on: book) },
+                            onTapThumbnail: { summaryBook = book }
+                        )
+                        .reportHeight(RowHeightKey.self)
                         .tag(index)
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
-                .frame(height: 185)
+                .frame(height: carouselHeight)
+                .onPreferenceChange(RowHeightKey.self) { height in
+                    if height > 0 { carouselHeight = max(185, height) }
+                }
                 .onChange(of: currentlyReadingBooks.count) { _, newCount in
                     if carouselIndex >= newCount { carouselIndex = max(0, newCount - 1) }
                 }
@@ -271,85 +391,6 @@ struct LibraryView: View {
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 16).fill(Color.surface))
-    }
-
-    private func currentlyReadingRow(_ book: Book) -> some View {
-        let todays = todaysPages(for: book)
-        let met = todays >= dailyPageTarget
-        let pagesInput = Binding<String>(
-            get: { pagesInputByBook[book.id] ?? "" },
-            set: { pagesInputByBook[book.id] = $0 }
-        )
-
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                Button { summaryBook = book } label: {
-                    libraryThumbnail(urlString: book.thumbnailURLString)
-                }
-                .buttonStyle(.plain)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(book.title).font(.system(size: 15, weight: .bold)).foregroundStyle(Color.textPrimary)
-                    Text(book.author).font(.system(size: 12.5)).foregroundStyle(Color.textSoft)
-                    if let total = book.totalPages, total > 0 {
-                        Text("Page \(book.currentPage) of \(total)").font(.system(size: 11.5)).foregroundStyle(Color.textMuted)
-                    } else {
-                        Text("Page \(book.currentPage)").font(.system(size: 11.5)).foregroundStyle(Color.textMuted)
-                    }
-                }
-                Spacer()
-                statusMenu(for: book)
-            }
-
-            if let total = book.totalPages, total > 0 {
-                ProgressView(value: Double(book.currentPage), total: Double(total)).tint(Color.accent)
-            }
-
-            HStack(spacing: 8) {
-                Image(systemName: met ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(met ? Color.sage : Color.textMuted.opacity(0.5))
-                Text(met ? "Today's \(dailyPageTarget)-page target hit" : "\(todays) / \(dailyPageTarget) pages today")
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(met ? Color.sageDeep : Color.textSoft)
-            }
-
-            HStack(spacing: 10) {
-                TextField("Pages read", text: pagesInput)
-                    .keyboardType(.numberPad)
-                    .padding(8)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.bg))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.textPrimary.opacity(0.14), lineWidth: 1.5))
-
-                Button {
-                    guard let pages = Int(pagesInput.wrappedValue), pages > 0 else { return }
-                    logPages(pages, for: book)
-                    pagesInputByBook[book.id] = ""
-                } label: {
-                    Text("Log").font(.system(size: 13.5, weight: .semibold)).foregroundStyle(.white)
-                        .padding(.horizontal, 18).padding(.vertical, 10)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(Color.accent))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    /// Inline status changer — fully independent of library status (Wishlist/
-    /// Owned lives elsewhere and this never touches it). Picking "Read" here
-    /// immediately queues the rating prompt via setStatus.
-    private func statusMenu(for book: Book) -> some View {
-        Menu {
-            ForEach(ReadingStatus.allCases.filter { $0 != book.status }, id: \.self) { status in
-                Button(status.rawValue) { setStatus(status, on: book) }
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Text(book.status.rawValue).font(.system(size: 11.5, weight: .semibold))
-                Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
-            }
-            .foregroundStyle(Color.textSoft)
-            .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(Capsule().fill(Color.bg))
-        }
     }
 
     private func recommendationCard(_ book: Book) -> some View {
@@ -385,51 +426,15 @@ struct LibraryView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(title).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Color.textMuted)
                 ForEach(list) { book in
-                    bookRow(book)
+                    LibraryBookRow(
+                        book: book,
+                        onTapThumbnail: { summaryBook = book },
+                        onTapEdit: { editingBook = book },
+                        onStatusChange: { status in setStatus(status, on: book) }
+                    )
                 }
             }
         }
-    }
-
-    /// Thumbnail, title/author, and status menu are three independently
-    /// tappable controls (not nested inside one another — nesting a Button
-    /// or Menu inside another Button's label lets the outer one swallow the
-    /// tap). Thumbnail opens the AI summary sheet, title/author opens edit,
-    /// status menu jumps straight to any status — a recommendation is a
-    /// suggestion, not a constraint, so every row supports the same jump.
-    private func bookRow(_ book: Book) -> some View {
-        HStack(spacing: 12) {
-            Button { summaryBook = book } label: {
-                libraryThumbnail(urlString: book.thumbnailURLString)
-            }
-            .buttonStyle(.plain)
-
-            Button { editingBook = book } label: {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(book.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.textPrimary)
-                    Text(book.author).font(.system(size: 12)).foregroundStyle(Color.textSoft)
-                    HStack(spacing: 6) {
-                        badge(book.libraryStatus.rawValue, Color.sageDeep, Color.sageLight)
-                        if let rating = book.rating {
-                            badge(rating.rawValue, Color.textSoft, Color.bg)
-                        }
-                    }
-                    .padding(.top, 2)
-                }
-            }
-            .buttonStyle(.plain)
-
-            Spacer()
-            statusMenu(for: book)
-        }
-        .padding(.horizontal, 12).padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color.surface))
-    }
-
-    private func badge(_ text: String, _ fg: Color, _ bg: Color) -> some View {
-        Text(text).font(.system(size: 10, weight: .semibold)).foregroundStyle(fg)
-            .padding(.horizontal, 8).padding(.vertical, 3)
-            .background(Capsule().fill(bg))
     }
 
     // MARK: Actions
@@ -542,6 +547,149 @@ struct LibraryView: View {
             scanError = error.localizedDescription
         }
         isScanning = false
+    }
+}
+
+// MARK: - Currently reading row
+
+/// Book identity leads (cover, title, author, page), then a hairline
+/// divider, then the full-width status dropdown, then today's progress and
+/// the log controls — order confirmed via HTML mockup before implementing.
+/// Title/author wrap to as many lines as needed (no lineLimit anywhere
+/// here); the cover grows to match via TextHeightKey, measured locally.
+private struct CurrentlyReadingRow: View {
+    let book: Book
+    let todaysPages: Int
+    let pagesInput: Binding<String>
+    let onLog: (Int) -> Void
+    let onStatusChange: (ReadingStatus) -> Void
+    let onTapThumbnail: () -> Void
+
+    @State private var textHeight: CGFloat = 0
+
+    var body: some View {
+        let met = todaysPages >= dailyPageTarget
+
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Button(action: onTapThumbnail) {
+                    GrowableThumbnail(urlString: book.thumbnailURLString, baseWidth: 89, matchedHeight: textHeight)
+                }
+                .buttonStyle(.plain)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(book.title)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Color.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(book.author)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Color.textSoft)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let total = book.totalPages, total > 0 {
+                        Text("Page \(book.currentPage) of \(total)").font(.system(size: 11.5)).foregroundStyle(Color.textMuted)
+                    } else {
+                        Text("Page \(book.currentPage)").font(.system(size: 11.5)).foregroundStyle(Color.textMuted)
+                    }
+                }
+                .padding(.trailing, 10)
+                .reportHeight(TextHeightKey.self)
+            }
+            .onPreferenceChange(TextHeightKey.self) { textHeight = $0 }
+
+            Divider().overlay(Color.textPrimary.opacity(0.1))
+
+            statusMenuFullWidth(current: book.status, onSelect: onStatusChange)
+
+            HStack(spacing: 8) {
+                Image(systemName: met ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(met ? Color.sage : Color.textMuted.opacity(0.5))
+                Text(met ? "Today's \(dailyPageTarget)-page target hit" : "\(todaysPages) / \(dailyPageTarget) pages today")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(met ? Color.sageDeep : Color.textSoft)
+            }
+
+            HStack(spacing: 10) {
+                TextField("Pages read", text: pagesInput)
+                    .keyboardType(.numberPad)
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.bg))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.textPrimary.opacity(0.14), lineWidth: 1.5))
+
+                Button {
+                    guard let pages = Int(pagesInput.wrappedValue), pages > 0 else { return }
+                    onLog(pages)
+                } label: {
+                    Text("Log").font(.system(size: 13.5, weight: .semibold)).foregroundStyle(.white)
+                        .padding(.horizontal, 18).padding(.vertical, 10)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Color.accent))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+// MARK: - Library book row (Unread / Read / Abandoned)
+
+/// Title leads (wraps freely), author underneath, then the full-width
+/// status dropdown underneath that. The library-status (and rating, if set)
+/// badge pins to the title's top-right corner — because it shares that
+/// first line with the title, even a moderately short title can wrap to a
+/// 2nd line; that's an accepted consequence of the corner placement, not a
+/// bug. Cover grows to match the text column the same way as the Currently
+/// Reading row.
+///
+/// Thumbnail, title/author, and status menu are three independently
+/// tappable controls, not nested inside one another — nesting a Button or
+/// Menu inside another Button's label lets the outer one swallow the tap.
+private struct LibraryBookRow: View {
+    let book: Book
+    let onTapThumbnail: () -> Void
+    let onTapEdit: () -> Void
+    let onStatusChange: (ReadingStatus) -> Void
+
+    @State private var textHeight: CGFloat = 0
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: onTapThumbnail) {
+                GrowableThumbnail(urlString: book.thumbnailURLString, baseWidth: 56, matchedHeight: textHeight)
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Button(action: onTapEdit) {
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(book.title)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.textPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(book.author)
+                                .font(.system(size: 12))
+                                .foregroundStyle(Color.textSoft)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 6)
+                        VStack(alignment: .trailing, spacing: 4) {
+                            libraryBadge(book.libraryStatus.rawValue, Color.sageDeep, Color.sageLight)
+                            if let rating = book.rating {
+                                libraryBadge(rating.rawValue, Color.textSoft, Color.bg)
+                            }
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+
+                statusMenuFullWidth(current: book.status, onSelect: onStatusChange)
+            }
+            .padding(.trailing, 10)
+            .reportHeight(TextHeightKey.self)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.surface))
+        .onPreferenceChange(TextHeightKey.self) { textHeight = $0 }
     }
 }
 
