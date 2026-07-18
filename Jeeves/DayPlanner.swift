@@ -43,6 +43,9 @@ enum DayPlanner {
     static let dayEndMinute = 20 * 60 + 30       // 8:30 PM
     static let photographyMinutes = 30
     static let lunchDeadlineMinute = 14 * 60 + 30 // 2:30 PM — Lunch must start at or before this
+    // commute + mobility + weights + cardio + commute + shower — the full span
+    // from leaving for the gym to being ready afterward.
+    static let gymToShowerDuration = 30 + 20 + 70 + 35 + 30 + 20
 
     private typealias QueueItem = (title: String, minutes: Int, note: String?, category: PrepCategory?)
 
@@ -87,10 +90,23 @@ enum DayPlanner {
         let leaveTime = gymMinute - 20 - 30 // mobility + commute, worked backward from weights start
         let preGymPool = max(0, leaveTime - choresEnd)
 
-        let packed = packQueue(queue, cursor: choresEnd, pool: preGymPool)
+        // Where the post-gym region begins. If that's already past lunch's 2:30 PM
+        // deadline, lunch can't live after the gym — it must be seated pre-gym.
+        let postGymStart = leaveTime + gymToShowerDuration
+        let lunchMustBePreGym = postGymStart > lunchDeadlineMinute
+
+        let packed = packQueue(queue, cursor: choresEnd, pool: preGymPool, lunchMustFitInPool: lunchMustBePreGym)
         blocks.append(contentsOf: packed.blocks)
         var preGymCursor = packed.cursor
-        let overflow = packed.overflow
+
+        // If lunch still spilled to overflow, make it the first post-gym block so
+        // it starts at postGymStart — which is at or before the deadline whenever
+        // it wasn't forced pre-gym above.
+        var overflow = packed.overflow
+        if let lunchIndex = overflow.firstIndex(where: { $0.title == "Lunch" }) {
+            overflow.insert(overflow.remove(at: lunchIndex), at: 0)
+        }
+
         if leaveTime > preGymCursor {
             blocks.append(PlanBlock(title: "Slack", startMinute: preGymCursor, durationMinutes: leaveTime - preGymCursor, note: nil, isAnchor: false))
             preGymCursor = leaveTime
@@ -147,27 +163,36 @@ enum DayPlanner {
     /// Packs `queue` items forward from `cursor` in order, respecting an optional pool
     /// limit (nil = unbounded); items that don't fit are returned as overflow, in order.
     ///
-    /// Lunch gets special treatment: if seating the next non-Lunch item first would push
-    /// Lunch's start past `lunchDeadlineMinute`, Lunch jumps the queue and gets seated
-    /// immediately instead, so it never silently slides into a post-gym overflow slot at
-    /// 5 or 6 PM.
-    private static func packQueue(_ queue: [QueueItem], cursor startCursor: Int, pool: Int?) -> (blocks: [PlanBlock], cursor: Int, overflow: [QueueItem]) {
+    /// Lunch gets special treatment because it has a hard 2:30 PM start deadline.
+    /// Before committing a non-Lunch item, we check whether doing so would strand
+    /// Lunch, and if so seat Lunch first. Two ways an item can strand Lunch:
+    ///   - it pushes the clock so far that Lunch placed after it would start late; or
+    ///   - (when `lunchMustFitInPool`, i.e. the whole post-gym region is past the
+    ///     deadline) it eats the bounded pool room Lunch needs, forcing Lunch into
+    ///     a post-gym overflow slot that would be too late.
+    private static func packQueue(_ queue: [QueueItem], cursor startCursor: Int, pool: Int?, lunchMustFitInPool: Bool = false) -> (blocks: [PlanBlock], cursor: Int, overflow: [QueueItem]) {
         var cursor = startCursor
         var filled = 0
         var blocks: [PlanBlock] = []
         var overflow: [QueueItem] = []
         var remaining = queue
+        let lunchMinutes = queue.first { $0.title == "Lunch" }?.minutes ?? 0
         var lunchPlaced = !queue.contains { $0.title == "Lunch" }
 
         while !remaining.isEmpty {
             var item = remaining.removeFirst()
-            if !lunchPlaced, item.title != "Lunch", cursor + item.minutes > lunchDeadlineMinute - 45 {
-                if let lunchIndex = remaining.firstIndex(where: { $0.title == "Lunch" }) {
+
+            if !lunchPlaced, item.title != "Lunch" {
+                let pushesPastDeadline = cursor + item.minutes > lunchDeadlineMinute
+                let eatsLunchPoolRoom = lunchMustFitInPool && (pool.map { filled + item.minutes + lunchMinutes > $0 } ?? false)
+                if pushesPastDeadline || eatsLunchPoolRoom,
+                   let lunchIndex = remaining.firstIndex(where: { $0.title == "Lunch" }) {
                     let lunch = remaining.remove(at: lunchIndex)
                     remaining.insert(item, at: 0)
                     item = lunch
                 }
             }
+
             if let pool, filled + item.minutes > pool {
                 overflow.append(item)
             } else {
