@@ -22,24 +22,30 @@ private let dailyPageTarget = 50
 
 // MARK: - Shared thumbnail (used by LibraryView, AddBooksView, BookSummarySheet)
 
+/// Renders from cached `data` when present (no network involved at all).
+/// `urlString` is only used as a fallback while data hasn't been downloaded
+/// yet (e.g. a search result that isn't a saved Book) — once a Book has
+/// thumbnailData cached, this never touches the network again.
 @ViewBuilder
-private func libraryThumbnail(urlString: String?, width: CGFloat = 44) -> some View {
+private func libraryThumbnail(urlString: String?, data: Data? = nil, width: CGFloat = 44) -> some View {
     let height = width * 1.5
-    if let urlString, let url = URL(string: urlString) {
-        AsyncImage(url: url) { phase in
-            if let image = phase.image {
-                image.resizable().aspectRatio(contentMode: .fill)
-            } else {
-                libraryThumbnailPlaceholder
+    Group {
+        if let data, let uiImage = UIImage(data: data) {
+            Image(uiImage: uiImage).resizable().aspectRatio(contentMode: .fill)
+        } else if let urlString, let url = URL(string: urlString) {
+            AsyncImage(url: url) { phase in
+                if let image = phase.image {
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } else {
+                    libraryThumbnailPlaceholder
+                }
             }
+        } else {
+            libraryThumbnailPlaceholder
         }
-        .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-    } else {
-        libraryThumbnailPlaceholder
-            .frame(width: width, height: height)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
     }
+    .frame(width: width, height: height)
+    .clipShape(RoundedRectangle(cornerRadius: 6))
 }
 
 private var libraryThumbnailPlaceholder: some View {
@@ -131,6 +137,7 @@ private extension View {
 /// verified by measuring the rendered DOM rather than eyeballing it.
 private struct GrowableThumbnail: View {
     let urlString: String?
+    var data: Data? = nil
     let baseWidth: CGFloat
     var matchedHeight: CGFloat = 0
 
@@ -140,7 +147,9 @@ private struct GrowableThumbnail: View {
         let width = height / 1.5
 
         Group {
-            if let urlString, let url = URL(string: urlString) {
+            if let data, let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage).resizable().aspectRatio(contentMode: .fill)
+            } else if let urlString, let url = URL(string: urlString) {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
                         image.resizable().aspectRatio(contentMode: .fill)
@@ -229,6 +238,7 @@ struct LibraryView: View {
             }
         }
         .background(Color.bg)
+        .task { await backfillMissingMetadata() }
         .overlay {
             if isScanning {
                 ZStack {
@@ -396,7 +406,7 @@ struct LibraryView: View {
     private func recommendationCard(_ book: Book) -> some View {
         HStack(spacing: 12) {
             Button { summaryBook = book } label: {
-                libraryThumbnail(urlString: book.thumbnailURLString)
+                libraryThumbnail(urlString: book.thumbnailURLString, data: book.thumbnailData)
             }
             .buttonStyle(.plain)
             VStack(alignment: .leading, spacing: 4) {
@@ -502,9 +512,10 @@ struct LibraryView: View {
         if book.thumbnailURLString == nil { enrichMetadata(for: book) }
     }
 
-    /// Search results already carry ISBN/thumbnail from Open Library, so no
-    /// enrichment call is needed. Defaults to Wishlist — unlike a shelf scan
-    /// (which means you own the book), searching for one doesn't imply that.
+    /// Search results already carry ISBN/thumbnail URL from Google
+    /// Books/Open Library, so no metadata lookup is needed — just the image
+    /// bytes. Defaults to Wishlist — unlike a shelf scan (which means you
+    /// own the book), searching for one doesn't imply that.
     private func insertFromSearch(_ result: BookSearchResult) {
         guard !isDuplicate(title: result.title, author: result.author) else { return }
         let book = Book(
@@ -514,6 +525,7 @@ struct LibraryView: View {
         )
         modelContext.insert(book)
         try? modelContext.save()
+        Task { await downloadThumbnailData(for: book) }
     }
 
     /// Best-effort ISBN + cover lookup, kicked off after a book is added.
@@ -526,6 +538,38 @@ struct LibraryView: View {
                 if (book.isbn ?? "").isEmpty, let isbn = result.isbn { book.isbn = isbn }
                 if let thumb = result.thumbnailURLString { book.thumbnailURLString = thumb }
                 try? modelContext.save()
+            }
+            await downloadThumbnailData(for: book)
+        }
+    }
+
+    /// Downloads and persists the actual cover image bytes once, so rows
+    /// never re-fetch over the network afterward — AsyncImage alone has no
+    /// persistent cache, so without this every scroll/relaunch re-downloaded
+    /// the same image. No-ops if already cached or there's nothing to fetch.
+    private func downloadThumbnailData(for book: Book) async {
+        guard book.thumbnailData == nil,
+              let urlString = book.thumbnailURLString,
+              let url = URL(string: urlString),
+              let (data, _) = try? await URLSession.shared.data(from: url) else { return }
+        await MainActor.run {
+            book.thumbnailData = data
+            try? modelContext.save()
+        }
+    }
+
+    /// Books added before a Google Books key existed (or that briefly failed
+    /// for any other reason) never got retried — enrichment was always a
+    /// one-shot attempt at add/edit time. This catches them up once per
+    /// Library visit: cheap no-op for anything already fully populated,
+    /// real work only for books still missing an ISBN, a thumbnail URL, or
+    /// the downloaded image bytes.
+    private func backfillMissingMetadata() async {
+        for book in books {
+            if book.isbn == nil || book.thumbnailURLString == nil {
+                enrichMetadata(for: book)
+            } else if book.thumbnailData == nil {
+                await downloadThumbnailData(for: book)
             }
         }
     }
@@ -573,7 +617,7 @@ private struct CurrentlyReadingRow: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 Button(action: onTapThumbnail) {
-                    GrowableThumbnail(urlString: book.thumbnailURLString, baseWidth: 89, matchedHeight: textHeight)
+                    GrowableThumbnail(urlString: book.thumbnailURLString, data: book.thumbnailData, baseWidth: 89, matchedHeight: textHeight)
                 }
                 .buttonStyle(.plain)
 
@@ -654,7 +698,7 @@ private struct LibraryBookRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Button(action: onTapThumbnail) {
-                GrowableThumbnail(urlString: book.thumbnailURLString, baseWidth: 56, matchedHeight: textHeight)
+                GrowableThumbnail(urlString: book.thumbnailURLString, data: book.thumbnailData, baseWidth: 56, matchedHeight: textHeight)
             }
             .buttonStyle(.plain)
 
@@ -710,6 +754,7 @@ private struct AddBooksView: View {
     @State private var query = ""
     @State private var results: [BookSearchResult] = []
     @State private var isSearching = false
+    @State private var hasSearched = false
     @State private var addedResultIDs: Set<String> = []
 
     var body: some View {
@@ -734,33 +779,14 @@ private struct AddBooksView: View {
                         .buttonStyle(.plain)
                     }
 
-                    HStack(spacing: 10) {
-                        Button { showCamera = true } label: {
-                            libraryScanButtonLabel("camera.fill", "Take photo")
-                        }
-                        .buttonStyle(.plain)
-
-                        PhotosPicker(selection: $photoPickerItem, matching: .images) {
-                            libraryScanButtonLabel("photo.on.rectangle", "Choose photo")
-                        }
-                    }
-
-                    Button(action: onAddManual) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "plus").font(.system(size: 13, weight: .bold))
-                            Text("Add book manually").font(.system(size: 14, weight: .semibold))
-                        }
-                        .foregroundStyle(Color.textPrimary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
-                        .background(RoundedRectangle(cornerRadius: 16).stroke(Color.textPrimary.opacity(0.14), lineWidth: 1.5))
-                    }
-                    .buttonStyle(.plain)
-
+                    // Search leads — it's the fastest way in, and it's what
+                    // fills in ISBN/cover/genre for you. Scanning and manual
+                    // entry are still here, just no longer competing for
+                    // first position.
                     VStack(alignment: .leading, spacing: 10) {
                         Text("SEARCH").font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Color.textMuted)
                         HStack(spacing: 8) {
-                            TextField("Title or author", text: $query)
+                            TextField("Title, author, or ISBN", text: $query)
                                 .padding(10)
                                 .background(RoundedRectangle(cornerRadius: 10).fill(Color.surface))
                                 .onSubmit { runSearch() }
@@ -774,12 +800,36 @@ private struct AddBooksView: View {
 
                         if isSearching {
                             HStack { Spacer(); ProgressView(); Spacer() }.padding(.vertical, 10)
+                        } else if hasSearched && results.isEmpty {
+                            Text("No matches. You can still add it manually below.")
+                                .font(.system(size: 12.5)).foregroundStyle(Color.textSoft)
+                                .padding(.vertical, 4)
                         }
 
                         ForEach(results) { result in
                             searchResultRow(result)
                         }
                     }
+
+                    HStack(spacing: 10) {
+                        Button { showCamera = true } label: {
+                            libraryScanButtonLabel("camera.fill", "Take photo")
+                        }
+                        .buttonStyle(.plain)
+
+                        PhotosPicker(selection: $photoPickerItem, matching: .images) {
+                            libraryScanButtonLabel("photo.on.rectangle", "Choose photo")
+                        }
+                    }
+
+                    Button(action: onAddManual) {
+                        Text("Can't find it? Add manually")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color.textSoft)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                    }
+                    .buttonStyle(.plain)
                 }
                 .padding(20)
             }
@@ -801,6 +851,7 @@ private struct AddBooksView: View {
         Task {
             results = await BookSearchService.search(query: q)
             isSearching = false
+            hasSearched = true
         }
     }
 
@@ -848,7 +899,7 @@ private struct BookSummarySheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 14) {
-                libraryThumbnail(urlString: book.thumbnailURLString, width: 56)
+                libraryThumbnail(urlString: book.thumbnailURLString, data: book.thumbnailData, width: 56)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(book.title).font(.heading(17)).foregroundStyle(Color.textPrimary)
                     Text(book.author).font(.system(size: 13)).foregroundStyle(Color.textSoft)

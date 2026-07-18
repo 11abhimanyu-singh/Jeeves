@@ -48,6 +48,11 @@ final class Book {
     var dateFinished: Date?
     var isbn: String?
     var thumbnailURLString: String?
+    // The actual cover image bytes, downloaded once and kept — without this,
+    // every row render re-fetches the image over the network (AsyncImage has
+    // no persistent cache), which is wasted data on every scroll/relaunch.
+    // thumbnailURLString is kept too, purely as the source to (re-)download from.
+    @Attribute(.externalStorage) var thumbnailData: Data?
     var summary: String? // cached Claude-generated summary/review, fetched on demand
 
     init(
@@ -64,6 +69,7 @@ final class Book {
         dateFinished: Date? = nil,
         isbn: String? = nil,
         thumbnailURLString: String? = nil,
+        thumbnailData: Data? = nil,
         summary: String? = nil
     ) {
         self.id = UUID()
@@ -80,6 +86,7 @@ final class Book {
         self.dateFinished = dateFinished
         self.isbn = isbn
         self.thumbnailURLString = thumbnailURLString
+        self.thumbnailData = thumbnailData
         self.summary = summary
     }
 }
