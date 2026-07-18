@@ -2,15 +2,15 @@
 //  LibraryView.swift
 //  Jeeves
 //
-//  Reading library: shelf-photo ingestion via the Claude API (reviewed and
-//  confirmed by the user before anything is saved — books land as plain
-//  Unread/Owned with no status questions asked at ingest time), a currently-
-//  reading tile for logging daily pages and changing status inline, and a
-//  fiction/non-fiction-alternating recommendation for what to read next.
+//  Reading library: shelf-photo ingestion via the Claude API, free-text
+//  search, and manual entry all live on a separate "Add Books" page reached
+//  via the + button — the main page is for daily scrolling and status
+//  changes, not adding, since books get added far less often than read.
 //
 //  Library status (Wishlist/Owned) and reading status (Unread/Currently
-//  Reading/Finished/Abandoned) are independent — triage happens after
-//  ingestion, not during it.
+//  Reading/Read/Abandoned) are fully independent — changing one never
+//  touches the other. Any number of books can be Currently Reading at once;
+//  they're shown in a swipeable carousel at the top.
 //
 
 import SwiftUI
@@ -20,15 +20,57 @@ import UIKit
 
 private let dailyPageTarget = 50
 
+// MARK: - Shared thumbnail (used by LibraryView, AddBooksView, BookSummarySheet)
+
+@ViewBuilder
+private func libraryThumbnail(urlString: String?, width: CGFloat = 44) -> some View {
+    let height = width * 1.5
+    if let urlString, let url = URL(string: urlString) {
+        AsyncImage(url: url) { phase in
+            if let image = phase.image {
+                image.resizable().aspectRatio(contentMode: .fill)
+            } else {
+                libraryThumbnailPlaceholder
+            }
+        }
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    } else {
+        libraryThumbnailPlaceholder
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+private var libraryThumbnailPlaceholder: some View {
+    RoundedRectangle(cornerRadius: 6)
+        .fill(Color.surfaceDeep)
+        .overlay(Image(systemName: "book.closed.fill").font(.system(size: 14)).foregroundStyle(Color.textMuted))
+}
+
+private func libraryScanButtonLabel(_ icon: String, _ label: String) -> some View {
+    HStack(spacing: 6) {
+        Image(systemName: icon).font(.system(size: 13))
+        Text(label).font(.system(size: 13.5, weight: .semibold))
+    }
+    .foregroundStyle(.white)
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, 12)
+    .background(RoundedRectangle(cornerRadius: 16).fill(Color.accent))
+}
+
+// MARK: - LibraryView
+
 struct LibraryView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Book.dateAdded, order: .reverse) private var books: [Book]
     @Query private var readingLogs: [ReadingLog]
 
+    @State private var showAddBooksPage = false
     @State private var showAddSheet = false
     @State private var editingBook: Book?
-    @State private var showSettingsSheet = false
     @State private var pendingRatingBook: Book?
+    @State private var summaryBook: Book?
 
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var showCamera = false
@@ -39,6 +81,7 @@ struct LibraryView: View {
     @State private var showReviewSheet = false
 
     @State private var pagesInputByBook: [UUID: String] = [:]
+    @State private var carouselIndex = 0
 
     private var today: Date { Date().startOfDay }
 
@@ -75,10 +118,6 @@ struct LibraryView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    if !KeychainService.hasAPIKey {
-                        apiKeyHint
-                    }
-                    scanControls
                     if let error = scanError {
                         Text(error).font(.system(size: 12.5)).foregroundStyle(Color.accentDeep)
                     }
@@ -92,21 +131,6 @@ struct LibraryView: View {
                     bookSection("UNREAD", unread)
                     bookSection("READ", finished)
                     bookSection("ABANDONED", abandoned)
-
-                    Button {
-                        editingBook = nil
-                        showAddSheet = true
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "plus").font(.system(size: 13, weight: .bold))
-                            Text("Add book manually").font(.system(size: 14, weight: .semibold))
-                        }
-                        .foregroundStyle(Color.textPrimary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
-                        .background(RoundedRectangle(cornerRadius: 16).stroke(Color.textPrimary.opacity(0.14), lineWidth: 1.5))
-                    }
-                    .buttonStyle(.plain)
                 }
                 .padding(20)
             }
@@ -121,6 +145,20 @@ struct LibraryView: View {
                         .background(RoundedRectangle(cornerRadius: 16).fill(Color.surface))
                 }
             }
+        }
+        .sheet(isPresented: $showAddBooksPage) {
+            AddBooksView(
+                photoPickerItem: $photoPickerItem,
+                showCamera: $showCamera,
+                hasAPIKey: KeychainService.hasAPIKey,
+                isDuplicate: { t, a in isDuplicate(title: t, author: a) },
+                onAddManual: {
+                    showAddBooksPage = false
+                    editingBook = nil
+                    showAddSheet = true
+                },
+                onAddSearchResult: { result in insertFromSearch(result) }
+            )
         }
         .sheet(isPresented: $showAddSheet) {
             BookEditSheet(
@@ -138,7 +176,6 @@ struct LibraryView: View {
                 isDuplicate: { t, a in isDuplicate(title: t, author: a, excluding: book.id) }
             )
         }
-        .sheet(isPresented: $showSettingsSheet) { SettingsSheet() }
         .sheet(isPresented: $showReviewSheet) {
             ScanReviewSheet(detected: detectedBooks, isDuplicate: { d in isDuplicate(title: d.title, author: d.author) }) { chosen in
                 for d in chosen where !isDuplicate(title: d.title, author: d.author) {
@@ -158,11 +195,18 @@ struct LibraryView: View {
                 pendingRatingBook = nil
             }
         }
+        .sheet(item: $summaryBook) { book in
+            BookSummarySheet(book: book) { text in
+                book.summary = text
+                try? modelContext.save()
+            }
+        }
         .sheet(isPresented: $showCamera) {
             CameraPicker(image: $cameraImage)
         }
         .onChange(of: photoPickerItem) { _, newItem in
             guard let newItem else { return }
+            showAddBooksPage = false
             Task {
                 if let data = try? await newItem.loadTransferable(type: Data.self), let uiImage = UIImage(data: data) {
                     await scan(uiImage)
@@ -172,6 +216,7 @@ struct LibraryView: View {
         }
         .onChange(of: cameraImage) { _, newImage in
             guard let newImage else { return }
+            showAddBooksPage = false
             Task {
                 await scan(newImage)
                 cameraImage = nil
@@ -191,76 +236,43 @@ struct LibraryView: View {
                 Text("Library").font(.heading(20)).foregroundStyle(Color.textPrimary)
             }
             Spacer()
-            Button { showSettingsSheet = true } label: {
-                Image(systemName: "gearshape.fill").font(.system(size: 17)).foregroundStyle(Color.textSoft)
+            Button { showAddBooksPage = true } label: {
+                Image(systemName: "plus.circle.fill").font(.system(size: 23)).foregroundStyle(Color.accent)
             }
         }
         .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 16)
     }
 
-    // MARK: API key hint
+    // MARK: Currently reading carousel
 
-    private var apiKeyHint: some View {
-        Button { showSettingsSheet = true } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Add your Anthropic API key").font(.system(size: 13.5, weight: .bold)).foregroundStyle(Color.textPrimary)
-                    Text("Needed to scan bookshelf photos").font(.system(size: 12)).foregroundStyle(Color.textSoft)
-                }
-                Spacer()
-                Image(systemName: "arrow.right").font(.system(size: 14)).foregroundStyle(Color.accent)
-            }
-            .padding(.horizontal, 16).padding(.vertical, 13)
-            .background(RoundedRectangle(cornerRadius: 16).fill(Color.surface))
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: Scan controls
-
-    private var scanControls: some View {
-        HStack(spacing: 10) {
-            Button { showCamera = true } label: {
-                scanButtonLabel("camera.fill", "Take photo")
-            }
-            .buttonStyle(.plain)
-
-            PhotosPicker(selection: $photoPickerItem, matching: .images) {
-                scanButtonLabel("photo.on.rectangle", "Choose photo")
-            }
-        }
-    }
-
-    private func scanButtonLabel(_ icon: String, _ label: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon).font(.system(size: 13))
-            Text(label).font(.system(size: 13.5, weight: .semibold))
-        }
-        .foregroundStyle(.white)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color.accent))
-    }
-
-    // MARK: Currently reading tile
-
-    /// Always visible — shows every book currently marked "Currently Reading"
-    /// (normally just one; setStatus enforces that) with an inline page-log
-    /// field and a status-change menu. An empty state explains what to do
-    /// when nothing's marked yet, so this tile is never just... missing.
+    /// Always visible — swipeable carousel of every book marked "Currently
+    /// Reading" (any number, no longer capped at one), each with an inline
+    /// page-log field and a status-change menu. An empty state explains what
+    /// to do when nothing's marked yet, so this tile is never just missing.
     private var currentlyReadingTile: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("CURRENTLY READING").font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Color.textMuted)
+            HStack {
+                Text("CURRENTLY READING").font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Color.textMuted)
+                Spacer()
+                if currentlyReadingBooks.count > 1 {
+                    Text("\(min(carouselIndex, currentlyReadingBooks.count - 1) + 1)/\(currentlyReadingBooks.count)")
+                        .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Color.textMuted)
+                }
+            }
 
             if currentlyReadingBooks.isEmpty {
                 Text("No book marked Currently Reading yet. Set one from Unread below, or start the recommendation.")
                     .font(.system(size: 13)).foregroundStyle(Color.textSoft)
             } else {
-                ForEach(currentlyReadingBooks) { book in
-                    currentlyReadingRow(book)
-                    if book.id != currentlyReadingBooks.last?.id {
-                        Divider().overlay(Color.textPrimary.opacity(0.1))
+                TabView(selection: $carouselIndex) {
+                    ForEach(Array(currentlyReadingBooks.enumerated()), id: \.element.id) { index, book in
+                        currentlyReadingRow(book).tag(index)
                     }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .frame(height: 300)
+                .onChange(of: currentlyReadingBooks.count) { _, newCount in
+                    if carouselIndex >= newCount { carouselIndex = max(0, newCount - 1) }
                 }
             }
         }
@@ -278,7 +290,10 @@ struct LibraryView: View {
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                thumbnail(for: book)
+                Button { summaryBook = book } label: {
+                    libraryThumbnail(urlString: book.thumbnailURLString)
+                }
+                .buttonStyle(.plain)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(book.title).font(.system(size: 15, weight: .bold)).foregroundStyle(Color.textPrimary)
                     Text(book.author).font(.system(size: 12.5)).foregroundStyle(Color.textSoft)
@@ -325,8 +340,9 @@ struct LibraryView: View {
         }
     }
 
-    /// Inline status changer — picking "Read" here immediately queues
-    /// the rating prompt via setStatus, same as everywhere else it's set.
+    /// Inline status changer — fully independent of library status (Wishlist/
+    /// Owned lives elsewhere and this never touches it). Picking "Read" here
+    /// immediately queues the rating prompt via setStatus.
     private func statusMenu(for book: Book) -> some View {
         Menu {
             ForEach(ReadingStatus.allCases.filter { $0 != book.status }, id: \.self) { status in
@@ -345,7 +361,10 @@ struct LibraryView: View {
 
     private func recommendationCard(_ book: Book) -> some View {
         HStack(spacing: 12) {
-            thumbnail(for: book)
+            Button { summaryBook = book } label: {
+                libraryThumbnail(urlString: book.thumbnailURLString)
+            }
+            .buttonStyle(.plain)
             VStack(alignment: .leading, spacing: 4) {
                 Text("UP NEXT").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.textMuted)
                 Text(book.title).font(.system(size: 14.5, weight: .bold)).foregroundStyle(Color.textPrimary)
@@ -379,31 +398,34 @@ struct LibraryView: View {
         }
     }
 
-    /// The status menu sits outside the tap-to-edit Button (not nested inside
-    /// it) — nesting a Menu inside a Button's label lets the outer Button
-    /// swallow the tap, so this keeps both independently tappable: tap the
-    /// book to edit it, tap the status pill to jump straight to any status —
-    /// including Read, directly from Unread. A recommendation is a
+    /// Thumbnail, title/author, and status menu are three independently
+    /// tappable controls (not nested inside one another — nesting a Button
+    /// or Menu inside another Button's label lets the outer one swallow the
+    /// tap). Thumbnail opens the AI summary sheet, title/author opens edit,
+    /// status menu jumps straight to any status — a recommendation is a
     /// suggestion, not a constraint, so every row supports the same jump.
     private func bookRow(_ book: Book) -> some View {
         HStack(spacing: 12) {
+            Button { summaryBook = book } label: {
+                libraryThumbnail(urlString: book.thumbnailURLString)
+            }
+            .buttonStyle(.plain)
+
             Button { editingBook = book } label: {
-                HStack(spacing: 12) {
-                    thumbnail(for: book)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(book.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.textPrimary)
-                        Text(book.author).font(.system(size: 12)).foregroundStyle(Color.textSoft)
-                        HStack(spacing: 6) {
-                            badge(book.libraryStatus.rawValue, Color.sageDeep, Color.sageLight)
-                            if let rating = book.rating {
-                                badge(rating.rawValue, Color.textSoft, Color.bg)
-                            }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(book.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.textPrimary)
+                    Text(book.author).font(.system(size: 12)).foregroundStyle(Color.textSoft)
+                    HStack(spacing: 6) {
+                        badge(book.libraryStatus.rawValue, Color.sageDeep, Color.sageLight)
+                        if let rating = book.rating {
+                            badge(rating.rawValue, Color.textSoft, Color.bg)
                         }
-                        .padding(.top, 2)
                     }
+                    .padding(.top, 2)
                 }
             }
             .buttonStyle(.plain)
+
             Spacer()
             statusMenu(for: book)
         }
@@ -417,42 +439,11 @@ struct LibraryView: View {
             .background(Capsule().fill(bg))
     }
 
-    // MARK: Thumbnail
-
-    @ViewBuilder
-    private func thumbnail(for book: Book, width: CGFloat = 44) -> some View {
-        let height = width * 1.5
-        if let urlString = book.thumbnailURLString, let url = URL(string: urlString) {
-            AsyncImage(url: url) { phase in
-                if let image = phase.image {
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } else {
-                    thumbnailPlaceholder
-                }
-            }
-            .frame(width: width, height: height)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-        } else {
-            thumbnailPlaceholder
-                .frame(width: width, height: height)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-        }
-    }
-
-    private var thumbnailPlaceholder: some View {
-        RoundedRectangle(cornerRadius: 6)
-            .fill(Color.surfaceDeep)
-            .overlay(Image(systemName: "book.closed.fill").font(.system(size: 14)).foregroundStyle(Color.textMuted))
-    }
-
     // MARK: Actions
 
+    /// No longer enforces a single Currently Reading book — any number can
+    /// be marked at once, shown in the carousel.
     private func setStatus(_ status: ReadingStatus, on book: Book) {
-        if status == .currentlyReading {
-            for other in books where other.id != book.id && other.status == .currentlyReading {
-                other.status = .unread
-            }
-        }
         book.status = status
         if status == .finished {
             book.dateFinished = .now
@@ -491,6 +482,11 @@ struct LibraryView: View {
         enrichMetadata(for: book)
     }
 
+    /// Library status and reading status are set independently — this only
+    /// calls setStatus (with its Read/dateFinished/rating-prompt side
+    /// effects) when the reading status actually changed, so editing
+    /// something unrelated (like flipping Wishlist/Owned) never reopens the
+    /// rating prompt or touches dateFinished on an already-Read book.
     private func apply(_ draft: BookDraft, to book: Book) {
         book.title = draft.title
         book.author = draft.author
@@ -501,8 +497,25 @@ struct LibraryView: View {
         book.totalPages = Int(draft.totalPages)
         book.currentPage = Int(draft.currentPage) ?? book.currentPage
         book.isbn = draft.isbn.isEmpty ? nil : draft.isbn
-        setStatus(draft.status, on: book)
+        if draft.status != book.status {
+            setStatus(draft.status, on: book)
+        }
+        try? modelContext.save()
         if book.thumbnailURLString == nil { enrichMetadata(for: book) }
+    }
+
+    /// Search results already carry ISBN/thumbnail from Open Library, so no
+    /// enrichment call is needed. Defaults to Wishlist — unlike a shelf scan
+    /// (which means you own the book), searching for one doesn't imply that.
+    private func insertFromSearch(_ result: BookSearchResult) {
+        guard !isDuplicate(title: result.title, author: result.author) else { return }
+        let book = Book(
+            title: result.title, author: result.author,
+            libraryStatus: .wishlist, status: .unread,
+            isbn: result.isbn, thumbnailURLString: result.thumbnailURLString
+        )
+        modelContext.insert(book)
+        try? modelContext.save()
     }
 
     /// Best-effort ISBN + cover lookup, kicked off after a book is added.
@@ -536,6 +549,209 @@ struct LibraryView: View {
             scanError = error.localizedDescription
         }
         isScanning = false
+    }
+}
+
+// MARK: - Add Books page
+
+/// Everything related to *acquiring* books lives here, off the main page —
+/// scanning, manual entry, and search — since you'll scroll your library
+/// daily but rarely add to it.
+private struct AddBooksView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var photoPickerItem: PhotosPickerItem?
+    @Binding var showCamera: Bool
+    let hasAPIKey: Bool
+    let isDuplicate: (String, String) -> Bool
+    let onAddManual: () -> Void
+    let onAddSearchResult: (BookSearchResult) -> Void
+
+    @State private var query = ""
+    @State private var results: [BookSearchResult] = []
+    @State private var isSearching = false
+    @State private var addedResultIDs: Set<String> = []
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    if !hasAPIKey {
+                        NavigationLink {
+                            SettingsSheet()
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Add your Anthropic API key").font(.system(size: 13.5, weight: .bold)).foregroundStyle(Color.textPrimary)
+                                    Text("Needed for shelf scanning and book summaries").font(.system(size: 12)).foregroundStyle(Color.textSoft)
+                                }
+                                Spacer()
+                                Image(systemName: "arrow.right").font(.system(size: 14)).foregroundStyle(Color.accent)
+                            }
+                            .padding(.horizontal, 16).padding(.vertical, 13)
+                            .background(RoundedRectangle(cornerRadius: 16).fill(Color.surface))
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    HStack(spacing: 10) {
+                        Button { showCamera = true } label: {
+                            libraryScanButtonLabel("camera.fill", "Take photo")
+                        }
+                        .buttonStyle(.plain)
+
+                        PhotosPicker(selection: $photoPickerItem, matching: .images) {
+                            libraryScanButtonLabel("photo.on.rectangle", "Choose photo")
+                        }
+                    }
+
+                    Button(action: onAddManual) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus").font(.system(size: 13, weight: .bold))
+                            Text("Add book manually").font(.system(size: 14, weight: .semibold))
+                        }
+                        .foregroundStyle(Color.textPrimary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 13)
+                        .background(RoundedRectangle(cornerRadius: 16).stroke(Color.textPrimary.opacity(0.14), lineWidth: 1.5))
+                    }
+                    .buttonStyle(.plain)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("SEARCH").font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Color.textMuted)
+                        HStack(spacing: 8) {
+                            TextField("Title or author", text: $query)
+                                .padding(10)
+                                .background(RoundedRectangle(cornerRadius: 10).fill(Color.surface))
+                                .onSubmit { runSearch() }
+                            Button { runSearch() } label: {
+                                Image(systemName: "magnifyingglass").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                                    .padding(10)
+                                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.accent))
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if isSearching {
+                            HStack { Spacer(); ProgressView(); Spacer() }.padding(.vertical, 10)
+                        }
+
+                        ForEach(results) { result in
+                            searchResultRow(result)
+                        }
+                    }
+                }
+                .padding(20)
+            }
+            .background(Color.bg)
+            .navigationTitle("Add Books")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func runSearch() {
+        let q = query
+        guard !q.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        isSearching = true
+        Task {
+            results = await BookSearchService.search(query: q)
+            isSearching = false
+        }
+    }
+
+    private func searchResultRow(_ result: BookSearchResult) -> some View {
+        let added = addedResultIDs.contains(result.id) || isDuplicate(result.title, result.author)
+        return HStack(spacing: 12) {
+            libraryThumbnail(urlString: result.thumbnailURLString)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(result.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.textPrimary)
+                Text(result.author).font(.system(size: 12)).foregroundStyle(Color.textSoft)
+            }
+            Spacer()
+            if added {
+                Text("In library").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.textMuted)
+            } else {
+                Button {
+                    onAddSearchResult(result)
+                    addedResultIDs.insert(result.id)
+                } label: {
+                    Text("Add").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Color.accent))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.surface))
+    }
+}
+
+// MARK: - Book summary sheet
+
+/// Opens as a bottom modal when a book's thumbnail is tapped. Caches the
+/// result on the Book itself so repeat views (and repeat API calls/cost)
+/// don't happen — a Refresh button lets you force a new take.
+private struct BookSummarySheet: View {
+    let book: Book
+    let onSummaryFetched: (String) -> Void
+
+    @State private var isLoading = false
+    @State private var errorText: String?
+    @State private var summaryText: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 14) {
+                libraryThumbnail(urlString: book.thumbnailURLString, width: 56)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(book.title).font(.heading(17)).foregroundStyle(Color.textPrimary)
+                    Text(book.author).font(.system(size: 13)).foregroundStyle(Color.textSoft)
+                }
+                Spacer()
+            }
+            Divider().overlay(Color.textPrimary.opacity(0.1))
+
+            if isLoading {
+                HStack { Spacer(); ProgressView("Asking Claude…"); Spacer() }.padding(.top, 24)
+            } else if let errorText {
+                Text(errorText).font(.system(size: 13.5)).foregroundStyle(Color.textSoft)
+            } else if let summaryText {
+                ScrollView {
+                    Text(summaryText).font(.system(size: 14)).foregroundStyle(Color.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Button("Refresh") { Task { await load(force: true) } }
+                    .font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Color.accentDeep)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(20)
+        .presentationDetents([.medium, .large])
+        .task {
+            if let existing = book.summary {
+                summaryText = existing
+            } else {
+                await load(force: false)
+            }
+        }
+    }
+
+    private func load(force: Bool) async {
+        isLoading = true
+        errorText = nil
+        do {
+            let text = try await ClaudeTextService.bookSummary(title: book.title, author: book.author)
+            summaryText = text
+            onSummaryFetched(text)
+        } catch {
+            errorText = error.localizedDescription
+        }
+        isLoading = false
     }
 }
 
@@ -730,41 +946,33 @@ private struct RatingPromptSheet: View {
 // MARK: - API key settings
 
 private struct SettingsSheet: View {
-    @Environment(\.dismiss) private var dismiss
     @State private var keyInput = ""
     @State private var hasSavedKey = KeychainService.hasAPIKey
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    SecureField("Anthropic API key", text: $keyInput)
-                    Button("Save") {
-                        KeychainService.saveAPIKey(keyInput)
-                        hasSavedKey = true
-                        keyInput = ""
-                    }
-                    .disabled(keyInput.trimmingCharacters(in: .whitespaces).isEmpty)
-                } footer: {
-                    Text(hasSavedKey ? "A key is currently saved in Keychain." : "Used only for shelf-photo scanning, stored in Keychain on this device.")
+        Form {
+            Section {
+                SecureField("Anthropic API key", text: $keyInput)
+                Button("Save") {
+                    KeychainService.saveAPIKey(keyInput)
+                    hasSavedKey = true
+                    keyInput = ""
                 }
-                if hasSavedKey {
-                    Section {
-                        Button("Remove saved key", role: .destructive) {
-                            KeychainService.deleteAPIKey()
-                            hasSavedKey = false
-                        }
-                    }
-                }
+                .disabled(keyInput.trimmingCharacters(in: .whitespaces).isEmpty)
+            } footer: {
+                Text(hasSavedKey ? "A key is currently saved in Keychain." : "Used for shelf-photo scanning and book summaries, stored in Keychain on this device.")
             }
-            .navigationTitle("Library Settings")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+            if hasSavedKey {
+                Section {
+                    Button("Remove saved key", role: .destructive) {
+                        KeychainService.deleteAPIKey()
+                        hasSavedKey = false
+                    }
                 }
             }
         }
+        .navigationTitle("Library Settings")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
