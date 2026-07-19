@@ -253,6 +253,7 @@ struct LibraryView: View {
             AddBooksView(
                 photoPickerItem: $photoPickerItem,
                 showCamera: $showCamera,
+                cameraImage: $cameraImage,
                 hasAPIKey: KeychainService.hasAPIKey,
                 isDuplicate: { t, a in isDuplicate(title: t, author: a) },
                 onAddManual: {
@@ -303,9 +304,6 @@ struct LibraryView: View {
                 book.summary = text
                 try? modelContext.save()
             }
-        }
-        .sheet(isPresented: $showCamera) {
-            CameraPicker(image: $cameraImage)
         }
         .onChange(of: photoPickerItem) { _, newItem in
             guard let newItem else { return }
@@ -746,6 +744,7 @@ private struct AddBooksView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var photoPickerItem: PhotosPickerItem?
     @Binding var showCamera: Bool
+    @Binding var cameraImage: UIImage?
     let hasAPIKey: Bool
     let isDuplicate: (String, String) -> Bool
     let onAddManual: () -> Void
@@ -850,6 +849,12 @@ private struct AddBooksView: View {
                         Image(systemName: "gearshape.fill")
                     }
                 }
+            }
+            // Camera is presented from WITHIN this sheet (not the parent), so
+            // it nests cleanly instead of conflicting with the Add Books sheet
+            // — that two-sheets-on-one-view conflict was the 15–20s stall.
+            .sheet(isPresented: $showCamera) {
+                CameraPicker(image: $cameraImage)
             }
         }
     }
