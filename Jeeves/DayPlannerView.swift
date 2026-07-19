@@ -91,7 +91,9 @@ struct DayPlannerView: View {
 
     private var dialDates: [Date] {
         let cal = Calendar.current
-        return (0..<60).compactMap { cal.date(byAdding: .day, value: $0, to: today)?.startOfDay }
+        // One past day (yesterday) as a ghosted anchor on the left, then today
+        // and the next 60 days.
+        return (-1...60).compactMap { cal.date(byAdding: .day, value: $0, to: today)?.startOfDay }
     }
 
     private var selectedEvents: [DailyEvent] {
@@ -109,34 +111,49 @@ struct DayPlannerView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
             }
-            .onAppear { proxy.scrollTo(selectedDate, anchor: .center) }
+            // Keep the selected day near the left so exactly one past day peeks
+            // in from the left edge as a reference point.
+            .onAppear { proxy.scrollTo(selectedDate, anchor: UnitPoint(x: 0.18, y: 0.5)) }
             .onChange(of: selectedDate) { _, d in
-                withAnimation { proxy.scrollTo(d, anchor: .center) }
+                withAnimation { proxy.scrollTo(d, anchor: UnitPoint(x: 0.18, y: 0.5)) }
             }
         }
     }
 
+    /// A weighted timeline dial: the selected day is a full amber circle and
+    /// largest; past days are ghosted gray; future days step down in size and
+    /// fade out with distance.
     private func datePill(_ date: Date) -> some View {
+        let cal = Calendar.current
         let selected = date == selectedDate
-        let dayIsToday = date == today
+        let isPast = date < today
+        let distance = cal.dateComponents([.day], from: selectedDate, to: date).day ?? 0
         let hasEvents = events.contains { $0.date == date }
-        return Button { selectedDate = date } label: {
-            VStack(spacing: 3) {
-                Text(date.formatted(.dateTime.weekday(.abbreviated)))
-                    .font(.system(size: 10.5, weight: .semibold))
-                Text(date.formatted(.dateTime.day()))
-                    .font(.system(size: 16, weight: .bold))
+
+        let opacity: Double = selected ? 1.0 : (isPast ? 0.4 : max(0.42, 1.0 - Double(distance) * 0.11))
+        let numberSize: CGFloat = selected ? 20 : (isPast ? 15 : max(15, 19 - CGFloat(max(0, distance - 1))))
+        let numberColor: Color = selected ? .white : (isPast ? Color.textMuted : Color.textPrimary)
+
+        return Button { withAnimation { selectedDate = date } } label: {
+            VStack(spacing: 6) {
+                Text(date.formatted(.dateTime.weekday(.abbreviated)).uppercased())
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(isPast ? Color.textMuted : Color.textSoft)
+                ZStack {
+                    if selected {
+                        Circle().fill(Color.accent).frame(width: 50, height: 50)
+                    }
+                    Text(date.formatted(.dateTime.day()))
+                        .font(.system(size: numberSize, weight: .bold))
+                        .foregroundStyle(numberColor)
+                }
+                .frame(width: 50, height: 50)
                 Circle()
-                    .fill(hasEvents ? (selected ? Color.white : Color.accent) : .clear)
+                    .fill(hasEvents ? Color.accent : .clear)
                     .frame(width: 5, height: 5)
             }
-            .foregroundStyle(selected ? .white : Color.textPrimary)
-            .frame(width: 46, height: 62)
-            .background(RoundedRectangle(cornerRadius: 14).fill(selected ? Color.accent : Color.surface))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(dayIsToday && !selected ? Color.accent : .clear, lineWidth: 1.5)
-            )
+            .frame(width: 52)
+            .opacity(opacity)
         }
         .buttonStyle(.plain)
         .id(date)
@@ -314,15 +331,23 @@ struct DayPlannerView: View {
     private func hhmm(_ minutes: Int) -> String { String(format: "%02d:%02d", minutes / 60, minutes % 60) }
 
     private var header: some View {
-        HStack {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(Color.accent)
-                    .frame(width: 30, height: 30)
-                    .overlay(Image(systemName: "calendar").foregroundStyle(.white).font(.system(size: 13)))
-                Text("Day Planner").font(.heading(18)).foregroundStyle(Color.textPrimary)
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(selectedDate.formatted(.dateTime.month(.wide).year()).uppercased())
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(1)
+                    .foregroundStyle(Color.textMuted)
+                Text("Day Planner").font(.heading(20)).foregroundStyle(Color.textPrimary)
             }
             Spacer()
+            // Tap to jump back to today.
+            Button { withAnimation { selectedDate = today } } label: {
+                Circle()
+                    .fill(Color.surface)
+                    .frame(width: 38, height: 38)
+                    .overlay(Image(systemName: "calendar").foregroundStyle(Color.textSoft).font(.system(size: 15)))
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 10)
     }
