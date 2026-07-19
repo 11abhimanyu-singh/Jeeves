@@ -76,4 +76,37 @@ enum KeychainService {
     static func loadGoogleMapsAPIKey() -> String? { load(account: googleMapsAccount) }
     static func deleteGoogleMapsAPIKey() { delete(account: googleMapsAccount) }
     static var hasGoogleMapsAPIKey: Bool { !(loadGoogleMapsAPIKey() ?? "").isEmpty }
+
+    // MARK: Google Calendar OAuth (iOS OAuth client ID + tokens)
+
+    private static let googleClientIDAccount = "googleOAuthClientID"
+    private static let googleAccessTokenAccount = "googleAccessToken"
+    private static let googleRefreshTokenAccount = "googleRefreshToken"
+    private static let googleTokenExpiryAccount = "googleTokenExpiry"  // epoch seconds as string
+
+    static func saveGoogleClientID(_ id: String) { save(id, account: googleClientIDAccount) }
+    static func loadGoogleClientID() -> String? { load(account: googleClientIDAccount) }
+    static func deleteGoogleClientID() { delete(account: googleClientIDAccount) }
+    static var hasGoogleClientID: Bool { !(loadGoogleClientID() ?? "").isEmpty }
+
+    static func saveGoogleTokens(access: String, refresh: String?, expiry: Date) {
+        save(access, account: googleAccessTokenAccount)
+        if let refresh { save(refresh, account: googleRefreshTokenAccount) }
+        save(String(expiry.timeIntervalSince1970), account: googleTokenExpiryAccount)
+    }
+    static func loadGoogleAccessToken() -> String? { load(account: googleAccessTokenAccount) }
+    static func loadGoogleRefreshToken() -> String? { load(account: googleRefreshTokenAccount) }
+    static func loadGoogleTokenExpiry() -> Date? {
+        load(account: googleTokenExpiryAccount).flatMap(Double.init).map { Date(timeIntervalSince1970: $0) }
+    }
+    static func updateGoogleAccessToken(_ access: String, expiry: Date) {
+        save(access, account: googleAccessTokenAccount)
+        save(String(expiry.timeIntervalSince1970), account: googleTokenExpiryAccount)
+    }
+    static func deleteGoogleTokens() {
+        delete(account: googleAccessTokenAccount)
+        delete(account: googleRefreshTokenAccount)
+        delete(account: googleTokenExpiryAccount)
+    }
+    static var isGoogleCalendarConnected: Bool { loadGoogleRefreshToken() != nil }
 }

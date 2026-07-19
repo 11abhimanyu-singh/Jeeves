@@ -21,6 +21,12 @@ struct SettingsView: View {
     @State private var googleMapsInput = ""
     @State private var hasGoogleMaps = KeychainService.hasGoogleMapsAPIKey
 
+    @State private var clientIDInput = ""
+    @State private var hasClientID = KeychainService.hasGoogleClientID
+    @State private var isCalendarConnected = KeychainService.isGoogleCalendarConnected
+    @State private var isConnecting = false
+    @State private var calendarError: String?
+
     var body: some View {
         Form {
             keySection(
@@ -43,6 +49,8 @@ struct SettingsView: View {
                 remove: { KeychainService.deleteGoogleMapsAPIKey() }
             )
 
+            calendarSection
+
             keySection(
                 title: "Google Books",
                 placeholder: "Google Books API key",
@@ -55,6 +63,59 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: Google Calendar (OAuth — client ID + connect)
+
+    private var calendarSection: some View {
+        Section {
+            TextField("iOS OAuth client ID", text: $clientIDInput)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            Button("Save client ID") {
+                KeychainService.saveGoogleClientID(clientIDInput)
+                hasClientID = true
+                clientIDInput = ""
+            }
+            .disabled(clientIDInput.trimmingCharacters(in: .whitespaces).isEmpty)
+
+            if hasClientID {
+                if isConnecting {
+                    HStack { ProgressView(); Text("Opening Google…").font(.system(size: 13)).foregroundStyle(.secondary) }
+                } else if isCalendarConnected {
+                    Label("Connected", systemImage: "checkmark.circle.fill").foregroundStyle(Color.sageDeep)
+                    Button("Disconnect", role: .destructive) {
+                        GoogleOAuthService.shared.disconnect()
+                        isCalendarConnected = false
+                    }
+                } else {
+                    Button("Connect Google Calendar") { connect() }
+                }
+            }
+            if let calendarError {
+                Text(calendarError).font(.system(size: 12)).foregroundStyle(Color.accentDeep)
+            }
+        } header: {
+            Text("Google Calendar")
+        } footer: {
+            Text(hasClientID
+                 ? "Lets Jeeves import today's events automatically. Read-only."
+                 : "Optional — import events from Google Calendar. In Google Cloud Console: enable the Google Calendar API, add the Calendar read-only scope on the OAuth consent screen (and yourself as a test user), then create an OAuth client ID of type iOS with bundle ID abhimanyusingh.me.Jeeves. Paste that client ID here.")
+        }
+    }
+
+    private func connect() {
+        isConnecting = true
+        calendarError = nil
+        Task {
+            do {
+                try await GoogleOAuthService.shared.connect()
+                isCalendarConnected = true
+            } catch {
+                calendarError = error.localizedDescription
+            }
+            isConnecting = false
+        }
     }
 
     @ViewBuilder

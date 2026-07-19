@@ -26,6 +26,7 @@ struct PlannerSetupView: View {
     @State private var isReadingTicket = false
     @State private var ticketError: String?
     @State private var detectedDraft: EventDraft?
+    @State private var isImportingCalendar = false
 
     private var today: Date { Date().startOfDay }
     private var todayEvents: [DailyEvent] { events.filter { $0.date == today }.sorted { $0.startMinute < $1.startMinute } }
@@ -128,8 +129,16 @@ struct PlannerSetupView: View {
             PhotosPicker(selection: $photoItem, matching: .images) {
                 Label("Add from ticket screenshot", systemImage: "photo.on.rectangle")
             }
+            if KeychainService.isGoogleCalendarConnected {
+                Button { importFromCalendar() } label: {
+                    Label("Import from Google Calendar", systemImage: "calendar")
+                }
+            }
             if isReadingTicket {
                 HStack { ProgressView(); Text("Reading ticket…").font(.system(size: 12.5)).foregroundStyle(Color.textMuted) }
+            }
+            if isImportingCalendar {
+                HStack { ProgressView(); Text("Importing from calendar…").font(.system(size: 12.5)).foregroundStyle(Color.textMuted) }
             }
             if let ticketError {
                 Text(ticketError).font(.system(size: 12)).foregroundStyle(Color.accentDeep)
@@ -154,6 +163,30 @@ struct PlannerSetupView: View {
             detectedDraft = EventDraft(detected: detected)
         } catch {
             ticketError = error.localizedDescription
+        }
+    }
+
+    private func importFromCalendar() {
+        isImportingCalendar = true
+        ticketError = nil
+        Task {
+            defer { isImportingCalendar = false }
+            do {
+                let calEvents = try await GoogleCalendarService.events(on: today)
+                for c in calEvents {
+                    // Skip anything already imported (same title + start today).
+                    let dup = todayEvents.contains { $0.title == c.title && $0.startMinute == c.startMinute }
+                    guard !dup else { continue }
+                    modelContext.insert(DailyEvent(
+                        date: today, title: c.title,
+                        startMinute: c.startMinute, endMinute: c.endMinute,
+                        destinationAddress: c.location, outboundStart: .home, source: .calendar
+                    ))
+                }
+                try? modelContext.save()
+            } catch {
+                ticketError = error.localizedDescription
+            }
         }
     }
 
