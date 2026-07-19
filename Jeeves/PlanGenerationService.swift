@@ -55,11 +55,14 @@ enum PlanGenerationService {
 
         let body: [String: Any] = [
             "model": model,
-            // Opus 4.8, ceiling 6k. The model spends output tokens on an
-            // extended-thinking block first, then the JSON plan — both must fit
-            // under this cap, so if a very complex day ever truncates the JSON
-            // (unparsable → deterministic fallback), this is the knob to raise.
-            "max_tokens": 6000,
+            // Opus 4.8 with adaptive thinking. max_tokens is a generous ceiling,
+            // NOT a tight cap: thinking and the JSON plan share this budget, and
+            // a tight cap (e.g. 6-8k) let thinking consume it on complex days,
+            // starving the plan (empty response → fallback). 16k leaves ample
+            // room for both so the plan never truncates. (Opus 4.8 rejects
+            // budget_tokens with a 400; adaptive thinking is the supported mode.)
+            "max_tokens": 16000,
+            "thinking": ["type": "adaptive"],
             "system": systemPrompt,
             "messages": [["role": "user", "content": userPrompt(req)]],
         ]
