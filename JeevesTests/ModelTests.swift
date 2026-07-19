@@ -85,6 +85,21 @@ final class ModelTests: XCTestCase {
         XCTAssertNil(turn.plan)
     }
 
+    // MARK: DailyPlanState — the committed day plan persists
+
+    func testDailyPlanStatePersistsPlan() {
+        let plan = GeneratedPlan(
+            blocks: [GeneratedBlock(title: "Reading", startTime: "08:00", endTime: "09:30", note: nil, isAnchor: true, kind: "activity")],
+            dropped: [], shrunk: [], summary: "A calm day.", boundaryTime: nil
+        )
+        let state = DailyPlanState(date: Date().startOfDay, hasGymToday: false, gymMinute: nil)
+        XCTAssertNil(state.plan)
+        state.storePlan(plan, isOffline: true)
+        XCTAssertEqual(state.plan?.blocks.first?.title, "Reading")
+        XCTAssertEqual(state.plan?.summary, "A calm day.")
+        XCTAssertTrue(state.generatedPlanIsOffline)
+    }
+
     // MARK: EventDraft (from a detected ticket)
 
     func testEventDraftFromDetectedParsesTimesAndVenue() {

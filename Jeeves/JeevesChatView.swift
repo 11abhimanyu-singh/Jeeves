@@ -311,21 +311,40 @@ struct JeevesChatView: View {
             // 1. Pull any events/gym mentioned in the message into real anchors,
             //    so "MLR at 7pm, plan my day" works without manual event entry.
             let planEvents = await extractAndCreateAnchors(from: userContext)
-            // 2. Build the request from those anchors (incl. live Maps commute).
-            let req = await buildPlanRequest(userContext: userContext, events: planEvents)
-            // 3. Generate.
-            do {
-                let plan = try await PlanGenerationService.generate(req)
-                addTurn(role: .assistant, plan.summary)
-                addTurn(role: .assistant, "", plan: plan)
-            } catch {
-                // Offline / error fallback: deterministic engine (PRD §6).
-                let fallback = deterministicPlan()
-                addTurn(role: .assistant, "I couldn't reach the planning service, so here's an offline plan from the built-in scheduler. (\(error.localizedDescription))")
-                addTurn(role: .assistant, "", plan: fallback, isOfflinePlan: true)
+            // 2. Generate (Claude, with deterministic fallback) via the shared
+            //    coordinator — same call the Day Planner uses.
+            let result = await PlanCoordinator.generate(.init(
+                userMessage: userContext,
+                hasGym: todayPlanState?.hasGymToday ?? false,
+                gymMinute: todayPlanState?.gymMinute,
+                events: planEvents,
+                locations: locations,
+                prepSessions: prepSessions
+            ))
+            // 3. COMMIT it to the Day Planner for today so it persists across
+            //    launches and shows on the planner — not just here in chat.
+            commitPlan(result.plan, isOffline: result.isOffline, on: today)
+
+            if result.isOffline {
+                addTurn(role: .assistant, "I couldn't reach the planning service, so here's an offline plan from the built-in scheduler.\(result.error.map { " (\($0))" } ?? "")")
+            } else {
+                addTurn(role: .assistant, result.plan.summary)
             }
+            addTurn(role: .assistant, "", plan: result.plan, isOfflinePlan: result.isOffline)
             isPlanning = false
         }
+    }
+
+    /// Saves the generated plan onto today's DailyPlanState so the Day Planner
+    /// tab shows it and it survives relaunches.
+    private func commitPlan(_ plan: GeneratedPlan, isOffline: Bool, on date: Date) {
+        let day = date.startOfDay
+        let state = dailyPlans.first { $0.date == day } ?? {
+            let s = DailyPlanState(date: day, hasGymToday: false, gymMinute: nil)
+            modelContext.insert(s); return s
+        }()
+        state.storePlan(plan, isOffline: isOffline)
+        try? modelContext.save()
     }
 
     /// Extracts events/gym from the message, persists any new ones, and returns
@@ -368,43 +387,6 @@ struct JeevesChatView: View {
         return todayEvents + created
     }
 
-    private func buildPlanRequest(userContext: String, events planEvents: [DailyEvent]) async -> PlanRequest {
-        let hasGym = todayPlanState?.hasGymToday ?? false
-        let gymMinute = todayPlanState?.gymMinute
-
-        // Live commute legs. Event venues (place names) work directly as Maps
-        // origins/destinations, so an extracted "MLR Convention Centre" routes
-        // even without a saved address for it.
-        var legs: [(label: String, from: String, to: String)] = []
-        let homeAddr = locations.first { $0.kind == .home }?.address ?? ""
-        let gymAddr = locations.first { $0.kind == .gym }?.address ?? ""
-        if hasGym, !homeAddr.isEmpty, !gymAddr.isEmpty {
-            legs.append(("Home→Gym", homeAddr, gymAddr))
-            legs.append(("Gym→Home", gymAddr, homeAddr))
-        }
-        for e in planEvents where !e.destinationAddress.isEmpty {
-            let fromAddr = locations.first { $0.kind == e.outboundStart }?.address ?? homeAddr
-            if !fromAddr.isEmpty {
-                legs.append(("\(e.outboundStart.rawValue)→\(e.title)", fromAddr, e.destinationAddress))
-            }
-            if !homeAddr.isEmpty {
-                legs.append(("\(e.title)→Home", e.destinationAddress, homeAddr))
-            }
-        }
-        let commutes = await GoogleMapsService.commuteEstimates(legs: legs)
-
-        return PlanRequest(
-            userMessage: userContext,
-            hasGymToday: hasGym,
-            gymMinute: gymMinute,
-            events: planEvents.sorted { $0.startMinute < $1.startMinute },
-            locations: locations,
-            defaultCommuteMinutes: 30,
-            commuteEstimates: commutes,
-            prepNeglectNote: prepNeglectNote()
-        )
-    }
-
     private var planningStatus: String {
         if isPlanning { return "Jeeves is planning your day…" }
         if isReadingTicket { return "Reading your ticket…" }
@@ -445,43 +427,11 @@ struct JeevesChatView: View {
     }
 
     private func hhmm(_ minutes: Int) -> String { String(format: "%02d:%02d", minutes / 60, minutes % 60) }
-
-    /// Which practice categories are most neglected this week — mirrors the
-    /// deterministic engine's weighting so Claude gets the same signal.
-    private func prepNeglectNote() -> String? {
-        let categories: [PrepCategory] = [.productSense, .execution, .strategy, .behavioral]
-        let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? .distantPast
-        let recent = prepSessions.filter { $0.date >= weekAgo && $0.category != .reading }
-        let counts = Dictionary(grouping: recent, by: { $0.category }).mapValues(\.count)
-        let ranked = categories.sorted { (counts[$0] ?? 0) < (counts[$1] ?? 0) }
-        return "Fewest practice sessions this week (most neglected first): " + ranked.map(\.rawValue).joined(separator: ", ")
-    }
-
-    /// Offline fallback — converts the deterministic DayPlanner's output into
-    /// the same GeneratedPlan shape the timeline card renders.
-    private func deterministicPlan() -> GeneratedPlan {
-        let blocks = DayPlanner.generate(
-            gymMinute: (todayPlanState?.hasGymToday ?? false) ? todayPlanState?.gymMinute : nil,
-            prepSessions: prepSessions,
-            leisureLogs: []
-        )
-        let generated = blocks.map { b in
-            GeneratedBlock(
-                title: b.title,
-                startTime: String(format: "%02d:%02d", b.startMinute / 60, b.startMinute % 60),
-                endTime: String(format: "%02d:%02d", b.endMinute / 60, b.endMinute % 60),
-                note: b.note,
-                isAnchor: b.isAnchor,
-                kind: b.isAnchor ? "anchor" : "activity"
-            )
-        }
-        return GeneratedPlan(blocks: generated, dropped: [], shrunk: [], summary: "", boundaryTime: nil)
-    }
 }
 
 // MARK: - Plan timeline card
 
-private struct PlanTimelineCard: View {
+struct PlanTimelineCard: View {
     let plan: GeneratedPlan
     let isOffline: Bool
 
