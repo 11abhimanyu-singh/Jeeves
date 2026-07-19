@@ -18,8 +18,6 @@ struct PlannerSetupView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var dailyPlans: [DailyPlanState]
     @Query private var events: [DailyEvent]
-    @Query private var locations: [SavedLocation]
-
     @State private var editingEvent: DailyEvent?
     @State private var showManualEvent = false
     @State private var photoItem: PhotosPickerItem?
@@ -35,14 +33,12 @@ struct PlannerSetupView: View {
         Form {
             gymSection
             eventsSection
-            locationsSection
         }
-        .navigationTitle("Plan setup")
+        .navigationTitle("Today")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
         }
-        .onAppear { seedLocationsIfNeeded() }
         .sheet(isPresented: $showManualEvent) {
             EventEditSheet(draft: EventDraft(), onSave: saveEvent)
         }
@@ -210,35 +206,6 @@ struct PlannerSetupView: View {
         try? modelContext.save()
     }
 
-    // MARK: Locations
-
-    private var locationsSection: some View {
-        Section {
-            ForEach(LocationKind.allCases) { kind in
-                if let loc = locations.first(where: { $0.kind == kind }) {
-                    NavigationLink { LocationEditView(location: loc) } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(kind.rawValue).font(.system(size: 15, weight: .semibold)).foregroundStyle(Color.textPrimary)
-                            Text(loc.address.isEmpty ? "No address set" : loc.address)
-                                .font(.system(size: 12)).foregroundStyle(loc.address.isEmpty ? Color.textMuted : Color.textSoft)
-                        }
-                    }
-                }
-            }
-        } header: {
-            Text("Saved locations")
-        } footer: {
-            Text("Addresses power real commute times (with a Google Maps key). Facilities let Jeeves reason — e.g. shower at the gym before an event.")
-        }
-    }
-
-    private func seedLocationsIfNeeded() {
-        for kind in LocationKind.allCases where !locations.contains(where: { $0.kind == kind }) {
-            modelContext.insert(SavedLocation(kind: kind))
-        }
-        try? modelContext.save()
-    }
-
     private func hhmm(_ minutes: Int) -> String { String(format: "%02d:%02d", minutes / 60, minutes % 60) }
 }
 
@@ -326,38 +293,5 @@ private struct EventEditSheet: View {
                 draft[keyPath: keyPath] = (c.hour ?? 0) * 60 + (c.minute ?? 0)
             }
         )
-    }
-}
-
-// MARK: - Location edit
-
-private struct LocationEditView: View {
-    @Bindable var location: SavedLocation
-    @Environment(\.modelContext) private var modelContext
-    @State private var facilitiesText = ""
-
-    var body: some View {
-        Form {
-            Section("Address") {
-                TextField("Address", text: $location.address, axis: .vertical)
-            }
-            Section {
-                TextField("comma, separated, facilities", text: $facilitiesText, axis: .vertical)
-            } header: {
-                Text("On-site facilities")
-            } footer: {
-                Text("What you can do here, e.g. shower, weightlifting, lunch. Jeeves uses these to reason about chaining trips.")
-            }
-        }
-        .navigationTitle(location.kind.rawValue)
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear { facilitiesText = location.facilities.joined(separator: ", ") }
-        .onDisappear {
-            location.facilities = facilitiesText
-                .split(separator: ",")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-            try? modelContext.save()
-        }
     }
 }

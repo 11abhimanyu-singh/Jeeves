@@ -112,14 +112,6 @@
 		};
 /* End PBXNativeTarget section */
 
-/* Begin PBXTargetDependency section */
-		E5604700300A2D6300BFD007 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = E5604630300A2D6300BFD88F /* Jeeves */;
-			targetProxy = E5604700300A2D6300BFD008 /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
-
 /* Begin PBXProject section */
 		E5604629300A2D6300BFD88F /* Project object */ = {
 			isa = PBXProject;
@@ -190,6 +182,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		E5604700300A2D6300BFD007 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E5604630300A2D6300BFD88F /* Jeeves */;
+			targetProxy = E5604700300A2D6300BFD008 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		E560463C300A2D6400BFD88F /* Debug */ = {
@@ -318,6 +318,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = MUXW6TU4WN;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Jeeves uses your camera to scan bookshelves and add books to your library.";
@@ -350,6 +351,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = MUXW6TU4WN;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Jeeves uses your camera to scan bookshelves and add books to your library.";

@@ -28,6 +28,7 @@ struct JeevesChatView: View {
     @State private var isPlanning = false
     @State private var errorText: String?
     @State private var showSetup = false
+    @State private var showSettings = false
 
     private var today: Date { Date().startOfDay }
     private var todayPlanState: DailyPlanState? { dailyPlans.first { $0.date == today } }
@@ -83,6 +84,9 @@ struct JeevesChatView: View {
         .sheet(isPresented: $showSetup) {
             NavigationStack { PlannerSetupView() }
         }
+        .sheet(isPresented: $showSettings) {
+            NavigationStack { SettingsView() }
+        }
     }
 
     private var header: some View {
@@ -93,8 +97,13 @@ struct JeevesChatView: View {
                 .overlay(Image(systemName: "sparkles").foregroundStyle(.white).font(.system(size: 13)))
             Text("Jeeves").font(.heading(18)).foregroundStyle(Color.textPrimary)
             Spacer()
+            // Calendar = today's anchors (gym + events, changes daily).
             Button { showSetup = true } label: {
-                Image(systemName: "slider.horizontal.3").font(.system(size: 16)).foregroundStyle(Color.textSoft)
+                Image(systemName: "calendar").font(.system(size: 16)).foregroundStyle(Color.textSoft)
+            }
+            // Gear = standing configuration (keys, integrations, locations).
+            Button { showSettings = true } label: {
+                Image(systemName: "gearshape.fill").font(.system(size: 16)).foregroundStyle(Color.textSoft)
             }
         }
         .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 10)

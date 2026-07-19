@@ -2,16 +2,20 @@
 //  SettingsView.swift
 //  Jeeves
 //
-//  One settings screen for every API key the app uses, each entered by the
-//  user and stored in Keychain — never hardcoded, never in source control.
-//  Shared (not private to one feature) since keys span features: Claude
-//  powers both the Library's book tools and the Jeeves planner; Google Maps
-//  is planner-only; Google Books is library-only.
+//  The single place for everything you configure once: API keys/integrations
+//  (Claude, Google Maps, Google Books, Google Calendar) and the saved
+//  Home/Work/Gym locations. Per-day inputs (today's gym, today's events) live
+//  in the Jeeves planning flow, not here — those change daily, this doesn't.
+//  Keys are stored in Keychain, never hardcoded or committed.
 //
 
 import SwiftUI
+import SwiftData
 
 struct SettingsView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Query private var locations: [SavedLocation]
+
     @State private var claudeInput = ""
     @State private var hasClaude = KeychainService.hasAPIKey
 
@@ -60,9 +64,41 @@ struct SettingsView: View {
                 save: { KeychainService.saveGoogleBooksAPIKey($0) },
                 remove: { KeychainService.deleteGoogleBooksAPIKey() }
             )
+
+            locationsSection
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { seedLocationsIfNeeded() }
+    }
+
+    // MARK: Saved locations
+
+    private var locationsSection: some View {
+        Section {
+            ForEach(LocationKind.allCases) { kind in
+                if let loc = locations.first(where: { $0.kind == kind }) {
+                    NavigationLink { LocationEditView(location: loc) } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(kind.rawValue).font(.system(size: 15, weight: .semibold))
+                            Text(loc.address.isEmpty ? "No address set" : loc.address)
+                                .font(.system(size: 12)).foregroundStyle(loc.address.isEmpty ? .secondary : .primary)
+                        }
+                    }
+                }
+            }
+        } header: {
+            Text("Saved locations")
+        } footer: {
+            Text("Addresses power real commute times (with a Google Maps key). Any of these work: a street address, a place name, a Plus Code, or lat,lng. Facilities let Jeeves reason — e.g. shower at the gym before an event.")
+        }
+    }
+
+    private func seedLocationsIfNeeded() {
+        for kind in LocationKind.allCases where !locations.contains(where: { $0.kind == kind }) {
+            modelContext.insert(SavedLocation(kind: kind))
+        }
+        try? modelContext.save()
     }
 
     // MARK: Google Calendar (OAuth — client ID + connect)
@@ -148,6 +184,43 @@ struct SettingsView: View {
                     hasKey.wrappedValue = false
                 }
             }
+        }
+    }
+}
+
+// MARK: - Location edit
+
+struct LocationEditView: View {
+    @Bindable var location: SavedLocation
+    @Environment(\.modelContext) private var modelContext
+    @State private var facilitiesText = ""
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("Address, place name, or Plus Code", text: $location.address, axis: .vertical)
+            } header: {
+                Text("Address")
+            } footer: {
+                Text("A street address, a place name (\"MLR Convention Centre, Bengaluru\"), a Plus Code, or lat,lng all work.")
+            }
+            Section {
+                TextField("comma, separated, facilities", text: $facilitiesText, axis: .vertical)
+            } header: {
+                Text("On-site facilities")
+            } footer: {
+                Text("What you can do here, e.g. shower, weightlifting, lunch. Jeeves uses these to reason about chaining trips.")
+            }
+        }
+        .navigationTitle(location.kind.rawValue)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { facilitiesText = location.facilities.joined(separator: ", ") }
+        .onDisappear {
+            location.facilities = facilitiesText
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            try? modelContext.save()
         }
     }
 }
