@@ -43,6 +43,10 @@ enum DayPlanner {
     static let dayEndMinute = 20 * 60 + 30       // 8:30 PM
     static let photographyMinutes = 30
     static let lunchDeadlineMinute = 14 * 60 + 30 // 2:30 PM — Lunch must start at or before this
+    // Below this, a leftover gap isn't worth scheduling as an activity — a
+    // 1-minute "Discretionary time" block makes no sense, so we drop it and
+    // leave the gap. Better to under-fill than to cram.
+    static let minDiscretionaryMinutes = 20
     // commute + mobility + weights + cardio + commute + shower — the full span
     // from leaving for the gym to being ready afterward.
     static let gymToShowerDuration = 30 + 20 + 70 + 35 + 30 + 20
@@ -77,8 +81,8 @@ enum DayPlanner {
             blocks.append(contentsOf: packed.blocks)
             cursor = packed.cursor
             let photographyStart = dayEndMinute - photographyMinutes
-            if photographyStart > cursor {
-                let slack = photographyStart - cursor
+            let slack = photographyStart - cursor
+            if slack >= minDiscretionaryMinutes {
                 let suggested = mostNeglectedLeisure(leisureLogs: leisureLogs, excluding: .photography)
                 blocks.append(PlanBlock(title: "Discretionary time", startMinute: cursor, durationMinutes: slack, note: "Suggested: \(suggested.rawValue) — least recently logged", isAnchor: false, leisureActivity: suggested))
                 cursor += slack
@@ -134,11 +138,11 @@ enum DayPlanner {
         }
 
         let photographyStart = dayEndMinute - photographyMinutes
-        if photographyStart > gymCursor {
-            let slack = photographyStart - gymCursor
+        let postGymSlack = photographyStart - gymCursor
+        if postGymSlack >= minDiscretionaryMinutes {
             let suggested = mostNeglectedLeisure(leisureLogs: leisureLogs, excluding: .photography)
-            blocks.append(PlanBlock(title: "Discretionary time", startMinute: gymCursor, durationMinutes: slack, note: "Suggested: \(suggested.rawValue) — least recently logged", isAnchor: false, leisureActivity: suggested))
-            gymCursor += slack
+            blocks.append(PlanBlock(title: "Discretionary time", startMinute: gymCursor, durationMinutes: postGymSlack, note: "Suggested: \(suggested.rawValue) — least recently logged", isAnchor: false, leisureActivity: suggested))
+            gymCursor += postGymSlack
         }
         blocks.append(PlanBlock(title: "Photography", startMinute: photographyStart, durationMinutes: photographyMinutes, note: "Fixed end-of-day block", isAnchor: true, leisureActivity: .photography))
 

@@ -60,6 +60,22 @@ final class DayPlannerTests: XCTestCase {
         assertNoOverlaps(DayPlanner.generate(gymMinute: nil, prepSessions: [], leisureLogs: []))
     }
 
+    /// A leftover gap should never become a nonsensical tiny "Discretionary
+    /// time" block — better to drop it and leave the gap. Sweep the whole range
+    /// of gym times (plus rest day) to guard the floor.
+    func testNoTinyDiscretionaryBlockAcrossGymTimes() {
+        var gymTimes: [Int?] = [nil]
+        for m in stride(from: 8 * 60, through: 18 * 60, by: 15) { gymTimes.append(m) }
+        for gym in gymTimes {
+            let blocks = DayPlanner.generate(gymMinute: gym, prepSessions: [], leisureLogs: [])
+            for b in blocks where b.title == "Discretionary time" {
+                XCTAssertGreaterThanOrEqual(
+                    b.durationMinutes, DayPlanner.minDiscretionaryMinutes,
+                    "gym \(String(describing: gym)): \(b.durationMinutes)-min discretionary block should have been dropped")
+            }
+        }
+    }
+
     // MARK: Gym days — the lunch deadline under pressure
 
     /// Gym at 11:00 leaves zero pre-gym room, so everything overflows to

@@ -41,8 +41,14 @@ struct JeevesChatView: View {
     private var today: Date { Date().startOfDay }
     private var todayPlanState: DailyPlanState? { dailyPlans.first { $0.date == today } }
     private var todayEvents: [DailyEvent] { events.filter { $0.date == today }.sorted { $0.startMinute < $1.startMinute } }
-    // Session = today's turns only; a new calendar day starts a fresh thread.
-    private var turns: [ChatTurn] { allTurns.filter { $0.day == today } }
+
+    // Session = a rolling 45-minute window. Turns older than this are pruned on
+    // open, so returning after a break shows a clean window, not a long history.
+    private static let sessionWindow: TimeInterval = 45 * 60
+    private var turns: [ChatTurn] {
+        let cutoff = Date().addingTimeInterval(-Self.sessionWindow)
+        return allTurns.filter { $0.timestamp >= cutoff }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -82,9 +88,15 @@ struct JeevesChatView: View {
                     .padding(16)
                 }
                 .scrollDismissesKeyboard(.interactively)
+                // Open at the most recent message, not the top.
+                .defaultScrollAnchor(.bottom)
                 .onChange(of: turns.count) { _, _ in
                     guard let last = turns.last else { return }
                     withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                }
+                .onAppear {
+                    pruneOldTurns()
+                    if let last = turns.last { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
 
@@ -236,6 +248,18 @@ struct JeevesChatView: View {
     private func clearToday() {
         for turn in turns { modelContext.delete(turn) }
         try? modelContext.save()
+    }
+
+    /// Deletes turns older than the 45-minute session window so the chat opens
+    /// clean after a break.
+    private func pruneOldTurns() {
+        let cutoff = Date().addingTimeInterval(-Self.sessionWindow)
+        var changed = false
+        for turn in allTurns where turn.timestamp < cutoff {
+            modelContext.delete(turn)
+            changed = true
+        }
+        if changed { try? modelContext.save() }
     }
 
     private func dismissKeyboard() {
