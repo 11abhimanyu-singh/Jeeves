@@ -345,6 +345,8 @@ struct JeevesChatView: View {
         }()
         state.storePlan(plan, isOffline: isOffline)
         try? modelContext.save()
+        // Schedule on-device reminders for this plan's key blocks.
+        Task { await NotificationService.reschedule(plan: plan, on: day) }
     }
 
     /// Extracts events/gym from the message, persists any new ones, and returns

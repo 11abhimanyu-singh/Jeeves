@@ -141,6 +141,7 @@ struct DayPlannerView: View {
             }()
             state.storePlan(result.plan, isOffline: result.isOffline)
             try? modelContext.save()
+            await NotificationService.reschedule(plan: result.plan, on: date)
             if result.isOffline { planError = "Couldn't reach the planning service — showing an offline plan.\(result.error.map { " (\($0))" } ?? "")" }
             isPlanning = false
         }

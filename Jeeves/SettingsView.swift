@@ -16,6 +16,8 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var locations: [SavedLocation]
 
+    @AppStorage(NotificationService.enabledKey) private var remindersEnabled = true
+
     @State private var claudeInput = ""
     @State private var hasClaude = KeychainService.hasAPIKey
 
@@ -69,6 +71,9 @@ struct SettingsView: View {
             )
             .listRowBackground(Color.surface)
 
+            remindersSection
+                .listRowBackground(Color.surface)
+
             locationsSection
                 .listRowBackground(Color.surface)
         }
@@ -76,6 +81,26 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { seedLocationsIfNeeded() }
+    }
+
+    // MARK: Reminders
+
+    private var remindersSection: some View {
+        Section {
+            Toggle("Plan reminders", isOn: $remindersEnabled)
+                .tint(Color.accent)
+                .onChange(of: remindersEnabled) { _, on in
+                    if on {
+                        Task { await NotificationService.requestAuthorization() }
+                    } else {
+                        NotificationService.clearAll()
+                    }
+                }
+        } header: {
+            Text("Reminders")
+        } footer: {
+            Text("On-device reminders at each commute, gym, and event in your day plan — no account or server needed. You'll be asked to allow notifications the first time a plan is made.")
+        }
     }
 
     // MARK: Saved locations
