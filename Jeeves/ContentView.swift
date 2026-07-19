@@ -50,7 +50,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \CheckIn.date, order: .reverse) private var checkins: [CheckIn]
 
-    enum Tab { case planner, checkin, library, progress, history }
+    enum Tab { case jeeves, planner, checkin, library, progress, history }
 
     @State private var tab: Tab = .planner
     @State private var selectedDate: Date = Calendar.current.date(byAdding: .day, value: -1, to: Date())!.startOfDay
@@ -82,6 +82,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Group {
                 switch tab {
+                case .jeeves: JeevesChatView()
                 case .planner: DayPlannerView()
                 case .checkin: checkinTab
                 case .library: LibraryView()
@@ -571,6 +572,7 @@ struct ContentView: View {
 
     private var tabBar: some View {
         HStack(spacing: 0) {
+            tabButton(.jeeves, "sparkles", "Jeeves")
             tabButton(.planner, "calendar", "Planner")
             tabButton(.checkin, "flame.fill", "Check-in")
             tabButton(.library, "books.vertical.fill", "Library")
