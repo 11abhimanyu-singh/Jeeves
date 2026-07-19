@@ -19,6 +19,8 @@ struct JeevesApp: App {
             DailyPlanState.self,
             Book.self,
             ReadingLog.self,
+            SavedLocation.self,
+            DailyEvent.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
