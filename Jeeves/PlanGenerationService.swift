@@ -127,6 +127,7 @@ enum PlanGenerationService {
     private static func userPrompt(_ req: PlanRequest) -> String {
         var s = ""
 
+        s += JeevesChatService.dateContext() + "\n\n"
         s += "TODAY'S REQUEST FROM THE USER:\n\(req.userMessage.isEmpty ? "(no extra context — plan a normal day)" : req.userMessage)\n\n"
 
         s += "BASELINE ROUTINE (movable blocks, each with a priority tier):\n"

@@ -34,13 +34,17 @@ enum EventVisionService {
         let base64 = jpeg.base64EncodedString()
 
         let prompt = """
+        \(JeevesChatService.dateContext())
+
         This is a screenshot of an event ticket or booking (a movie, concert, show, \
-        reservation, etc.). Extract the event details. Respond with ONLY a JSON object, \
-        no prose, no markdown fences:
+        reservation, etc.) — it may list several bookings on different dates. Extract \
+        the ONE event happening on today's date (the current date above). If none is \
+        on today's date, extract the soonest upcoming one. Respond with ONLY a JSON \
+        object, no prose, no markdown fences:
         {"title": "...", "date": "YYYY-MM-DD", "startTime": "HH:MM", "endTime": "HH:MM", "venue": "venue name and/or address"}
         Use 24-hour time. If the end time isn't shown, estimate a sensible one from the \
-        event type (e.g. ~3h for a movie) or use null. Use null for any field you truly \
-        can't determine. Don't invent a venue address that isn't there — the venue name alone is fine.
+        event type (e.g. ~3h for a movie/show) or use null. Use null for any field you \
+        truly can't determine. Don't invent a venue address that isn't there — the venue name alone is fine.
         """
 
         let body: [String: Any] = [

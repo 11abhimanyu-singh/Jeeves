@@ -46,8 +46,9 @@ enum Baseline {
 // MARK: - Claude response contract (PRD §6)
 
 /// One entry in the returned schedule. `kind` classifies it so the UI can
-/// render/anchor by type rather than guessing from the title.
-struct GeneratedBlock: Decodable {
+/// render/anchor by type rather than guessing from the title. Codable (not
+/// just Decodable) so a generated plan can be persisted in a chat turn.
+struct GeneratedBlock: Codable {
     let title: String
     let startTime: String       // "HH:MM", 24-hour
     let endTime: String         // "HH:MM"
@@ -67,7 +68,7 @@ struct GeneratedBlock: Decodable {
 
 /// What Jeeves changed to make the day fit, surfaced to the user verbatim
 /// (PRD §5.3 rule 4: never silently drop/shrink).
-struct GeneratedPlan: Decodable {
+struct GeneratedPlan: Codable {
     let blocks: [GeneratedBlock]
     let dropped: [String]           // activities left out entirely
     let shrunk: [String]            // activities kept but shortened (human-readable, e.g. "prep 120→70")

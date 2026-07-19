@@ -37,10 +37,14 @@ enum AnchorExtractionService {
         }
 
         let prompt = """
+        \(JeevesChatService.dateContext())
+
         The user said: "\(message)"
 
         Extract any events (appointments, shows, meetings, movies, etc.) and gym \
-        plans they mention for TODAY. These already exist, so do NOT repeat them: \
+        plans they mention for TODAY (the current date above). If the message or an \
+        attached list contains events on multiple dates, only take the one(s) on \
+        today's date. These already exist, so do NOT repeat them: \
         \(existingTitles.isEmpty ? "(none)" : existingTitles.joined(separator: "; ")).
 
         Respond with ONLY this JSON, nothing else:

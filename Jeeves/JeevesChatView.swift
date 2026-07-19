@@ -23,8 +23,9 @@ struct JeevesChatView: View {
     @Query private var events: [DailyEvent]
     @Query private var locations: [SavedLocation]
     @Query private var prepSessions: [PrepSession]
+    // Persisted conversation, oldest first — survives tab switches and restarts.
+    @Query(sort: \ChatTurn.timestamp, order: .forward) private var allTurns: [ChatTurn]
 
-    @State private var messages: [ChatMessage] = []
     @State private var inputText = ""
     @State private var isSending = false
     @State private var isPlanning = false
@@ -40,6 +41,8 @@ struct JeevesChatView: View {
     private var today: Date { Date().startOfDay }
     private var todayPlanState: DailyPlanState? { dailyPlans.first { $0.date == today } }
     private var todayEvents: [DailyEvent] { events.filter { $0.date == today }.sorted { $0.startMinute < $1.startMinute } }
+    // Session = today's turns only; a new calendar day starts a fresh thread.
+    private var turns: [ChatTurn] { allTurns.filter { $0.day == today } }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -50,7 +53,7 @@ struct JeevesChatView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
-                        if messages.isEmpty {
+                        if turns.isEmpty {
                             Text("Tell Jeeves about your day, or tap Plan my day. Jeeves reasons like a human planner — chaining trips, using the gym shower, moving lunch near your event — not just packing blocks into gaps.")
                                 .font(.system(size: 13.5))
                                 .foregroundStyle(Color.textMuted)
@@ -59,8 +62,8 @@ struct JeevesChatView: View {
                                 .frame(maxWidth: .infinity, alignment: .center)
                         }
 
-                        ForEach(messages) { message in
-                            messageView(message).id(message.id)
+                        ForEach(turns) { turn in
+                            turnView(turn).id(turn.id)
                         }
 
                         if isSending || isPlanning || isReadingTicket {
@@ -78,8 +81,9 @@ struct JeevesChatView: View {
                     }
                     .padding(16)
                 }
-                .onChange(of: messages.count) { _, _ in
-                    guard let last = messages.last else { return }
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: turns.count) { _, _ in
+                    guard let last = turns.last else { return }
                     withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
@@ -88,6 +92,8 @@ struct JeevesChatView: View {
             inputBar
         }
         .background(Color.bg)
+        // Tap anywhere on the conversation to dismiss the keyboard.
+        .onTapGesture { dismissKeyboard() }
         .sheet(isPresented: $showSetup) {
             NavigationStack { PlannerSetupView() }
         }
@@ -111,6 +117,12 @@ struct JeevesChatView: View {
                 .overlay(Image(systemName: "sparkles").foregroundStyle(.white).font(.system(size: 13)))
             Text("Jeeves").font(.heading(18)).foregroundStyle(Color.textPrimary)
             Spacer()
+            // New chat = clear today's thread and start fresh.
+            if !turns.isEmpty {
+                Button { clearToday() } label: {
+                    Image(systemName: "square.and.pencil").font(.system(size: 16)).foregroundStyle(Color.textSoft)
+                }
+            }
             // Calendar = today's anchors (gym + events, changes daily).
             Button { showSetup = true } label: {
                 Image(systemName: "calendar").font(.system(size: 16)).foregroundStyle(Color.textSoft)
@@ -141,26 +153,38 @@ struct JeevesChatView: View {
         .padding(.horizontal, 16).padding(.vertical, 10)
     }
 
-    // MARK: Message rendering
+    // MARK: Turn rendering
 
     @ViewBuilder
-    private func messageView(_ message: ChatMessage) -> some View {
-        if let plan = message.plan {
-            PlanTimelineCard(plan: plan, isOffline: message.isOfflinePlan)
+    private func turnView(_ turn: ChatTurn) -> some View {
+        if let plan = turn.plan {
+            PlanTimelineCard(plan: plan, isOffline: turn.isOfflinePlan)
         } else {
-            bubble(for: message)
+            bubble(for: turn)
         }
     }
 
-    private func bubble(for message: ChatMessage) -> some View {
+    private func bubble(for turn: ChatTurn) -> some View {
         HStack {
-            if message.role == .user { Spacer(minLength: 40) }
-            Text(message.content)
-                .font(.system(size: 14.5))
-                .foregroundStyle(message.role == .user ? .white : Color.textPrimary)
-                .padding(.horizontal, 14).padding(.vertical, 10)
-                .background(RoundedRectangle(cornerRadius: 16).fill(message.role == .user ? Color.accent : Color.surface))
-            if message.role == .assistant { Spacer(minLength: 40) }
+            if turn.isUser { Spacer(minLength: 40) }
+            VStack(alignment: .trailing, spacing: 6) {
+                // Uploaded ticket image, shown in-thread so the user sees what
+                // Jeeves is reading.
+                if let data = turn.imageData, let uiImage = UIImage(data: data) {
+                    Image(uiImage: uiImage)
+                        .resizable().scaledToFit()
+                        .frame(maxWidth: 200, maxHeight: 260)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                if !turn.content.isEmpty {
+                    Text(turn.content)
+                        .font(.system(size: 14.5))
+                        .foregroundStyle(turn.isUser ? .white : Color.textPrimary)
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .background(RoundedRectangle(cornerRadius: 16).fill(turn.isUser ? Color.accent : Color.surface))
+                }
+            }
+            if !turn.isUser { Spacer(minLength: 40) }
         }
     }
 
@@ -196,21 +220,50 @@ struct JeevesChatView: View {
         !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending && !isPlanning
     }
 
+    // MARK: Persisted-turn helpers
+
+    @discardableResult
+    private func addTurn(role: ChatMessage.Role, _ content: String, plan: GeneratedPlan? = nil, isOfflinePlan: Bool = false, imageData: Data? = nil) -> ChatTurn {
+        let turn = ChatTurn(
+            role: role.rawValue, content: content, day: today,
+            planJSON: plan.flatMap(ChatTurn.encodePlan), isOfflinePlan: isOfflinePlan, imageData: imageData
+        )
+        modelContext.insert(turn)
+        try? modelContext.save()
+        return turn
+    }
+
+    private func clearToday() {
+        for turn in turns { modelContext.delete(turn) }
+        try? modelContext.save()
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    /// Prior text turns (no plans), as the chat API's conversation history.
+    private var chatHistory: [ChatMessage] {
+        turns.filter { $0.plan == nil && !$0.content.isEmpty }
+            .map { ChatMessage(role: $0.isUser ? .user : .assistant, content: $0.content) }
+    }
+
     // MARK: Free-text chat
 
     private func sendChat() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        let priorHistory = messages.filter { $0.plan == nil }
-        messages.append(ChatMessage(role: .user, content: text))
+        let priorHistory = chatHistory
+        addTurn(role: .user, text)
         inputText = ""
         errorText = nil
+        dismissKeyboard()
         isSending = true
 
         Task {
             do {
                 let reply = try await JeevesChatService.send(history: priorHistory, newMessage: text)
-                messages.append(ChatMessage(role: .assistant, content: reply))
+                addTurn(role: .assistant, reply)
             } catch {
                 errorText = error.localizedDescription
             }
@@ -222,10 +275,11 @@ struct JeevesChatView: View {
 
     private func planMyDay() {
         errorText = nil
+        dismissKeyboard()
         isPlanning = true
         let userContext = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !userContext.isEmpty {
-            messages.append(ChatMessage(role: .user, content: userContext))
+            addTurn(role: .user, userContext)
             inputText = ""
         }
 
@@ -238,13 +292,13 @@ struct JeevesChatView: View {
             // 3. Generate.
             do {
                 let plan = try await PlanGenerationService.generate(req)
-                messages.append(ChatMessage(role: .assistant, content: plan.summary))
-                messages.append(ChatMessage(role: .assistant, content: "", plan: plan))
+                addTurn(role: .assistant, plan.summary)
+                addTurn(role: .assistant, "", plan: plan)
             } catch {
                 // Offline / error fallback: deterministic engine (PRD §6).
                 let fallback = deterministicPlan()
-                messages.append(ChatMessage(role: .assistant, content: "I couldn't reach the planning service, so here's an offline plan from the built-in scheduler. (\(error.localizedDescription))"))
-                messages.append(ChatMessage(role: .assistant, content: "", plan: fallback, isOfflinePlan: true))
+                addTurn(role: .assistant, "I couldn't reach the planning service, so here's an offline plan from the built-in scheduler. (\(error.localizedDescription))")
+                addTurn(role: .assistant, "", plan: fallback, isOfflinePlan: true)
             }
             isPlanning = false
         }
@@ -338,17 +392,21 @@ struct JeevesChatView: View {
     private func readTicket(_ item: PhotosPickerItem) async {
         isReadingTicket = true
         errorText = nil
-        defer { isReadingTicket = false }
         guard let data = try? await item.loadTransferable(type: Data.self), let uiImage = UIImage(data: data) else {
             errorText = "Couldn't load that image."
+            isReadingTicket = false
             return
         }
+        // Show the uploaded image in the thread so it's clear what Jeeves is reading.
+        let shrunk = uiImage.jpegData(compressionQuality: 0.5) ?? data
+        addTurn(role: .user, "", imageData: shrunk)
         do {
             let detected = try await EventVisionService.detectEvent(in: uiImage)
             detectedDraft = EventDraft(detected: detected)
         } catch {
             errorText = error.localizedDescription
         }
+        isReadingTicket = false
     }
 
     private func addEventFromChat(_ draft: EventDraft) {
@@ -359,7 +417,7 @@ struct JeevesChatView: View {
         )
         modelContext.insert(event)
         try? modelContext.save()
-        messages.append(ChatMessage(role: .assistant, content: "Added to today: \(draft.title) at \(hhmm(draft.startMinute)). Tap Plan my day and I'll fit everything around it."))
+        addTurn(role: .assistant, "Added to today: \(draft.title) at \(hhmm(draft.startMinute)). Tap Plan my day and I'll fit everything around it.")
     }
 
     private func hhmm(_ minutes: Int) -> String { String(format: "%02d:%02d", minutes / 60, minutes % 60) }
@@ -468,5 +526,5 @@ private struct PlanTimelineCard: View {
 
 #Preview {
     JeevesChatView()
-        .modelContainer(for: [DailyPlanState.self, DailyEvent.self, SavedLocation.self, PrepSession.self], inMemory: true)
+        .modelContainer(for: [DailyPlanState.self, DailyEvent.self, SavedLocation.self, PrepSession.self, ChatTurn.self], inMemory: true)
 }

@@ -40,6 +40,14 @@ enum JeevesChatService {
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
     private static let model = "claude-sonnet-5"
 
+    /// The model has no clock of its own; give it the device's current date so
+    /// it can answer "what's today" and resolve relative dates correctly.
+    static func dateContext() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "EEEE, d MMMM yyyy, h:mm a"
+        return "The current date and time on the user's device is \(f.string(from: Date()))."
+    }
+
     private static let systemPrompt = """
     You are Jeeves, a personal day-planning assistant living inside the user's own \
     iOS productivity app. Have a natural, helpful conversation about their day and \
@@ -64,7 +72,7 @@ enum JeevesChatService {
         let body: [String: Any] = [
             "model": model,
             "max_tokens": 1024,
-            "system": systemPrompt,
+            "system": systemPrompt + "\n\n" + Self.dateContext(),
             "messages": messages,
         ]
 
