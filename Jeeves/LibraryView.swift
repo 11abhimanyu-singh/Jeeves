@@ -763,7 +763,7 @@ private struct AddBooksView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     if !hasAPIKey {
                         NavigationLink {
-                            SettingsSheet()
+                            SettingsView()
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -845,7 +845,7 @@ private struct AddBooksView: View {
                 // Settings at all once that one key was already saved.
                 ToolbarItem(placement: .confirmationAction) {
                     NavigationLink {
-                        SettingsSheet()
+                        SettingsView()
                     } label: {
                         Image(systemName: "gearshape.fill")
                     }
@@ -1142,66 +1142,6 @@ private struct RatingPromptSheet: View {
         }
         .padding(24)
         .presentationDetents([.medium])
-    }
-}
-
-// MARK: - API key settings
-
-private struct SettingsSheet: View {
-    @State private var keyInput = ""
-    @State private var hasSavedKey = KeychainService.hasAPIKey
-
-    @State private var googleKeyInput = ""
-    @State private var hasSavedGoogleKey = KeychainService.hasGoogleBooksAPIKey
-
-    var body: some View {
-        Form {
-            Section {
-                SecureField("Anthropic API key", text: $keyInput)
-                Button("Save") {
-                    KeychainService.saveAPIKey(keyInput)
-                    hasSavedKey = true
-                    keyInput = ""
-                }
-                .disabled(keyInput.trimmingCharacters(in: .whitespaces).isEmpty)
-            } header: {
-                Text("Claude")
-            } footer: {
-                Text(hasSavedKey ? "A key is currently saved in Keychain." : "Used for shelf-photo scanning and book summaries, stored in Keychain on this device.")
-            }
-            if hasSavedKey {
-                Section {
-                    Button("Remove saved key", role: .destructive) {
-                        KeychainService.deleteAPIKey()
-                        hasSavedKey = false
-                    }
-                }
-            }
-
-            Section {
-                SecureField("Google Books API key", text: $googleKeyInput)
-                Button("Save") {
-                    KeychainService.saveGoogleBooksAPIKey(googleKeyInput)
-                    hasSavedGoogleKey = true
-                    googleKeyInput = ""
-                }
-                .disabled(googleKeyInput.trimmingCharacters(in: .whitespaces).isEmpty)
-            } header: {
-                Text("Google Books")
-            } footer: {
-                Text(hasSavedGoogleKey ? "A key is currently saved in Keychain." : "Optional — only used as a fallback when Open Library has no cover or ISBN for a book. Get a key from Google Cloud Console (enable the Books API, then create an API key).")
-            }
-            if hasSavedGoogleKey {
-                Section {
-                    Button("Remove saved key", role: .destructive) {
-                        KeychainService.deleteGoogleBooksAPIKey()
-                        hasSavedGoogleKey = false
-                    }
-                }
-            }
-        }
-        .navigationTitle("Library Settings")
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

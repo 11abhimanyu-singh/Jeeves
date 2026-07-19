@@ -67,4 +67,13 @@ enum KeychainService {
     static func loadGoogleBooksAPIKey() -> String? { load(account: googleBooksAccount) }
     static func deleteGoogleBooksAPIKey() { delete(account: googleBooksAccount) }
     static var hasGoogleBooksAPIKey: Bool { !(loadGoogleBooksAPIKey() ?? "").isEmpty }
+
+    // MARK: Google Maps (real commute times with live traffic)
+
+    private static let googleMapsAccount = "googleMapsAPIKey"
+
+    static func saveGoogleMapsAPIKey(_ key: String) { save(key, account: googleMapsAccount) }
+    static func loadGoogleMapsAPIKey() -> String? { load(account: googleMapsAccount) }
+    static func deleteGoogleMapsAPIKey() { delete(account: googleMapsAccount) }
+    static var hasGoogleMapsAPIKey: Bool { !(loadGoogleMapsAPIKey() ?? "").isEmpty }
 }
