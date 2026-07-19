@@ -34,6 +34,11 @@ struct JeevesApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                // The palette is a hardcoded light theme; system colors (text
+                // fields, .primary/.secondary) would flip to white in dark mode
+                // and vanish on the light background. Pin light until the
+                // dark-warm redesign (PRD §3) lands and handles both properly.
+                .preferredColorScheme(.light)
         }
         .modelContainer(sharedModelContainer)
     }

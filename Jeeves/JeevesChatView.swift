@@ -14,6 +14,8 @@
 
 import SwiftUI
 import SwiftData
+import PhotosUI
+import UIKit
 
 struct JeevesChatView: View {
     @Environment(\.modelContext) private var modelContext
@@ -29,6 +31,11 @@ struct JeevesChatView: View {
     @State private var errorText: String?
     @State private var showSetup = false
     @State private var showSettings = false
+
+    // In-chat ticket upload → event ingestion.
+    @State private var photoItem: PhotosPickerItem?
+    @State private var isReadingTicket = false
+    @State private var detectedDraft: EventDraft?
 
     private var today: Date { Date().startOfDay }
     private var todayPlanState: DailyPlanState? { dailyPlans.first { $0.date == today } }
@@ -56,10 +63,10 @@ struct JeevesChatView: View {
                             messageView(message).id(message.id)
                         }
 
-                        if isSending || isPlanning {
+                        if isSending || isPlanning || isReadingTicket {
                             HStack(spacing: 8) {
                                 ProgressView()
-                                Text(isPlanning ? "Jeeves is planning your day…" : "Jeeves is thinking…")
+                                Text(planningStatus)
                                     .font(.system(size: 12.5)).foregroundStyle(Color.textMuted)
                             }
                             .padding(.leading, 4)
@@ -86,6 +93,13 @@ struct JeevesChatView: View {
         }
         .sheet(isPresented: $showSettings) {
             NavigationStack { SettingsView() }
+        }
+        .sheet(item: $detectedDraft) { draft in
+            EventEditSheet(draft: draft, onSave: addEventFromChat)
+        }
+        .onChange(of: photoItem) { _, item in
+            guard let item else { return }
+            Task { await readTicket(item); photoItem = nil }
         }
     }
 
@@ -152,8 +166,17 @@ struct JeevesChatView: View {
 
     private var inputBar: some View {
         HStack(alignment: .bottom, spacing: 10) {
+            // Attach a ticket screenshot → Jeeves reads it and drafts an event.
+            PhotosPicker(selection: $photoItem, matching: .images) {
+                Image(systemName: "photo")
+                    .font(.system(size: 22))
+                    .foregroundStyle(Color.textSoft)
+                    .padding(.bottom, 4)
+            }
+
             TextField("Message Jeeves…", text: $inputText, axis: .vertical)
                 .lineLimit(1...4)
+                .foregroundStyle(Color.textPrimary)
                 .padding(10)
                 .background(RoundedRectangle(cornerRadius: 14).fill(Color.surface))
 
@@ -207,7 +230,12 @@ struct JeevesChatView: View {
         }
 
         Task {
-            let req = await buildPlanRequest(userContext: userContext)
+            // 1. Pull any events/gym mentioned in the message into real anchors,
+            //    so "MLR at 7pm, plan my day" works without manual event entry.
+            let planEvents = await extractAndCreateAnchors(from: userContext)
+            // 2. Build the request from those anchors (incl. live Maps commute).
+            let req = await buildPlanRequest(userContext: userContext, events: planEvents)
+            // 3. Generate.
             do {
                 let plan = try await PlanGenerationService.generate(req)
                 messages.append(ChatMessage(role: .assistant, content: plan.summary))
@@ -222,11 +250,53 @@ struct JeevesChatView: View {
         }
     }
 
-    private func buildPlanRequest(userContext: String) async -> PlanRequest {
+    /// Extracts events/gym from the message, persists any new ones, and returns
+    /// the full set of today's events (existing + newly created) for planning.
+    /// On extraction failure, quietly falls back to whatever's already set up.
+    private func extractAndCreateAnchors(from message: String) async -> [DailyEvent] {
+        guard !message.isEmpty else { return todayEvents }
+        guard let anchors = try? await AnchorExtractionService.extract(from: message, existingTitles: todayEvents.map(\.title)) else {
+            return todayEvents
+        }
+
+        var created: [DailyEvent] = []
+        for e in anchors.events {
+            let title = e.title.trimmingCharacters(in: .whitespaces)
+            guard !title.isEmpty else { continue }
+            // Skip anything that duplicates an existing event today.
+            if todayEvents.contains(where: { $0.title.lowercased() == title.lowercased() }) { continue }
+            let start = e.startTime.flatMap(GeneratedBlock.minutes(from:)) ?? 19 * 60
+            let end = e.endTime.flatMap(GeneratedBlock.minutes(from:)) ?? (start + 180)
+            let from = LocationKind(rawValue: e.leavingFrom ?? "Home") ?? .home
+            let event = DailyEvent(
+                date: today, title: title, startMinute: start, endMinute: end,
+                destinationAddress: e.venue ?? "", outboundStart: from, source: .manual
+            )
+            modelContext.insert(event)
+            created.append(event)
+        }
+
+        // Gym, only if the message actually mentioned it.
+        if let gymToday = anchors.gymToday {
+            let state = todayPlanState ?? {
+                let s = DailyPlanState(date: today, hasGymToday: false, gymMinute: nil)
+                modelContext.insert(s); return s
+            }()
+            state.hasGymToday = gymToday
+            if let gt = anchors.gymTime.flatMap(GeneratedBlock.minutes(from:)) { state.gymMinute = gt }
+        }
+
+        try? modelContext.save()
+        return todayEvents + created
+    }
+
+    private func buildPlanRequest(userContext: String, events planEvents: [DailyEvent]) async -> PlanRequest {
         let hasGym = todayPlanState?.hasGymToday ?? false
         let gymMinute = todayPlanState?.gymMinute
 
-        // Live commute legs, resolved from saved-location + event addresses.
+        // Live commute legs. Event venues (place names) work directly as Maps
+        // origins/destinations, so an extracted "MLR Convention Centre" routes
+        // even without a saved address for it.
         var legs: [(label: String, from: String, to: String)] = []
         let homeAddr = locations.first { $0.kind == .home }?.address ?? ""
         let gymAddr = locations.first { $0.kind == .gym }?.address ?? ""
@@ -234,8 +304,8 @@ struct JeevesChatView: View {
             legs.append(("Home→Gym", homeAddr, gymAddr))
             legs.append(("Gym→Home", gymAddr, homeAddr))
         }
-        for e in todayEvents where !e.destinationAddress.isEmpty {
-            let fromAddr = locations.first { $0.kind == e.outboundStart }?.address ?? ""
+        for e in planEvents where !e.destinationAddress.isEmpty {
+            let fromAddr = locations.first { $0.kind == e.outboundStart }?.address ?? homeAddr
             if !fromAddr.isEmpty {
                 legs.append(("\(e.outboundStart.rawValue)→\(e.title)", fromAddr, e.destinationAddress))
             }
@@ -249,13 +319,50 @@ struct JeevesChatView: View {
             userMessage: userContext,
             hasGymToday: hasGym,
             gymMinute: gymMinute,
-            events: todayEvents,
+            events: planEvents.sorted { $0.startMinute < $1.startMinute },
             locations: locations,
             defaultCommuteMinutes: 30,
             commuteEstimates: commutes,
             prepNeglectNote: prepNeglectNote()
         )
     }
+
+    private var planningStatus: String {
+        if isPlanning { return "Jeeves is planning your day…" }
+        if isReadingTicket { return "Reading your ticket…" }
+        return "Jeeves is thinking…"
+    }
+
+    // MARK: In-chat ticket upload
+
+    private func readTicket(_ item: PhotosPickerItem) async {
+        isReadingTicket = true
+        errorText = nil
+        defer { isReadingTicket = false }
+        guard let data = try? await item.loadTransferable(type: Data.self), let uiImage = UIImage(data: data) else {
+            errorText = "Couldn't load that image."
+            return
+        }
+        do {
+            let detected = try await EventVisionService.detectEvent(in: uiImage)
+            detectedDraft = EventDraft(detected: detected)
+        } catch {
+            errorText = error.localizedDescription
+        }
+    }
+
+    private func addEventFromChat(_ draft: EventDraft) {
+        let event = DailyEvent(
+            date: today, title: draft.title,
+            startMinute: draft.startMinute, endMinute: draft.endMinute,
+            destinationAddress: draft.address, outboundStart: draft.outboundStart, source: draft.source
+        )
+        modelContext.insert(event)
+        try? modelContext.save()
+        messages.append(ChatMessage(role: .assistant, content: "Added to today: \(draft.title) at \(hhmm(draft.startMinute)). Tap Plan my day and I'll fit everything around it."))
+    }
+
+    private func hhmm(_ minutes: Int) -> String { String(format: "%02d:%02d", minutes / 60, minutes % 60) }
 
     /// Which practice categories are most neglected this week — mirrors the
     /// deterministic engine's weighting so Claude gets the same signal.

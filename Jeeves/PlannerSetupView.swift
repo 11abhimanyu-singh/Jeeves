@@ -241,7 +241,7 @@ struct EventDraft: Identifiable {
     }
 }
 
-private struct EventEditSheet: View {
+struct EventEditSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State var draft: EventDraft
     let onSave: (EventDraft) -> Void
