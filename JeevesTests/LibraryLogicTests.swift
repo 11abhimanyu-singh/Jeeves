@@ -97,4 +97,42 @@ final class LibraryLogicTests: XCTestCase {
         let books = [makeBook("", author: "")]
         XCTAssertFalse(LibraryLogic.isDuplicate(title: "", author: "", in: books))
     }
+
+    // MARK: Fuzzy dedupe — re-scanning the same book yields varied strings
+
+    func testSubtitleDifferenceIsStillADuplicate() {
+        let books = [makeBook("Zero to One", author: "Peter Thiel")]
+        XCTAssertTrue(LibraryLogic.isDuplicate(
+            title: "Zero to One: Notes on Startups, or How to Build the Future",
+            author: "Peter Thiel", in: books))
+    }
+
+    func testCoAuthorDifferenceIsStillADuplicate() {
+        let books = [makeBook("Zero to One", author: "Peter Thiel")]
+        XCTAssertTrue(LibraryLogic.isDuplicate(
+            title: "Zero to One", author: "Peter Thiel with Blake Masters", in: books))
+    }
+
+    func testPunctuationAndDiacriticsDifferenceIsStillADuplicate() {
+        let books = [makeBook("Les Misérables", author: "Victor Hugo")]
+        XCTAssertTrue(LibraryLogic.isDuplicate(
+            title: "Les Miserables!", author: "victor hugo", in: books))
+    }
+
+    func testMissingAuthorOnRescanStillMatchesOnTitle() {
+        let books = [makeBook("The Living Elephants", author: "Raman Sukumar")]
+        XCTAssertTrue(LibraryLogic.isDuplicate(title: "The Living Elephants", author: "", in: books))
+    }
+
+    func testGenuinelyDifferentBookIsNotADuplicate() {
+        let books = [makeBook("Zero to One", author: "Peter Thiel")]
+        XCTAssertFalse(LibraryLogic.isDuplicate(title: "Sapiens", author: "Yuval Noah Harari", in: books))
+    }
+
+    func testSameTitleDistinctAuthorStillNotADuplicate() {
+        // Different translations/editions with the same title but unrelated
+        // authors must not collapse into one.
+        let books = [makeBook("The Republic", author: "Plato")]
+        XCTAssertFalse(LibraryLogic.isDuplicate(title: "The Republic", author: "Benjamin Jowett", in: books))
+    }
 }
