@@ -31,9 +31,10 @@ struct PlannerSetupView: View {
 
     var body: some View {
         Form {
-            gymSection
-            eventsSection
+            gymSection.listRowBackground(Color.surface)
+            eventsSection.listRowBackground(Color.surface)
         }
+        .jeevesFormChrome()
         .navigationTitle("Today")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -254,22 +255,27 @@ struct EventEditSheet: View {
                     TextField("Title", text: $draft.title)
                     TextField("Venue / address", text: $draft.address)
                 }
+                .listRowBackground(Color.surface)
                 Section("Time") {
                     DatePicker("Starts", selection: minuteBinding(\.startMinute), displayedComponents: .hourAndMinute)
                     DatePicker("Ends", selection: minuteBinding(\.endMinute), displayedComponents: .hourAndMinute)
                 }
+                .listRowBackground(Color.surface)
                 Section("Leaving from") {
                     Picker("Leaving from", selection: $draft.outboundStart) {
                         ForEach(LocationKind.allCases) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented)
                 }
+                .listRowBackground(Color.surface)
                 if let onDelete {
                     Section {
                         Button("Delete event", role: .destructive) { onDelete(); dismiss() }
                     }
+                    .listRowBackground(Color.surface)
                 }
             }
+            .jeevesFormChrome()
             .navigationTitle(draft.source == .screenshot ? "Confirm event" : "Event")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -42,6 +42,7 @@ struct SettingsView: View {
                 save: { KeychainService.saveAPIKey($0) },
                 remove: { KeychainService.deleteAPIKey() }
             )
+            .listRowBackground(Color.surface)
 
             keySection(
                 title: "Google Maps",
@@ -52,8 +53,10 @@ struct SettingsView: View {
                 save: { KeychainService.saveGoogleMapsAPIKey($0) },
                 remove: { KeychainService.deleteGoogleMapsAPIKey() }
             )
+            .listRowBackground(Color.surface)
 
             calendarSection
+                .listRowBackground(Color.surface)
 
             keySection(
                 title: "Google Books",
@@ -64,9 +67,12 @@ struct SettingsView: View {
                 save: { KeychainService.saveGoogleBooksAPIKey($0) },
                 remove: { KeychainService.deleteGoogleBooksAPIKey() }
             )
+            .listRowBackground(Color.surface)
 
             locationsSection
+                .listRowBackground(Color.surface)
         }
+        .jeevesFormChrome()
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { seedLocationsIfNeeded() }
@@ -204,6 +210,7 @@ struct LocationEditView: View {
             } footer: {
                 Text("A street address, a place name (\"MLR Convention Centre, Bengaluru\"), a Plus Code, or lat,lng all work.")
             }
+            .listRowBackground(Color.surface)
             Section {
                 TextField("comma, separated, facilities", text: $facilitiesText, axis: .vertical)
             } header: {
@@ -211,7 +218,9 @@ struct LocationEditView: View {
             } footer: {
                 Text("What you can do here, e.g. shower, weightlifting, lunch. Jeeves uses these to reason about chaining trips.")
             }
+            .listRowBackground(Color.surface)
         }
+        .jeevesFormChrome()
         .navigationTitle(location.kind.rawValue)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { facilitiesText = location.facilities.joined(separator: ", ") }

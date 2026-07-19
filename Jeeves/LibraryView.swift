@@ -1002,10 +1002,12 @@ private struct BookEditSheet: View {
                         Text("Non-fiction").tag(Bool?.some(false))
                     }
                 }
+                .listRowBackground(Color.surface)
                 Section("Progress") {
                     TextField("Total pages", text: $draft.totalPages).keyboardType(.numberPad)
                     TextField("Current page", text: $draft.currentPage).keyboardType(.numberPad)
                 }
+                .listRowBackground(Color.surface)
                 Section("Status") {
                     Picker("Library status", selection: $draft.libraryStatus) {
                         ForEach(LibraryStatus.allCases, id: \.self) { Text($0.rawValue).tag($0) }
@@ -1020,6 +1022,7 @@ private struct BookEditSheet: View {
                         }
                     }
                 }
+                .listRowBackground(Color.surface)
                 if let onDelete {
                     Section {
                         Button("Delete book", role: .destructive) {
@@ -1027,8 +1030,10 @@ private struct BookEditSheet: View {
                             dismiss()
                         }
                     }
+                    .listRowBackground(Color.surface)
                 }
             }
+            .jeevesFormChrome()
             .navigationTitle(book == nil ? "Add Book" : "Edit Book")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -42,6 +42,19 @@ extension Font {
     }
 }
 
+extension View {
+    /// Applies the Jeeves warm theme to a native Form/List so it stops showing
+    /// Apple's default gray-grouped look: tan page background, terracotta
+    /// accent on controls. Pair each Section with `.listRowBackground(Color.surface)`
+    /// so the rows are warm cards instead of white.
+    func jeevesFormChrome() -> some View {
+        self
+            .scrollContentBackground(.hidden)
+            .background(Color.bg)
+            .tint(Color.accent)
+    }
+}
+
 private let monthlyGoal = 20
 
 // MARK: - ContentView
