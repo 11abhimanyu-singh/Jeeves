@@ -11,11 +11,15 @@
 
 import Foundation
 
-struct ChatMessage: Identifiable, Equatable {
+struct ChatMessage: Identifiable {
     enum Role: String { case user, assistant }
     let id = UUID()
     let role: Role
     let content: String
+    // When set, this message renders as a plan timeline instead of a text
+    // bubble. isOfflinePlan marks a deterministic-fallback plan.
+    var plan: GeneratedPlan? = nil
+    var isOfflinePlan: Bool = false
 }
 
 enum JeevesChatError: LocalizedError {
