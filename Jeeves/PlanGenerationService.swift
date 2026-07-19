@@ -46,7 +46,7 @@ enum PlanGenerationError: LocalizedError {
 
 enum PlanGenerationService {
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
-    private static let model = "claude-sonnet-5"
+    private static let model = "claude-opus-4-8"
 
     static func generate(_ req: PlanRequest) async throws -> GeneratedPlan {
         guard let apiKey = KeychainService.loadAPIKey(), !apiKey.isEmpty else {
@@ -55,11 +55,11 @@ enum PlanGenerationService {
 
         let body: [String: Any] = [
             "model": model,
-            // Generous ceiling: claude-sonnet-5 spends output tokens on an
-            // extended-thinking block first, then the answer. At 2048 the
-            // thinking alone consumed the whole budget and the JSON never
-            // came — this leaves ample room for both the reasoning and the plan.
-            "max_tokens": 8192,
+            // Opus 4.8, ceiling 6k. The model spends output tokens on an
+            // extended-thinking block first, then the JSON plan — both must fit
+            // under this cap, so if a very complex day ever truncates the JSON
+            // (unparsable → deterministic fallback), this is the knob to raise.
+            "max_tokens": 6000,
             "system": systemPrompt,
             "messages": [["role": "user", "content": userPrompt(req)]],
         ]
