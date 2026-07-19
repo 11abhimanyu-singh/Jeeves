@@ -16,9 +16,45 @@
 //
 
 import XCTest
+import SwiftData
 @testable import Jeeves
 
 final class LiveAITests: XCTestCase {
+
+    // MARK: Event → Day Planner (the chat "Plan my day" commit path)
+
+    /// Adds an event, runs the same PlanCoordinator call the chat uses, commits
+    /// the result to a day's DailyPlanState, and confirms the Day Planner would
+    /// then show a plan that reflects the event. This is the end-to-end "add an
+    /// event, and the day planner changes" behavior — Claude-driven, so live.
+    @MainActor
+    func testEventCommitsToDayPlanner() async throws {
+        try XCTSkipUnless(KeychainService.hasAPIKey, "no Anthropic key in Keychain")
+        let day = Date().startOfDay
+        let event = DailyEvent(date: day, title: "Baithak live",
+                               startMinute: 19 * 60, endMinute: 21 * 60,
+                               destinationAddress: "MLR Convention Centre, Bengaluru",
+                               outboundStart: .home, source: .manual)
+
+        // The Day Planner starts with no committed plan.
+        let state = DailyPlanState(date: day, hasGymToday: false, gymMinute: nil)
+        XCTAssertNil(state.plan, "planner should start empty")
+
+        // Same call the chat's Plan my day makes.
+        let result = await PlanCoordinator.generate(.init(
+            hasGym: false, gymMinute: nil, events: [event], locations: [], prepSessions: []
+        ))
+        XCTAssertFalse(result.isOffline, "should be a live Claude plan when the key is present")
+        XCTAssertFalse(result.plan.blocks.isEmpty)
+        XCTAssertTrue(result.plan.blocks.contains { $0.kind == "event" }, "the event should be anchored in the plan")
+
+        // Commit → the Day Planner now reads a plan for this day.
+        state.storePlan(result.plan, isOffline: result.isOffline)
+        XCTAssertNotNil(state.plan, "planner should now show the committed plan")
+        XCTAssertEqual(state.plan?.blocks.count, result.plan.blocks.count)
+        XCTAssertTrue(state.plan?.blocks.contains { $0.title.localizedCaseInsensitiveContains("Baithak") } ?? false,
+                      "the committed plan the planner shows should include the added event")
+    }
 
     // MARK: Claude
 
