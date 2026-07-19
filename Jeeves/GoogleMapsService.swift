@@ -3,61 +3,53 @@
 //  Jeeves
 //
 //  Real driving commute times with live traffic (PRD §5.4, §6) via the
-//  Google Maps Distance Matrix API. Requires a user-supplied, Keychain-
-//  stored Maps key. Everything here is best-effort: no key, no network, or
-//  an un-geocodable address returns nil, and the planner falls back to the
-//  user's default commute minutes rather than failing.
+//  Google Routes API (computeRoutes). The older Distance Matrix API is a
+//  legacy product Google no longer enables for new projects, so this uses
+//  the current Routes API instead. Requires a user-supplied, Keychain-
+//  stored Maps key with the Routes API enabled. Everything is best-effort:
+//  no key, no network, or an un-routable address returns nil, and the
+//  planner falls back to the user's default commute minutes.
 //
 
 import Foundation
 
 enum GoogleMapsService {
-    /// Live-traffic driving minutes between two addresses, or nil if it can't
-    /// be determined (missing key, bad address, network/API error).
+    private static let endpoint = URL(string: "https://routes.googleapis.com/directions/v2:computeRoutes")!
+
+    /// Live-traffic driving minutes between two addresses/place names, or nil
+    /// if it can't be determined (missing key, bad address, network/API error).
     static func commuteMinutes(from origin: String, to destination: String) async -> Int? {
         let o = origin.trimmingCharacters(in: .whitespacesAndNewlines)
         let d = destination.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !o.isEmpty, !d.isEmpty,
               let apiKey = KeychainService.loadGoogleMapsAPIKey(), !apiKey.isEmpty else { return nil }
 
-        var components = URLComponents(string: "https://maps.googleapis.com/maps/api/distancematrix/json")
-        components?.queryItems = [
-            URLQueryItem(name: "origins", value: o),
-            URLQueryItem(name: "destinations", value: d),
-            URLQueryItem(name: "mode", value: "driving"),
-            URLQueryItem(name: "departure_time", value: "now"),   // enables duration_in_traffic
-            URLQueryItem(name: "key", value: apiKey),
+        let body: [String: Any] = [
+            "origin": ["address": o],
+            "destination": ["address": d],
+            "travelMode": "DRIVE",
+            "routingPreference": "TRAFFIC_AWARE",
         ]
-        guard let url = components?.url else { return nil }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "X-Goog-Api-Key")
+        request.setValue("routes.duration", forHTTPHeaderField: "X-Goog-FieldMask")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         struct Response: Decodable {
-            struct Row: Decodable {
-                struct Element: Decodable {
-                    struct Duration: Decodable { let value: Int } // seconds
-                    let status: String
-                    let duration: Duration?
-                    let durationInTraffic: Duration?
-                    enum CodingKeys: String, CodingKey {
-                        case status, duration
-                        case durationInTraffic = "duration_in_traffic"
-                    }
-                }
-                let elements: [Element]
-            }
-            let status: String
-            let rows: [Row]
+            struct Route: Decodable { let duration: String? } // e.g. "2491s"
+            let routes: [Route]
         }
 
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
             let decoded = try JSONDecoder().decode(Response.self, from: data)
-            guard decoded.status == "OK",
-                  let element = decoded.rows.first?.elements.first,
-                  element.status == "OK" else { return nil }
-            // Prefer traffic-aware duration; fall back to free-flow duration.
-            let seconds = element.durationInTraffic?.value ?? element.duration?.value
-            guard let seconds else { return nil }
-            return Int((Double(seconds) / 60.0).rounded())
+            guard let durationString = decoded.routes.first?.duration,
+                  let seconds = Double(durationString.replacingOccurrences(of: "s", with: "")) else { return nil }
+            return Int((seconds / 60).rounded())
         } catch {
             return nil
         }
