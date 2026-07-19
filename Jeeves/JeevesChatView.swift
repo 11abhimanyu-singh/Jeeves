@@ -411,7 +411,7 @@ struct JeevesChatView: View {
 
     private func addEventFromChat(_ draft: EventDraft) {
         let event = DailyEvent(
-            date: today, title: draft.title,
+            date: draft.date.startOfDay, title: draft.title,
             startMinute: draft.startMinute, endMinute: draft.endMinute,
             destinationAddress: draft.address, outboundStart: draft.outboundStart, source: draft.source
         )

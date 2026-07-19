@@ -189,7 +189,7 @@ struct PlannerSetupView: View {
 
     private func saveEvent(_ draft: EventDraft) {
         let event = DailyEvent(
-            date: today, title: draft.title,
+            date: draft.date.startOfDay, title: draft.title,
             startMinute: draft.startMinute, endMinute: draft.endMinute,
             destinationAddress: draft.address, outboundStart: draft.outboundStart,
             source: draft.source
@@ -200,6 +200,7 @@ struct PlannerSetupView: View {
 
     private func apply(_ draft: EventDraft, to event: DailyEvent) {
         event.title = draft.title
+        event.date = draft.date.startOfDay
         event.startMinute = draft.startMinute
         event.endMinute = draft.endMinute
         event.destinationAddress = draft.address
@@ -215,6 +216,7 @@ struct PlannerSetupView: View {
 struct EventDraft: Identifiable {
     let id = UUID()
     var title = ""
+    var date: Date = Date().startOfDay
     var startMinute = 14 * 60
     var endMinute = 17 * 60
     var address = ""
@@ -223,8 +225,12 @@ struct EventDraft: Identifiable {
 
     init() {}
 
+    /// New event pre-dated to a chosen day (e.g. the day selected on the planner dial).
+    init(on day: Date) { date = day.startOfDay }
+
     init(event: DailyEvent) {
         title = event.title
+        date = event.date
         startMinute = event.startMinute
         endMinute = event.endMinute
         address = event.destinationAddress
@@ -234,11 +240,21 @@ struct EventDraft: Identifiable {
 
     init(detected: DetectedEvent) {
         title = detected.title
+        // A ticket carries its own date — honor it so a future-dated ticket
+        // lands on the right day instead of always today.
+        if let ds = detected.date, let parsed = EventDraft.parseDate(ds) { date = parsed }
         if let s = detected.startTime, let m = GeneratedBlock.minutes(from: s) { startMinute = m }
         if let e = detected.endTime, let m = GeneratedBlock.minutes(from: e) { endMinute = m }
         else { endMinute = startMinute + 180 }  // sensible default span
         address = detected.venue ?? ""
         source = .screenshot
+    }
+
+    static func parseDate(_ s: String) -> Date? {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = .current
+        return f.date(from: s)?.startOfDay
     }
 }
 
@@ -254,6 +270,10 @@ struct EventEditSheet: View {
                 Section("Event") {
                     TextField("Title", text: $draft.title)
                     TextField("Venue / address", text: $draft.address)
+                }
+                .listRowBackground(Color.surface)
+                Section("Date") {
+                    DatePicker("Day", selection: $draft.date, displayedComponents: .date)
                 }
                 .listRowBackground(Color.surface)
                 Section("Time") {

@@ -16,12 +16,19 @@ struct DayPlannerView: View {
     @Query private var prepSessions: [PrepSession]
     @Query private var leisureLogs: [LeisureLog]
     @Query private var dailyPlans: [DailyPlanState]
+    @Query private var events: [DailyEvent]
 
     @State private var hasGymToday = true
     @State private var gymTime: Date = Calendar.current.date(bySettingHour: 11, minute: 0, second: 0, of: Date()) ?? Date()
     @State private var planConfirmed = false
 
+    // Date dial: defaults to today, scrollable through the next 60 days.
+    @State private var selectedDate: Date = Date().startOfDay
+    @State private var eventDraft: EventDraft?
+    @State private var editingEvent: DailyEvent?
+
     private var today: Date { Date().startOfDay }
+    private var isToday: Bool { selectedDate == today }
 
     private var todayPlanState: DailyPlanState? {
         dailyPlans.first { $0.date == today }
@@ -41,24 +48,204 @@ struct DayPlannerView: View {
         VStack(spacing: 0) {
             header
             Divider().overlay(Color.textPrimary.opacity(0.14))
+            dateDial
+            Divider().overlay(Color.textPrimary.opacity(0.14))
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    if planConfirmed {
-                        confirmedSummary
-                    } else {
-                        gymInput
-                    }
-                    scheduleList
-                }
-                .padding(20)
-            }
+            ScrollView { scrollContent.padding(20) }
         }
         .background(Color.bg)
+        .sheet(item: $eventDraft) { draft in
+            EventEditSheet(draft: draft, onSave: saveEvent, onDelete: eventDeleteAction)
+        }
         .onAppear { loadGymState() }
         .onChange(of: hasGymToday) { _, _ in saveGymState() }
         .onChange(of: gymTime) { _, _ in saveGymState() }
     }
+
+    // The gym routine + deterministic timeline are specific to today; future
+    // days show their events only.
+    @ViewBuilder
+    private var scrollContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            eventsSection
+            if isToday {
+                if planConfirmed {
+                    confirmedSummary
+                } else {
+                    gymInput
+                }
+                scheduleList
+            }
+        }
+    }
+
+    // MARK: Date dial
+
+    private var dialDates: [Date] {
+        let cal = Calendar.current
+        return (0..<60).compactMap { cal.date(byAdding: .day, value: $0, to: today)?.startOfDay }
+    }
+
+    private var selectedEvents: [DailyEvent] {
+        events.filter { $0.date == selectedDate }.sorted { $0.startMinute < $1.startMinute }
+    }
+
+    private var dateDial: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(dialDates, id: \.self) { date in
+                        datePill(date)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            }
+            .onAppear { proxy.scrollTo(selectedDate, anchor: .center) }
+            .onChange(of: selectedDate) { _, d in
+                withAnimation { proxy.scrollTo(d, anchor: .center) }
+            }
+        }
+    }
+
+    private func datePill(_ date: Date) -> some View {
+        let selected = date == selectedDate
+        let dayIsToday = date == today
+        let hasEvents = events.contains { $0.date == date }
+        return Button { selectedDate = date } label: {
+            VStack(spacing: 3) {
+                Text(date.formatted(.dateTime.weekday(.abbreviated)))
+                    .font(.system(size: 10.5, weight: .semibold))
+                Text(date.formatted(.dateTime.day()))
+                    .font(.system(size: 16, weight: .bold))
+                Circle()
+                    .fill(hasEvents ? (selected ? Color.white : Color.accent) : .clear)
+                    .frame(width: 5, height: 5)
+            }
+            .foregroundStyle(selected ? .white : Color.textPrimary)
+            .frame(width: 46, height: 62)
+            .background(RoundedRectangle(cornerRadius: 14).fill(selected ? Color.accent : Color.surface))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(dayIsToday && !selected ? Color.accent : .clear, lineWidth: 1.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .id(date)
+    }
+
+    // MARK: Events for the selected day
+
+    private var eventsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(prettyDate(selectedDate))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.textMuted)
+                Spacer()
+                Button { addEvent() } label: {
+                    Label("Add", systemImage: "plus")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.accentDeep)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if selectedEvents.isEmpty {
+                Text(isToday ? "No events today." : "No events on this day.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.textSoft)
+                    .padding(.vertical, 4)
+            } else {
+                ForEach(selectedEvents) { event in
+                    eventRow(event)
+                }
+            }
+        }
+    }
+
+    private func eventRow(_ event: DailyEvent) -> some View {
+        Button { editEvent(event) } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Text(hhmm(event.startMinute))
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(Color.accentDeep)
+                    .frame(width: 52, alignment: .trailing)
+                Rectangle().fill(Color.accent).frame(width: 3).cornerRadius(1.5)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(event.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.textPrimary)
+                    Text("\(hhmm(event.startMinute))–\(hhmm(event.endMinute)) · from \(event.outboundStart.rawValue)")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Color.textSoft)
+                    if !event.destinationAddress.isEmpty {
+                        Text(event.destinationAddress)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Color.textMuted)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 14).fill(Color.surface))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Event actions
+
+    private func addEvent() {
+        editingEvent = nil
+        eventDraft = EventDraft(on: selectedDate)
+    }
+
+    private func editEvent(_ event: DailyEvent) {
+        editingEvent = event
+        eventDraft = EventDraft(event: event)
+    }
+
+    private func saveEvent(_ draft: EventDraft) {
+        if let event = editingEvent {
+            event.title = draft.title
+            event.date = draft.date.startOfDay
+            event.startMinute = draft.startMinute
+            event.endMinute = draft.endMinute
+            event.destinationAddress = draft.address
+            event.outboundStart = draft.outboundStart
+        } else {
+            modelContext.insert(DailyEvent(
+                date: draft.date.startOfDay, title: draft.title,
+                startMinute: draft.startMinute, endMinute: draft.endMinute,
+                destinationAddress: draft.address, outboundStart: draft.outboundStart,
+                source: draft.source
+            ))
+        }
+        try? modelContext.save()
+        selectedDate = draft.date.startOfDay   // follow the event to its day
+        editingEvent = nil
+    }
+
+    private var eventDeleteAction: (() -> Void)? {
+        guard editingEvent != nil else { return nil }
+        return { deleteEditingEvent() }
+    }
+
+    private func deleteEditingEvent() {
+        if let event = editingEvent {
+            modelContext.delete(event)
+            try? modelContext.save()
+        }
+        editingEvent = nil
+    }
+
+    private func prettyDate(_ date: Date) -> String {
+        let base = date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
+        return date == today ? "TODAY · \(base)" : base.uppercased()
+    }
+
+    private func hhmm(_ minutes: Int) -> String { String(format: "%02d:%02d", minutes / 60, minutes % 60) }
 
     private var header: some View {
         HStack {
