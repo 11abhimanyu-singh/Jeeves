@@ -27,6 +27,11 @@ struct DayPlannerView: View {
     @State private var eventDraft: EventDraft?
     @State private var editingEvent: DailyEvent?
 
+    // Google Calendar import (reviewed, not silent).
+    @State private var calendarReview: CalendarReview?
+    @State private var isImportingCalendar = false
+    @State private var calendarError: String?
+
     private var today: Date { Date().startOfDay }
     private var isToday: Bool { selectedDate == today }
 
@@ -56,6 +61,9 @@ struct DayPlannerView: View {
         .background(Color.bg)
         .sheet(item: $eventDraft) { draft in
             EventEditSheet(draft: draft, onSave: saveEvent, onDelete: eventDeleteAction)
+        }
+        .sheet(item: $calendarReview) { review in
+            CalendarImportSheet(review: review, onAdd: addFromCalendar)
         }
         .onAppear { loadGymState() }
         .onChange(of: hasGymToday) { _, _ in saveGymState() }
@@ -138,17 +146,36 @@ struct DayPlannerView: View {
 
     private var eventsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(spacing: 14) {
                 Text(prettyDate(selectedDate))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.textMuted)
                 Spacer()
+                if KeychainService.isGoogleCalendarConnected {
+                    Button { importFromCalendar() } label: {
+                        Image(systemName: "calendar.badge.plus")
+                            .font(.system(size: 16))
+                            .foregroundStyle(Color.accentDeep)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isImportingCalendar)
+                }
                 Button { addEvent() } label: {
                     Label("Add", systemImage: "plus")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Color.accentDeep)
                 }
                 .buttonStyle(.plain)
+            }
+
+            if isImportingCalendar {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Reading your calendar…").font(.system(size: 12.5)).foregroundStyle(Color.textMuted)
+                }
+            }
+            if let calendarError {
+                Text(calendarError).font(.system(size: 12)).foregroundStyle(Color.accentDeep)
             }
 
             if selectedEvents.isEmpty {
@@ -162,6 +189,45 @@ struct DayPlannerView: View {
                 }
             }
         }
+    }
+
+    // MARK: Google Calendar import (reviewed)
+
+    private func importFromCalendar() {
+        isImportingCalendar = true
+        calendarError = nil
+        let day = selectedDate
+        Task {
+            defer { isImportingCalendar = false }
+            do {
+                let evs = try await GoogleCalendarService.events(on: day)
+                if evs.isEmpty {
+                    calendarError = "No calendar events on \(day == today ? "today" : "this day")."
+                } else {
+                    calendarReview = CalendarReview(date: day, events: evs)
+                }
+            } catch {
+                calendarError = error.localizedDescription
+            }
+        }
+    }
+
+    /// Adds the user-selected calendar events to the planner, skipping any
+    /// that already exist on that day.
+    private func addFromCalendar(_ chosen: [CalendarEvent]) {
+        for c in chosen {
+            let dup = events.contains {
+                $0.date == calendarReview?.date && $0.title == c.title && $0.startMinute == c.startMinute
+            }
+            guard !dup, let day = calendarReview?.date else { continue }
+            modelContext.insert(DailyEvent(
+                date: day, title: c.title,
+                startMinute: c.startMinute, endMinute: c.endMinute,
+                destinationAddress: c.location, outboundStart: .home, source: .calendar
+            ))
+        }
+        try? modelContext.save()
+        if let day = calendarReview?.date { selectedDate = day }
     }
 
     private func eventRow(_ event: DailyEvent) -> some View {
@@ -444,6 +510,73 @@ struct DayPlannerView: View {
         }
         try? modelContext.save()
     }
+}
+
+// MARK: - Calendar import review
+
+struct CalendarReview: Identifiable {
+    let id = UUID()
+    let date: Date
+    let events: [CalendarEvent]
+}
+
+/// Lists calendar events for a day and lets the user choose which to add —
+/// the "ask whether to add" step, instead of a silent import.
+private struct CalendarImportSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let review: CalendarReview
+    let onAdd: ([CalendarEvent]) -> Void
+    @State private var selected: Set<UUID> = []
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Your Google Calendar for \(review.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())). Pick which to add to your planner.")
+                        .font(.system(size: 13)).foregroundStyle(Color.textSoft)
+                        .padding(.bottom, 4)
+                    ForEach(review.events) { event in
+                        Button { toggle(event.id) } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: selected.contains(event.id) ? "checkmark.circle.fill" : "circle")
+                                    .font(.system(size: 22))
+                                    .foregroundStyle(selected.contains(event.id) ? Color.accent : Color.textMuted.opacity(0.5))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(event.title).font(.system(size: 14.5, weight: .semibold)).foregroundStyle(Color.textPrimary)
+                                    Text("\(hhmm(event.startMinute))–\(hhmm(event.endMinute))\(event.location.isEmpty ? "" : " · \(event.location)")")
+                                        .font(.system(size: 12)).foregroundStyle(Color.textSoft).lineLimit(1)
+                                }
+                                Spacer()
+                            }
+                            .padding(12)
+                            .background(RoundedRectangle(cornerRadius: 14).fill(Color.surface))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(20)
+            }
+            .background(Color.bg)
+            .navigationTitle("Add from Calendar")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add \(selected.count)") {
+                        onAdd(review.events.filter { selected.contains($0.id) })
+                        dismiss()
+                    }
+                    .disabled(selected.isEmpty)
+                }
+            }
+            .onAppear { selected = Set(review.events.map(\.id)) } // default: all selected
+        }
+    }
+
+    private func toggle(_ id: UUID) {
+        if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
+    }
+    private func hhmm(_ m: Int) -> String { String(format: "%02d:%02d", m / 60, m % 60) }
 }
 
 #Preview {
