@@ -100,6 +100,34 @@ final class LiveAITests: XCTestCase {
         }
     }
 
+    /// Regression: a MIDDAY event must not discard the rest of the day. The
+    /// planner used to treat the event's departure as the end of the day and
+    /// drop everything after it (including a Must-do), leaving the whole
+    /// afternoon empty. A correct plan keeps the morning Must-do and fills the
+    /// hours after the event returns home.
+    func testMiddayEventUsesTheWholeDay() async throws {
+        try XCTSkipUnless(KeychainService.hasAPIKey, "no Anthropic key in Keychain")
+        let appt = DailyEvent(date: Date().startOfDay, title: "Dr Sree Lakshmi",
+                              startMinute: 14 * 60, endMinute: 15 * 60,
+                              destinationAddress: "Silent Monkee, Bengaluru",
+                              outboundStart: .home, source: .manual)
+        let plan = try await PlanGenerationService.generate(PlanRequest(
+            userMessage: "Gym at 11, appointment at 2pm.",
+            hasGymToday: true, gymMinute: 11 * 60,
+            events: [appt], locations: [],
+            defaultCommuteMinutes: 30, commuteEstimates: ["Home→Dr Sree Lakshmi": 40],
+            prepNeglectNote: nil
+        ))
+        // Must-do reading is kept, in the morning.
+        XCTAssertFalse(plan.dropped.contains { $0.localizedCaseInsensitiveContains("Reading") },
+                       "Must-do reading dropped: \(plan.dropped)")
+        XCTAssertTrue(plan.blocks.contains { $0.title.localizedCaseInsensitiveContains("Reading") && ($0.startMinute ?? 0) < 11 * 60 })
+        // The afternoon after the 15:00 appointment holds real work.
+        XCTAssertTrue(plan.blocks.contains { b in
+            (b.startMinute ?? 0) >= 15 * 60 && !["event", "commute", "free"].contains(b.kind)
+        }, "afternoon/evening after the appointment should hold work, not be discarded")
+    }
+
     // MARK: Google Maps (Routes API)
 
     func testLiveMapsCommute() async throws {

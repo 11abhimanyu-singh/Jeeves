@@ -152,11 +152,11 @@ enum PlanGenerationService {
         s += "- Always report what you dropped and shrank. Never silently omit anything.\n\n"
 
         s += "DAY WINDOW:\n"
-        s += "- Productive window starts at 08:00.\n"
-        if req.events.isEmpty {
-            s += "- Normal day: hard boundary is 20:30. Photography is the fixed last block (20:00–20:30) if it survives.\n"
-        } else {
-            s += "- EVENT DAY: the hard boundary is the DEPARTURE TIME for the earliest event. ALL planned work must finish before the user leaves. Nothing is scheduled after returning home — that's wind-down, outside the plan.\n"
+        s += "- The productive window is 08:00 to the 20:30 hard boundary — EVERY day, including event days. Photography is the fixed last block (20:00–20:30) if it survives.\n"
+        if !req.events.isEmpty {
+            s += "- Events are FIXED ANCHORS you schedule work AROUND, not a wall that ends the day. Each event is an out-and-back trip: leave in time, attend, return home. Fill EVERY free window with productive work — before the first event, between events, and (crucially) AFTER you return home from an event, right up to 20:30.\n"
+            s += "- Do NOT drop work just because it doesn't fit before an event. A midday event (e.g. a 2 PM appointment) leaves the whole afternoon and evening free after you return — use it. The ONLY time post-event hours are unavailable is when the event itself runs so late that you get home near or after 20:30.\n"
+            s += "- The 08:00 morning peak-focus slot must hold Interview prep — Reading whenever it's free. Never leave the morning empty while dropping a Must-do; with the full 08:00–20:30 window there is almost always room, so dropping a Must-do should essentially never happen.\n"
         }
         s += "\n"
 
