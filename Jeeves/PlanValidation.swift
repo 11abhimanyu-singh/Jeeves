@@ -38,17 +38,56 @@ enum PlanValidation {
                 message: "\"\(b.block.title)\" (\(b.block.startTime)) overlaps \"\(a.block.title)\" (ends \(a.block.endTime))"))
         }
 
-        // 2. Productive work stays inside 08:00–20:30. Events (and the commutes
-        //    to/from them) follow their real times; the evening wind-down (free)
-        //    and Sleep at 23:00 legitimately live after the boundary — so the
-        //    check applies only to the genuinely productive kinds.
-        let productive: Set<String> = ["activity", "gym", "lunch"]
-        for t in timed where productive.contains(t.block.kind.lowercased()) {
+        // 2. Productive WORK stays inside 08:00–20:30. Events, the gym routine,
+        //    and commutes are fixed commitments that follow their real times
+        //    and may run later (a 19:00 gym legitimately ends past 20:30); the
+        //    evening wind-down (free) and Sleep at 23:00 also live after the
+        //    boundary — so the check applies only to work kinds.
+        let productive: Set<String> = ["activity", "lunch"]
+        // A short (≤30 min) shower block is a hygiene routine that legitimately
+        // follows a late gym home — the duration cap keeps the exemption from
+        // becoming an escape hatch (an "activity" titled "Shower + emails"
+        // 20:30–22:30 is still work past the boundary).
+        func isShowerRoutine(_ t: (block: GeneratedBlock, start: Int, end: Int)) -> Bool {
+            t.block.title.localizedCaseInsensitiveContains("shower") && t.end - t.start <= 30
+        }
+        for t in timed where productive.contains(t.block.kind.lowercased()) && !isShowerRoutine(t) {
             if t.start < dayStart {
                 out.append(Violation(severity: .severe, message: "\"\(t.block.title)\" starts before 08:00"))
             }
             if t.end > boundary {
                 out.append(Violation(severity: .severe, message: "\"\(t.block.title)\" runs past 20:30"))
+            }
+        }
+
+        // 2b. Gym sub-block durations are pinned — the workout must never be
+        //     compressed to fit the day: Weightlifting is exactly 70 min and
+        //     starts at the user's entered time; Mobility 20 and Cardio 35 are
+        //     flagged as quality drift. Matching prefers kind "gym" so an event
+        //     or errand with "lift"/"weight" in its title can't satisfy (or
+        //     falsely trip) the check. Skipped for an unrealistically late gym
+        //     (after 21:00) where the full routine can't precede 23:00 sleep —
+        //     enforcing 70 min there would make the rule set unsatisfiable.
+        func isWeightlifting(_ t: (block: GeneratedBlock, start: Int, end: Int)) -> Bool {
+            t.block.title.localizedCaseInsensitiveContains("weight") || t.block.title.localizedCaseInsensitiveContains("lift")
+        }
+        if request.hasGymToday, let gymMinute = request.gymMinute, gymMinute <= 21 * 60 {
+            let gymKind = timed.filter { $0.block.kind.lowercased() == "gym" }
+            let lifting = gymKind.first(where: isWeightlifting)
+                ?? timed.first { isWeightlifting($0) && !["event", "commute", "free", "sleep"].contains($0.block.kind.lowercased()) }
+            if let lifting {
+                let duration = lifting.end - lifting.start
+                if duration < 70 {
+                    out.append(Violation(severity: .severe, message: "Weightlifting is \(duration) min — it is a fixed 70-min block and must never be compressed"))
+                }
+            } else {
+                out.append(Violation(severity: .severe, message: "Gym day but no weightlifting block in the plan"))
+            }
+            for (title, expected) in [("Mobility", 20), ("Cardio", 35)] {
+                if let b = gymKind.first(where: { $0.block.title.localizedCaseInsensitiveContains(title) }) ?? timed.first(where: { $0.block.title.localizedCaseInsensitiveContains(title) && $0.block.kind.lowercased() != "event" }),
+                   b.end - b.start != expected {
+                    out.append(Violation(severity: .quality, message: "\(title) is \(b.end - b.start) min — expected \(expected)"))
+                }
             }
         }
 

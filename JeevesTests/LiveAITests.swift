@@ -141,4 +141,23 @@ final class LiveAITests: XCTestCase {
         XCTAssertGreaterThan(m, 0)
         XCTAssertLessThan(m, 300, "sanity: a city commute is under 5 hours")
     }
+
+    /// Predictive traffic: the same leg priced for tomorrow 13:30 (midday
+    /// traffic) must return a valid duration via TRAFFIC_AWARE_OPTIMAL.
+    func testLiveMapsCommutePredictiveDeparture() async throws {
+        try XCTSkipUnless(KeychainService.hasGoogleMapsAPIKey, "no Google Maps key in Keychain")
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date())!.startOfDay
+        let departure = try XCTUnwrap(PlanCoordinator.departureDate(minuteOfDay: 13 * 60 + 30, on: tomorrow))
+        let now = await GoogleMapsService.commuteMinutes(
+            from: "Koramangala, Bangalore",
+            to: "MLR Convention Centre, Whitefield, Bangalore")
+        let midday = await GoogleMapsService.commuteMinutes(
+            from: "Koramangala, Bangalore",
+            to: "MLR Convention Centre, Whitefield, Bangalore",
+            departure: departure)
+        print("=== maps commute now: \(String(describing: now)) min | tomorrow 13:30 predicted: \(String(describing: midday)) min ===")
+        let m = try XCTUnwrap(midday, "Routes API should return a predicted duration for a future departure")
+        XCTAssertGreaterThan(m, 0)
+        XCTAssertLessThan(m, 300)
+    }
 }

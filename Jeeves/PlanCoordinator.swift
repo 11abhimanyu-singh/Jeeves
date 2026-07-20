@@ -19,6 +19,7 @@ enum PlanCoordinator {
         var events: [DailyEvent]
         var locations: [SavedLocation]
         var prepSessions: [PrepSession]
+        var planDate: Date = Date()     // the day being planned — commute legs use its scheduled departure times for predictive traffic
         var referenceNow: Date? = nil   // pinned "now" for evals; nil = real clock
     }
 
@@ -64,24 +65,73 @@ enum PlanCoordinator {
 
     // MARK: Request assembly (live Maps commute legs)
 
-    private static func buildRequest(_ i: Inputs) async -> PlanRequest {
-        var legs: [(label: String, from: String, to: String)] = []
+    /// When each commute leg actually departs, as minutes-since-midnight on the
+    /// plan date, derived from the anchors. Feeding these to the Routes API
+    /// gets PREDICTED traffic for that time of day instead of traffic at the
+    /// moment the plan is generated (planning at night for a midday leg would
+    /// otherwise price in empty roads). Pure and unit-tested.
+    ///
+    /// Event legs are checked FIRST, with the exact label shapes buildRequest
+    /// constructs — so a calendar event literally titled "Gym" (a common
+    /// calendar entry) is priced by ITS times, not mistaken for the gym-anchor
+    /// commute.
+    static func legDepartureMinute(label: String, gymMinute: Int?, events: [DailyEvent]) -> Int? {
+        for e in events {
+            if label == "\(e.title)→Home" { return e.endMinute }
+            for kind in LocationKind.allCases where label == "\(kind.rawValue)→\(e.title)" {
+                return e.startMinute - 45   // leave ~45 min before the event
+            }
+        }
+        if label == "Home→Gym", let g = gymMinute {
+            return g - 50   // 30 commute + 20 mobility before the weights start
+        }
+        if label == "Gym→Home", let g = gymMinute {
+            return g + 70 + 35   // weights + cardio, then drive home
+        }
+        return nil
+    }
+
+    /// A concrete Date on `day` at wall-clock `minuteOfDay` (bySettingHour, so
+    /// a 13:30 leg means 13:30 local even across a DST transition — elapsed-
+    /// minute arithmetic would drift an hour on changeover days).
+    static func departureDate(minuteOfDay: Int, on day: Date) -> Date? {
+        let m = max(0, minuteOfDay)
+        return Calendar.current.date(bySettingHour: (m / 60) % 24, minute: m % 60, second: 0, of: day.startOfDay)
+    }
+
+    typealias CommuteLeg = (label: String, from: String, to: String, departure: Date?)
+
+    /// The commute legs a day's anchors require, each with its scheduled
+    /// departure on the plan date. Pure — split out of buildRequest so the
+    /// wiring (labels ↔ departures) is unit-testable without network.
+    static func commuteLegs(_ i: Inputs) -> [CommuteLeg] {
+        var legs: [CommuteLeg] = []
         let homeAddr = i.locations.first { $0.kind == .home }?.address ?? ""
         let gymAddr = i.locations.first { $0.kind == .gym }?.address ?? ""
+        func departure(for label: String) -> Date? {
+            guard let minute = legDepartureMinute(label: label, gymMinute: i.hasGym ? i.gymMinute : nil, events: i.events) else { return nil }
+            return departureDate(minuteOfDay: minute, on: i.planDate)
+        }
         if i.hasGym, !homeAddr.isEmpty, !gymAddr.isEmpty {
-            legs.append(("Home→Gym", homeAddr, gymAddr))
-            legs.append(("Gym→Home", gymAddr, homeAddr))
+            legs.append(("Home→Gym", homeAddr, gymAddr, departure(for: "Home→Gym")))
+            legs.append(("Gym→Home", gymAddr, homeAddr, departure(for: "Gym→Home")))
         }
         for e in i.events where !e.destinationAddress.isEmpty {
             let fromAddr = i.locations.first { $0.kind == e.outboundStart }?.address ?? homeAddr
             if !fromAddr.isEmpty {
-                legs.append(("\(e.outboundStart.rawValue)→\(e.title)", fromAddr, e.destinationAddress))
+                let label = "\(e.outboundStart.rawValue)→\(e.title)"
+                legs.append((label, fromAddr, e.destinationAddress, departure(for: label)))
             }
             if !homeAddr.isEmpty {
-                legs.append(("\(e.title)→Home", e.destinationAddress, homeAddr))
+                let label = "\(e.title)→Home"
+                legs.append((label, e.destinationAddress, homeAddr, departure(for: label)))
             }
         }
-        let commutes = await GoogleMapsService.commuteEstimates(legs: legs)
+        return legs
+    }
+
+    private static func buildRequest(_ i: Inputs) async -> PlanRequest {
+        let commutes = await GoogleMapsService.commuteEstimates(legs: commuteLegs(i))
 
         return PlanRequest(
             userMessage: i.userMessage,

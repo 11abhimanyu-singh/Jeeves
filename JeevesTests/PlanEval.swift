@@ -47,6 +47,7 @@ final class PlanEval: XCTestCase {
             Scenario(name: "Normal rest day", userMessage: "", hasGym: false, gym: nil, events: [], now: morning, showSchedule: false),
             Scenario(name: "Morning gym (11:00)", userMessage: "", hasGym: true, gym: 11 * 60, events: [], now: morning, showSchedule: false),
             Scenario(name: "Evening gym (17:00)", userMessage: "", hasGym: true, gym: 17 * 60, events: [], now: morning, showSchedule: false),
+            Scenario(name: "Late gym (19:00) — routine must not compress", userMessage: "", hasGym: true, gym: 19 * 60, events: [], now: morning, showSchedule: true),
             Scenario(name: "Midday event + gym", userMessage: "", hasGym: true, gym: 11 * 60,
                      events: [event(today, 14 * 60, 15 * 60, "Dr Sree Lakshmi")], now: morning, showSchedule: false),
             Scenario(name: "Evening event", userMessage: "", hasGym: false, gym: nil,
@@ -94,6 +95,15 @@ final class PlanEval: XCTestCase {
                 print("   --- schedule ---")
                 for blk in plan.blocks { print("     \(blk.startTime)–\(blk.endTime)  \(blk.title) [\(blk.kind)]") }
                 if !plan.dropped.isEmpty { print("     dropped: \(plan.dropped.joined(separator: ", "))") }
+            }
+            // Hard gate for the pinned-workout regression: after the generate-
+            // with-repair loop, a gym-day plan must never compress the lift.
+            if s.name.contains("must not compress"), !result.isOffline {
+                let lifting = plan.blocks.first {
+                    $0.kind.lowercased() == "gym" && ($0.title.localizedCaseInsensitiveContains("weight") || $0.title.localizedCaseInsensitiveContains("lift"))
+                }
+                let duration = lifting.flatMap { b in b.startMinute.flatMap { s in b.endMinute.map { $0 - s } } }
+                XCTAssertEqual(duration, 70, "\(s.name): weightlifting must be exactly 70 min, got \(String(describing: duration))")
             }
         }
 

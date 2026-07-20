@@ -132,7 +132,8 @@ struct DayPlannerView: View {
                 gymMinute: gymMinute,
                 events: dayEvents,
                 locations: locations,
-                prepSessions: prepSessions
+                prepSessions: prepSessions,
+                planDate: date
             ))
             // Commit to this date's plan state so it persists and displays here.
             let state = planState(for: date) ?? {

@@ -157,7 +157,7 @@ enum PlanGenerationService {
 
         s += "DAY WINDOW:\n"
         s += "- The productive window is 08:00 to the 20:30 hard boundary — EVERY day, including event days.\n"
-        s += "- Sleep is a FIXED 8-hour anchor from 23:00 to 07:00 (11 PM–7 AM) — always the final block of the day (kind \"sleep\", isAnchor true, startTime 23:00, endTime 07:00). No WORK is scheduled after the 20:30 boundary; fill the evening 20:30–23:00 with a single wind-down / personal-time block (kind \"free\") leading into sleep.\n"
+        s += "- Sleep is a FIXED 8-hour anchor from 23:00 to 07:00 (11 PM–7 AM) — always the final block of the day (kind \"sleep\", isAnchor true, startTime 23:00, endTime 07:00). No WORK is scheduled after the 20:30 boundary — but the gym routine, events, and their commutes follow their real times and may run later. Fill whatever remains of the evening (from the last block, or 20:30) up to 23:00 with a single wind-down / personal-time block (kind \"free\") leading into sleep.\n"
         if !req.events.isEmpty {
             s += "- Events are FIXED ANCHORS you schedule work AROUND, not a wall that ends the day. Each event is an out-and-back trip: leave in time, attend, return home. Fill EVERY free window with productive work — before the first event, between events, and (crucially) AFTER you return home from an event, right up to 20:30.\n"
             s += "- Do NOT drop work just because it doesn't fit before an event. A midday event (e.g. a 2 PM appointment) leaves the whole afternoon and evening free after you return — use it. The ONLY time post-event hours are unavailable is when the event itself runs so late that you get home near or after 20:30.\n"
@@ -177,7 +177,7 @@ enum PlanGenerationService {
 
         s += "TODAY'S ANCHORS:\n"
         if req.hasGymToday, let g = req.gymMinute {
-            s += "- Gym: weightlifting starts at \(hhmm(g)). Gym routine is mobility, weightlifting, cardio. The shower is at HOME after returning from the gym — NOT at the gym — unless you're chaining directly from the gym to an event (then shower at the gym to skip the trip home). Gym routing is always Home → Gym → Home unless chaining to an adjacent event makes Gym → Event sensible.\n"
+            s += "- Gym: weightlifting starts at \(hhmm(g)). Gym routine is mobility, weightlifting, cardio, with FIXED durations: Mobility 20 min, Weightlifting 70 min, Cardio 35 min. NEVER compress or extend these — the workout is the workout; a late gym runs past 20:30 rather than shrinking (the 20:30 boundary applies to WORK, and the gym is a fixed personal commitment like an event). The shower is at HOME after returning from the gym (20 min) — NOT at the gym — unless you're chaining directly from the gym to an event (then shower at the gym to skip the trip home). Gym routing is always Home → Gym → Home unless chaining to an adjacent event makes Gym → Event sensible.\n"
             let midpoint = (Baseline.dayStartMinute + Baseline.normalBoundaryMinute) / 2   // 14:15
             if g >= midpoint {
                 s += "- The gym is in the SECOND half of the day (weightlifting at/after \(hhmm(midpoint))), so ALSO add a 20-min morning shower in the morning routine — the user shouldn't go the whole day unshowered. The main shower still happens at home in the evening after the gym (also 20 min).\n"

@@ -319,7 +319,8 @@ struct JeevesChatView: View {
                 gymMinute: todayPlanState?.gymMinute,
                 events: planEvents,
                 locations: locations,
-                prepSessions: prepSessions
+                prepSessions: prepSessions,
+                planDate: today
             ))
             // 3. COMMIT it to the Day Planner for today so it persists across
             //    launches and shows on the planner — not just here in chat.
