@@ -50,9 +50,14 @@ final class PlanEval: XCTestCase {
         print("\n=========== PLAN EVAL (judge: \(OpenAIJudgeService.model)) ===========")
 
         for s in scenarios {
-            guard let plan = try? await PlanGenerationService.generate(s.request) else {
-                print("[\(s.name)] generation FAILED"); continue
-            }
+            // Use the real guardrailed path (validator + one repair retry, with
+            // deterministic fallback) so a transient failure can't drop a
+            // scenario, and we eval exactly what the user actually gets.
+            let result = await PlanCoordinator.generate(.init(
+                hasGym: s.request.hasGymToday, gymMinute: s.request.gymMinute,
+                events: s.request.events, locations: [], prepSessions: []
+            ))
+            let plan = result.plan
             // Free structural check first.
             let severe = PlanValidation.severe(plan, request: s.request)
             // Independent quality judge.
