@@ -10,6 +10,11 @@ import SwiftData
 
 @main
 struct JeevesApp: App {
+    init() {
+        // Show reminders even while the app is open.
+        NotificationService.configure()
+    }
+
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             CheckIn.self,

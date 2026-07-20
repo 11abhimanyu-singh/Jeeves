@@ -15,6 +15,7 @@ import SwiftData
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var locations: [SavedLocation]
+    @Query private var dailyPlans: [DailyPlanState]
 
     @AppStorage(NotificationService.enabledKey) private var remindersEnabled = true
 
@@ -110,11 +111,35 @@ struct SettingsView: View {
                         NotificationService.clearAll()
                     }
                 }
+            Button {
+                Task { await NotificationService.sendTestReminder(body: nextTaskBody()) }
+            } label: {
+                Label("Send me a test reminder (5s)", systemImage: "bell.badge")
+                    .foregroundStyle(Color.accentDeep)
+            }
+            .disabled(!remindersEnabled)
         } header: {
             Text("Reminders")
         } footer: {
-            Text("On-device reminders at each commute, gym, and event in your day plan — no account or server needed. You'll be asked to allow notifications the first time a plan is made.")
+            Text("On-device reminders at each commute, gym, and event in your day plan — no account or server needed. You'll be asked to allow notifications the first time a plan is made. Tap the button and background the app to see one fire in ~5 seconds.")
         }
+    }
+
+    /// The next upcoming task in today's committed plan, for the test reminder.
+    private func nextTaskBody() -> String {
+        let today = Date().startOfDay
+        let cal = Calendar.current
+        let nowMinute = cal.component(.hour, from: Date()) * 60 + cal.component(.minute, from: Date())
+        if let plan = dailyPlans.first(where: { $0.date == today })?.plan,
+           let next = plan.blocks
+               .compactMap({ b -> (Int, String)? in
+                   guard let s = b.startMinute, s >= nowMinute else { return nil }
+                   return (s, b.title)
+               })
+               .min(by: { $0.0 < $1.0 }) {
+            return "Time to start: \(next.1) at \(String(format: "%02d:%02d", next.0 / 60, next.0 % 60))"
+        }
+        return "Time to start your next task — open Jeeves and plan your day."
     }
 
     // MARK: Saved locations

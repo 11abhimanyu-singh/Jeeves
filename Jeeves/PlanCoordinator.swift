@@ -19,6 +19,7 @@ enum PlanCoordinator {
         var events: [DailyEvent]
         var locations: [SavedLocation]
         var prepSessions: [PrepSession]
+        var referenceNow: Date? = nil   // pinned "now" for evals; nil = real clock
     }
 
     struct Result {
@@ -90,7 +91,8 @@ enum PlanCoordinator {
             locations: i.locations,
             defaultCommuteMinutes: 30,
             commuteEstimates: commutes,
-            prepNeglectNote: prepNeglectNote(i.prepSessions)
+            prepNeglectNote: prepNeglectNote(i.prepSessions),
+            referenceNow: i.referenceNow
         )
     }
 

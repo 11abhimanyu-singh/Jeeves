@@ -42,10 +42,14 @@ enum JeevesChatService {
 
     /// The model has no clock of its own; give it the device's current date so
     /// it can answer "what's today" and resolve relative dates correctly.
-    static func dateContext() -> String {
+    static func dateContext() -> String { dateContext(for: Date()) }
+
+    /// Overridable "now" — the app passes the real clock; evals pass a fixed
+    /// time so plans don't drift with when the test happens to run.
+    static func dateContext(for date: Date) -> String {
         let f = DateFormatter()
         f.dateFormat = "EEEE, d MMMM yyyy, h:mm a"
-        return "The current date and time on the user's device is \(f.string(from: Date()))."
+        return "The current date and time on the user's device is \(f.string(from: date))."
     }
 
     private static let systemPrompt = """

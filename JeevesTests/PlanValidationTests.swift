@@ -62,6 +62,22 @@ final class PlanValidationTests: XCTestCase {
         XCTAssertTrue(PlanValidation.severe(plan, request: request()).contains { $0.message.contains("past 20:30") })
     }
 
+    func testLunchPastDeadlineIsSevere() {
+        let plan = GeneratedPlan(
+            blocks: [b("Interview prep — Reading", "08:00", "09:30", anchor: true),
+                     b("Lunch", "16:45", "17:30", kind: "lunch")],
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        XCTAssertTrue(PlanValidation.severe(plan, request: request()).contains { $0.message.contains("14:30") })
+    }
+
+    func testLunchBeforeDeadlineIsFine() {
+        let plan = GeneratedPlan(
+            blocks: [b("Interview prep — Reading", "08:00", "09:30", anchor: true),
+                     b("Lunch", "13:00", "13:45", kind: "lunch")],
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        XCTAssertFalse(PlanValidation.severe(plan, request: request()).contains { $0.message.contains("14:30") })
+    }
+
     func testMissingLunchIsSevere() {
         let plan = GeneratedPlan(
             blocks: [b("Job applications", "09:00", "10:30")],

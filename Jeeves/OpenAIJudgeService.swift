@@ -26,8 +26,9 @@ enum OpenAIJudgeError: LocalizedError {
 
 enum OpenAIJudgeService {
     private static let endpoint = URL(string: "https://api.openai.com/v1/chat/completions")!
-    // Configurable — any current chat model works as a judge.
-    static let model = "gpt-4o"
+    // Configurable judge model. Note: gpt-5-mini only supports the default
+    // temperature, so we omit the temperature param entirely (works across models).
+    static let model = "gpt-5-mini"
 
     /// A 0–1 score per criterion plus an overall and the judge's reasoning.
     struct Verdict: Decodable {
@@ -46,7 +47,6 @@ enum OpenAIJudgeService {
 
         let body: [String: Any] = [
             "model": model,
-            "temperature": 0,
             "response_format": ["type": "json_object"],
             "messages": [
                 ["role": "system", "content": systemPrompt],

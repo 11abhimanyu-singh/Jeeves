@@ -14,8 +14,37 @@
 import Foundation
 import UserNotifications
 
+/// Makes reminders appear as banners even while the app is open (iOS hides them
+/// in-foreground by default). Set once at launch.
+final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = NotificationDelegate()
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound, .list])
+    }
+}
+
 enum NotificationService {
     static let enabledKey = "jeeves.remindersEnabled"
+
+    /// Call once at app launch so reminders show while the app is in the foreground.
+    static func configure() {
+        UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
+    }
+
+    /// Fires a reminder ~5s from now so the user can see reminders actually work
+    /// on-device (there's no way to push to a physical device from a dev Mac).
+    static func sendTestReminder(body: String) async {
+        guard await ensureAuthorized() else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Jeeves"
+        content.body = body
+        content.sound = .default
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 5, repeats: false)
+        let request = UNNotificationRequest(identifier: "jeeves-test-\(UUID().uuidString)", content: content, trigger: trigger)
+        try? await UNUserNotificationCenter.current().add(request)
+    }
 
     static var remindersEnabled: Bool {
         // Default on — a plan without reminders isn't much of a plan.

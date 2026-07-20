@@ -26,6 +26,7 @@ struct PlanRequest {
     var defaultCommuteMinutes: Int     // fallback when a real Maps time isn't available
     var commuteEstimates: [String: Int] // "From→To" → minutes (real, from Google Maps when available)
     var prepNeglectNote: String?       // e.g. "Fewest sessions this week: Behavioral, then Strategy"
+    var referenceNow: Date? = nil      // pinned "now" for evals; nil = real device clock
 }
 
 enum PlanGenerationError: LocalizedError {
@@ -130,7 +131,7 @@ enum PlanGenerationService {
     private static func userPrompt(_ req: PlanRequest) -> String {
         var s = ""
 
-        s += JeevesChatService.dateContext() + "\n\n"
+        s += JeevesChatService.dateContext(for: req.referenceNow ?? Date()) + "\n\n"
         s += "TODAY'S REQUEST FROM THE USER:\n\(req.userMessage.isEmpty ? "(no extra context — plan a normal day)" : req.userMessage)\n\n"
 
         s += "BASELINE ROUTINE (movable blocks, each with a priority tier):\n"

@@ -57,7 +57,11 @@ enum PlanValidation {
                 out.append(Violation(severity: .severe, message: "Must-do dropped: \(d)"))
             }
         }
-        if !plan.blocks.contains(where: { $0.kind.lowercased() == "lunch" || $0.title.localizedCaseInsensitiveContains("lunch") }) {
+        if let lunch = timed.first(where: { $0.block.kind.lowercased() == "lunch" || $0.block.title.localizedCaseInsensitiveContains("lunch") }) {
+            if lunch.start > 14 * 60 + 30 {
+                out.append(Violation(severity: .severe, message: "Lunch starts at \(hhmm(lunch.start)) — past the 14:30 Must-do deadline"))
+            }
+        } else {
             out.append(Violation(severity: .severe, message: "Lunch (a Must-do) is missing from the plan"))
         }
 
