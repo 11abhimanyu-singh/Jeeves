@@ -28,15 +28,37 @@ enum PlanCoordinator {
     }
 
     /// Generates a plan, preferring Claude and falling back to the deterministic
-    /// engine if the API is unreachable or errors.
+    /// engine if the API is unreachable or errors. The Claude plan is validated
+    /// against the scheduler's rules; a plan with a SEVERE violation (dropped
+    /// Must-do, wasted afternoon, overlap, out-of-bounds work) is retried once
+    /// with the problems fed back, and the cleaner of the two is kept.
     static func generate(_ inputs: Inputs) async -> Result {
         let request = await buildRequest(inputs)
-        do {
-            let plan = try await PlanGenerationService.generate(request)
-            return Result(plan: plan, isOffline: false, error: nil)
-        } catch {
-            return Result(plan: deterministic(inputs), isOffline: true, error: error.localizedDescription)
+
+        guard let first = try? await PlanGenerationService.generate(request) else {
+            return Result(plan: deterministic(inputs), isOffline: true, error: "planning service unreachable")
         }
+        let firstViolations = PlanValidation.severe(first, request: request)
+        if firstViolations.isEmpty {
+            return Result(plan: first, isOffline: false, error: nil)
+        }
+
+        // One repair pass: tell the model exactly what was wrong.
+        let repairRequest = requestWithCorrections(request, violations: firstViolations)
+        guard let repaired = try? await PlanGenerationService.generate(repairRequest) else {
+            return Result(plan: first, isOffline: false, error: nil) // keep the first plan if the retry can't run
+        }
+        let repairedViolations = PlanValidation.severe(repaired, request: request)
+        let best = repairedViolations.count <= firstViolations.count ? repaired : first
+        return Result(plan: best, isOffline: false, error: nil)
+    }
+
+    private static func requestWithCorrections(_ req: PlanRequest, violations: [PlanValidation.Violation]) -> PlanRequest {
+        var r = req
+        let list = violations.map { "- \($0.message)" }.joined(separator: "\n")
+        let prefix = req.userMessage.isEmpty ? "" : req.userMessage + "\n\n"
+        r.userMessage = prefix + "IMPORTANT: your previous plan for this day broke these rules. Produce a corrected plan that fixes ALL of them:\n\(list)"
+        return r
     }
 
     // MARK: Request assembly (live Maps commute legs)
