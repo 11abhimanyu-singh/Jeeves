@@ -156,7 +156,7 @@ enum PlanGenerationService {
 
         s += "DAY WINDOW:\n"
         s += "- The productive window is 08:00 to the 20:30 hard boundary — EVERY day, including event days.\n"
-        s += "- Sleep is a FIXED anchor at 23:00 (11 PM) — always the final block of the day (kind \"sleep\", isAnchor true, e.g. 23:00–23:30). No WORK is scheduled after the 20:30 boundary; fill the evening 20:30–23:00 with a single wind-down / personal-time block (kind \"free\") leading into sleep.\n"
+        s += "- Sleep is a FIXED 8-hour anchor from 23:00 to 07:00 (11 PM–7 AM) — always the final block of the day (kind \"sleep\", isAnchor true, startTime 23:00, endTime 07:00). No WORK is scheduled after the 20:30 boundary; fill the evening 20:30–23:00 with a single wind-down / personal-time block (kind \"free\") leading into sleep.\n"
         if !req.events.isEmpty {
             s += "- Events are FIXED ANCHORS you schedule work AROUND, not a wall that ends the day. Each event is an out-and-back trip: leave in time, attend, return home. Fill EVERY free window with productive work — before the first event, between events, and (crucially) AFTER you return home from an event, right up to 20:30.\n"
             s += "- Do NOT drop work just because it doesn't fit before an event. A midday event (e.g. a 2 PM appointment) leaves the whole afternoon and evening free after you return — use it. The ONLY time post-event hours are unavailable is when the event itself runs so late that you get home near or after 20:30.\n"
@@ -228,7 +228,7 @@ enum PlanGenerationService {
         - Times are 24-hour "HH:MM". Blocks must be in chronological order and must not overlap.
         - kind is one of: "activity", "commute", "gym", "event", "lunch", "free", "sleep".
         - Mark gym sub-blocks, events, the morning peak-focus reading, and Sleep as isAnchor: true.
-        - Always end the day with a {"kind":"sleep","title":"Sleep","startTime":"23:00","endTime":"23:30","isAnchor":true} block.
+        - Always end the day with a {"kind":"sleep","title":"Sleep","startTime":"23:00","endTime":"07:00","isAnchor":true} block.
         - boundaryTime is the hard boundary in force (20:30 on a normal day, else the departure time).
         - dropped/shrunk list the human-readable names; leave them as [] if nothing was dropped/shrunk.
         - Fill leftover time before the boundary with a {"kind":"free","title":"Free time",...} block rather than leaving gaps.

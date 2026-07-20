@@ -169,7 +169,7 @@ enum DayPlanner {
         if sleepMinute - windDownStart >= minDiscretionaryMinutes {
             blocks.append(PlanBlock(title: "Wind-down / personal time", startMinute: windDownStart, durationMinutes: sleepMinute - windDownStart, note: "Evening — no scheduled work", isAnchor: false))
         }
-        blocks.append(PlanBlock(title: "Sleep", startMinute: sleepMinute, durationMinutes: 30, note: "Bedtime — 11 PM", isAnchor: true))
+        blocks.append(PlanBlock(title: "Sleep", startMinute: sleepMinute, durationMinutes: 8 * 60, note: "11 PM – 7 AM", isAnchor: true))
     }
 
     /// Splits the 120-min practice block across the 4 categories, weighting
