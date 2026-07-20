@@ -54,7 +54,7 @@ struct GeneratedBlock: Codable {
     let endTime: String         // "HH:MM"
     let note: String?
     let isAnchor: Bool
-    let kind: String            // "activity" | "commute" | "gym" | "event" | "lunch" | "free"
+    let kind: String            // "activity" | "commute" | "gym" | "event" | "lunch" | "free" | "sleep"
 
     var startMinute: Int? { Self.minutes(from: startTime) }
     var endMinute: Int? { Self.minutes(from: endTime) }

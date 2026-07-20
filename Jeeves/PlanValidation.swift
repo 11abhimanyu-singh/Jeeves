@@ -38,9 +38,12 @@ enum PlanValidation {
                 message: "\"\(b.block.title)\" (\(b.block.startTime)) overlaps \"\(a.block.title)\" (ends \(a.block.endTime))"))
         }
 
-        // 2. Non-event/commute work stays inside 08:00–20:30. Events (and the
-        //    commutes to/from them) follow their real times and may run later.
-        for t in timed where !["event", "commute"].contains(t.block.kind.lowercased()) {
+        // 2. Productive work stays inside 08:00–20:30. Events (and the commutes
+        //    to/from them) follow their real times; the evening wind-down (free)
+        //    and Sleep at 23:00 legitimately live after the boundary — so the
+        //    check applies only to the genuinely productive kinds.
+        let productive: Set<String> = ["activity", "gym", "lunch"]
+        for t in timed where productive.contains(t.block.kind.lowercased()) {
             if t.start < dayStart {
                 out.append(Violation(severity: .severe, message: "\"\(t.block.title)\" starts before 08:00"))
             }

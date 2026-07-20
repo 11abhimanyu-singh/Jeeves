@@ -40,7 +40,8 @@ struct PlanBlock: Identifiable {
 
 enum DayPlanner {
     static let dayStartMinute = 8 * 60          // 8:00 AM
-    static let dayEndMinute = 20 * 60 + 30       // 8:30 PM
+    static let dayEndMinute = 20 * 60 + 30       // 8:30 PM — end of the productive window
+    static let sleepMinute = 23 * 60             // 11:00 PM — fixed bedtime anchor
     static let photographyMinutes = 30
     static let lunchDeadlineMinute = 14 * 60 + 30 // 2:30 PM — Lunch must start at or before this
     // Below this, a leftover gap isn't worth scheduling as an activity — a
@@ -96,6 +97,7 @@ enum DayPlanner {
                 blocks.append(PlanBlock(title: "Discretionary time", startMinute: cursor, durationMinutes: slack, note: "Suggested: \(suggested.rawValue) — least recently logged", isAnchor: false, leisureActivity: suggested))
                 cursor += slack
             }
+            appendEvening(&blocks, from: cursor)
             return blocks
         }
 
@@ -154,7 +156,20 @@ enum DayPlanner {
             gymCursor += postGymSlack
         }
 
+        appendEvening(&blocks, from: gymCursor)
         return blocks
+    }
+
+    /// Caps every day the same way: a wind-down / personal-time block from the
+    /// end of the productive window (20:30) to the fixed 23:00 bedtime, then a
+    /// Sleep anchor. Work never runs past 20:30, but the evening is real time
+    /// the user still lives in — and Sleep gets a reminder like any anchor.
+    private static func appendEvening(_ blocks: inout [PlanBlock], from lastEnd: Int) {
+        let windDownStart = min(lastEnd, sleepMinute)
+        if sleepMinute - windDownStart >= minDiscretionaryMinutes {
+            blocks.append(PlanBlock(title: "Wind-down / personal time", startMinute: windDownStart, durationMinutes: sleepMinute - windDownStart, note: "Evening — no scheduled work", isAnchor: false))
+        }
+        blocks.append(PlanBlock(title: "Sleep", startMinute: sleepMinute, durationMinutes: 30, note: "Bedtime — 11 PM", isAnchor: true))
     }
 
     /// Splits the 120-min practice block across the 4 categories, weighting

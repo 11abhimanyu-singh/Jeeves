@@ -60,6 +60,24 @@ final class DayPlannerTests: XCTestCase {
         assertNoOverlaps(DayPlanner.generate(gymMinute: nil, prepSessions: [], leisureLogs: []))
     }
 
+    /// Every day — rest or gym — ends with a fixed Sleep anchor at 11 PM, and
+    /// no productive work is scheduled past the 20:30 boundary.
+    func testEveryDayEndsWithSleepAtEleven() {
+        for gym: Int? in [nil, 11 * 60, 17 * 60] {
+            let blocks = DayPlanner.generate(gymMinute: gym, prepSessions: [], leisureLogs: [])
+            let sleep = block("Sleep", in: blocks)
+            XCTAssertNotNil(sleep, "gym \(String(describing: gym)): day should end with Sleep")
+            XCTAssertEqual(sleep?.startMinute, DayPlanner.sleepMinute, "Sleep starts at 23:00")
+            XCTAssertTrue(sleep?.isAnchor ?? false, "Sleep is a fixed anchor")
+            XCTAssertEqual(blocks.map(\.startMinute).max(), sleep?.startMinute, "nothing starts after Sleep")
+            // No productive work past 20:30 (wind-down/sleep may run later).
+            let productive = Set(["Interview prep — Reading", "Job applications", "Reading (habit)", "Lunch", "Chore buffer", "Chores", "Photography"])
+            for b in blocks where productive.contains(b.title) {
+                XCTAssertLessThanOrEqual(b.endMinute, DayPlanner.dayEndMinute, "'\(b.title)' runs past 20:30")
+            }
+        }
+    }
+
     // MARK: Shower rule — morning shower on a second-half gym day
 
     func testFirstHalfGymHasOnlyPostGymShower() {

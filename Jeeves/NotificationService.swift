@@ -53,20 +53,34 @@ enum NotificationService {
 
     // MARK: Pure helpers (unit-tested)
 
-    /// Which blocks are worth a reminder — anchors (events, gym, focus reading)
-    /// plus commute departures. Filler like "Free time" is skipped.
+    /// Which blocks are worth a reminder — anchors (events, gym, focus reading,
+    /// sleep) plus commute departures. Filler like "Free time" is skipped.
     static func shouldRemind(_ block: GeneratedBlock) -> Bool {
         if block.isAnchor { return true }
-        return ["commute", "event", "gym"].contains(block.kind.lowercased())
+        return ["commute", "event", "gym", "sleep"].contains(block.kind.lowercased())
     }
 
-    /// The reminder text for a block.
+    /// Minutes of lead time before a block's start that its reminder fires.
+    /// Events and sleep get a 15-minute heads-up so you can wrap up and head
+    /// out (or wind down); everything else reminds right at its start time.
+    static func leadMinutes(for block: GeneratedBlock) -> Int {
+        ["event", "sleep"].contains(block.kind.lowercased()) ? 15 : 0
+    }
+
+    /// The reminder text for a block. Events/sleep fire 15 min early, so their
+    /// copy says so.
     static func reminderBody(for block: GeneratedBlock) -> String {
         switch block.kind.lowercased() {
         case "commute": return "Time to leave — \(block.title)"
-        case "event":   return "\(block.title) — starting now"
+        case "event":   return "In 15 min: \(block.title)\(startLabel(block).map { " at \($0)" } ?? "")"
+        case "sleep":   return "Wind down — bedtime in 15 min"
         default:        return block.title
         }
+    }
+
+    private static func startLabel(_ block: GeneratedBlock) -> String? {
+        guard let s = block.startMinute else { return nil }
+        return String(format: "%02d:%02d", s / 60, s % 60)
     }
 
     // MARK: Scheduling
@@ -91,9 +105,10 @@ enum NotificationService {
 
         for block in plan.blocks {
             guard shouldRemind(block), let start = block.startMinute else { continue }
+            let fireMinute = max(0, start - leadMinutes(for: block))
             var comps = dayComps
-            comps.hour = start / 60
-            comps.minute = start % 60
+            comps.hour = fireMinute / 60
+            comps.minute = fireMinute % 60
             guard let fireDate = cal.date(from: comps), fireDate > now else { continue }
 
             let content = UNMutableNotificationContent()

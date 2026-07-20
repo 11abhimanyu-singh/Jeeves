@@ -33,8 +33,22 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertEqual(NotificationService.reminderBody(for: block("commute", isAnchor: false, title: "Commute to gym")),
                        "Time to leave — Commute to gym")
         XCTAssertEqual(NotificationService.reminderBody(for: block("event", isAnchor: true, title: "Baithak")),
-                       "Baithak — starting now")
+                       "In 15 min: Baithak at 09:00")
         XCTAssertEqual(NotificationService.reminderBody(for: block("gym", isAnchor: true, title: "Weightlifting")),
                        "Weightlifting")
+    }
+
+    func testEventsAndSleepRemindFifteenMinutesEarly() {
+        XCTAssertEqual(NotificationService.leadMinutes(for: block("event", isAnchor: true)), 15)
+        XCTAssertEqual(NotificationService.leadMinutes(for: block("sleep", isAnchor: true)), 15)
+        // Everything else reminds right at its start time.
+        XCTAssertEqual(NotificationService.leadMinutes(for: block("commute", isAnchor: false)), 0)
+        XCTAssertEqual(NotificationService.leadMinutes(for: block("gym", isAnchor: true)), 0)
+    }
+
+    func testSleepGetsAReminder() {
+        XCTAssertTrue(NotificationService.shouldRemind(block("sleep", isAnchor: true)))
+        XCTAssertEqual(NotificationService.reminderBody(for: block("sleep", isAnchor: true, title: "Sleep")),
+                       "Wind down — bedtime in 15 min")
     }
 }
