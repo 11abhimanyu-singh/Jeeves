@@ -95,9 +95,9 @@ enum OpenAIJudgeService {
     private static func userPrompt(plan: GeneratedPlan, scenario: String) -> String {
         var s = "SCENARIO:\n\(scenario)\n\n"
         s += "THE SCHEDULER'S RULES:\n"
-        s += "- Productive window is 08:00–20:30 every day. Interview prep — Reading (90 min) is a Must-do at the 08:00 peak slot; Lunch is a Must-do by 14:30. Must-dos are NEVER dropped.\n"
-        s += "- Events (appointments, shows) are fixed anchors you work AROUND — leave, attend, return home — and the day continues after you return, up to 20:30. A midday event must NOT cause the afternoon to be discarded.\n"
-        s += "- Drop order when the day is full: Flexible first, then Important, never Must-do. Better to shrink than drop; report drops/shrinks.\n"
+        s += "- Productive window is 08:00–20:30. Interview prep — Reading (90 min) is a Must-do that belongs at the 08:00 peak slot ONLY WHEN THE MORNING IS FREE. If an event (e.g. overnight travel) occupies the morning, Reading correctly moves to the first free slot afterward — do NOT penalize that. Lunch is a Must-do by 14:30 unless the user is out/travelling over lunch. Must-dos are NEVER dropped.\n"
+        s += "- Events (appointments, shows, travel) are fixed anchors you work AROUND. 'Using the full day' means using all AVAILABLE time, not literally 08:00–20:30: if travel or an event blocks part of the day, that time is unavailable and must NOT be counted against the plan. A midday event must not cause the remaining afternoon to be discarded.\n"
+        s += "- Drop order when the day is full: Flexible first (Chores, Chore buffer, Photography, discretionary), then Important, never Must-do. Important items shouldn't be shrunk below 50% — dropping one Important item to keep the rest at full length is CORRECT, not a fault. Photography is flexible, not a fixed end-of-day block.\n"
         s += "- Reason like a human: chain adjacent trips (gym→event directly), use on-site facilities (shower at gym before an event), relocate flexible activities sensibly.\n\n"
         s += "THE PLAN TO SCORE:\n"
         for b in plan.blocks {

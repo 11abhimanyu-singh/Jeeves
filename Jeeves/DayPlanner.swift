@@ -74,6 +74,8 @@ enum DayPlanner {
         let choresEnd = cursor
 
         // Movable, fixed-duration queue — order matters, it's the fill order.
+        // Photography is now a flexible queue item (dropped first if the day is
+        // full), not a fixed end-of-day anchor.
         var queue: [QueueItem] = [
             ("Job applications", 90, nil, nil),
             ("Reading (habit)", 90, nil, nil),
@@ -81,20 +83,19 @@ enum DayPlanner {
             ("Chore buffer", 30, nil, nil),
         ]
         queue.append(contentsOf: practiceQueue(from: prepSessions))
+        queue.append(("Photography", photographyMinutes, nil, nil))
 
         guard let gymMinute else {
-            // Rest day: drain the queue (Lunch still deadline-protected), fill leftover with discretionary time, Photography last.
+            // Rest day: drain the queue (Lunch still deadline-protected), fill leftover with discretionary time.
             let packed = packQueue(queue, cursor: cursor, pool: nil)
             blocks.append(contentsOf: packed.blocks)
             cursor = packed.cursor
-            let photographyStart = dayEndMinute - photographyMinutes
-            let slack = photographyStart - cursor
+            let slack = dayEndMinute - cursor
             if slack >= minDiscretionaryMinutes {
                 let suggested = mostNeglectedLeisure(leisureLogs: leisureLogs, excluding: .photography)
                 blocks.append(PlanBlock(title: "Discretionary time", startMinute: cursor, durationMinutes: slack, note: "Suggested: \(suggested.rawValue) — least recently logged", isAnchor: false, leisureActivity: suggested))
                 cursor += slack
             }
-            blocks.append(PlanBlock(title: "Photography", startMinute: photographyStart, durationMinutes: photographyMinutes, note: "Fixed end-of-day block", isAnchor: true, leisureActivity: .photography))
             return blocks
         }
 
@@ -139,22 +140,19 @@ enum DayPlanner {
         blocks.append(PlanBlock(title: "Shower", startMinute: gymCursor, durationMinutes: 20, note: nil, isAnchor: false))
         gymCursor += 20
 
-        let photographyStart = dayEndMinute - photographyMinutes
         for item in overflow {
-            // Don't pack past the fixed 20:00 Photography block — drop what
-            // won't fit rather than overlapping it.
-            guard gymCursor + item.minutes <= photographyStart else { continue }
+            // Don't pack past the 20:30 boundary — drop what won't fit.
+            guard gymCursor + item.minutes <= dayEndMinute else { continue }
             blocks.append(PlanBlock(title: item.title, startMinute: gymCursor, durationMinutes: item.minutes, note: item.note, isAnchor: false, prepCategory: item.category))
             gymCursor += item.minutes
         }
 
-        let postGymSlack = photographyStart - gymCursor
+        let postGymSlack = dayEndMinute - gymCursor
         if postGymSlack >= minDiscretionaryMinutes {
             let suggested = mostNeglectedLeisure(leisureLogs: leisureLogs, excluding: .photography)
             blocks.append(PlanBlock(title: "Discretionary time", startMinute: gymCursor, durationMinutes: postGymSlack, note: "Suggested: \(suggested.rawValue) — least recently logged", isAnchor: false, leisureActivity: suggested))
             gymCursor += postGymSlack
         }
-        blocks.append(PlanBlock(title: "Photography", startMinute: photographyStart, durationMinutes: photographyMinutes, note: "Fixed end-of-day block", isAnchor: true, leisureActivity: .photography))
 
         return blocks
     }

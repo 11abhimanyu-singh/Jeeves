@@ -148,12 +148,14 @@ enum PlanGenerationService {
         s += "PRIORITY RULES:\n"
         s += "- Anchors (gym, events) are fixed commitments and sit above all tiers — never move or drop them.\n"
         s += "- Tiers, drop order when things don't fit: Flexible first, then Important. NEVER drop Must-do.\n"
-        s += "- Only after dropping should you shrink survivors, proportionally, so the day fits exactly.\n"
+        s += "- Only after dropping should you shrink survivors so the day fits exactly.\n"
+        s += "- IMPORTANT-tier floor: never shrink an Important activity below 50% of its allocated time. If fitting the day would force any Important item below 50%, DROP one Important item entirely (vary which one day to day) so the rest run at full length. One activity done fully beats two done at 20 minutes each — you may even extend a surviving Important item into the freed time rather than leaving it idle.\n"
+        s += "- Photography is a FLEXIBLE, discretionary-level activity: place it in leftover time or drop it like any Flexible item. It is NOT pinned to the end of the day and has no special end-of-day slot.\n"
         s += "- Which item to drop/shrink first WITHIN a tier is your judgment (context-aware), not a fixed rule.\n"
         s += "- Always report what you dropped and shrank. Never silently omit anything.\n\n"
 
         s += "DAY WINDOW:\n"
-        s += "- The productive window is 08:00 to the 20:30 hard boundary — EVERY day, including event days. Photography is the fixed last block (20:00–20:30) if it survives.\n"
+        s += "- The productive window is 08:00 to the 20:30 hard boundary — EVERY day, including event days.\n"
         if !req.events.isEmpty {
             s += "- Events are FIXED ANCHORS you schedule work AROUND, not a wall that ends the day. Each event is an out-and-back trip: leave in time, attend, return home. Fill EVERY free window with productive work — before the first event, between events, and (crucially) AFTER you return home from an event, right up to 20:30.\n"
             s += "- Do NOT drop work just because it doesn't fit before an event. A midday event (e.g. a 2 PM appointment) leaves the whole afternoon and evening free after you return — use it. The ONLY time post-event hours are unavailable is when the event itself runs so late that you get home near or after 20:30.\n"

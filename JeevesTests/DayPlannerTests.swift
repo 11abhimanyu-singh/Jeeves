@@ -47,13 +47,13 @@ final class DayPlannerTests: XCTestCase {
         XCTAssertLessThanOrEqual(lunch!.startMinute, DayPlanner.lunchDeadlineMinute)
     }
 
-    func testRestDayPhotographyIsFixedLastBlock() {
+    func testRestDayPlacesPhotographyAsFlexible() {
+        // Photography is a flexible activity now — present on a light day, and
+        // NOT pinned to the end (it's no longer a fixed 20:00–20:30 anchor).
         let blocks = DayPlanner.generate(gymMinute: nil, prepSessions: [], leisureLogs: [])
         let photo = block("Photography", in: blocks)
-        XCTAssertNotNil(photo)
-        XCTAssertEqual(photo!.endMinute, DayPlanner.dayEndMinute)
-        let maxEnd = blocks.map(\.endMinute).max()
-        XCTAssertEqual(photo!.endMinute, maxEnd, "Nothing may be scheduled after Photography")
+        XCTAssertNotNil(photo, "a rest day has room for Photography")
+        XCTAssertFalse(photo?.isAnchor ?? true, "Photography is flexible, not an anchor")
     }
 
     func testRestDayHasNoOverlaps() {
