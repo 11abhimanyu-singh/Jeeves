@@ -148,6 +148,7 @@ enum PlanGenerationService {
         s += "PRIORITY RULES:\n"
         s += "- Anchors (gym, events) are fixed commitments and sit above all tiers — never move or drop them.\n"
         s += "- Tiers, drop order when things don't fit: Flexible first, then Important. NEVER drop Must-do.\n"
+        s += "- Lunch timing: NEVER before 12:30 (no late-morning brunch). Aim to FINISH lunch by 14:00; the hard latest start is 14:30. So the lunch window is 12:30–14:00 preferred, 14:30 at the very latest.\n"
         s += "- Only after dropping should you shrink survivors so the day fits exactly.\n"
         s += "- IMPORTANT-tier floor: never shrink an Important activity below 50% of its allocated time. If fitting the day would force any Important item below 50%, DROP one Important item entirely (vary which one day to day) so the rest run at full length. One activity done fully beats two done at 20 minutes each — you may even extend a surviving Important item into the freed time rather than leaving it idle.\n"
         s += "- Photography is a FLEXIBLE, discretionary-level activity: place it in leftover time or drop it like any Flexible item. It is NOT pinned to the end of the day and has no special end-of-day slot.\n"
@@ -179,7 +180,7 @@ enum PlanGenerationService {
             s += "- Gym: weightlifting starts at \(hhmm(g)). Gym routine is mobility, weightlifting, cardio. The shower is at HOME after returning from the gym — NOT at the gym — unless you're chaining directly from the gym to an event (then shower at the gym to skip the trip home). Gym routing is always Home → Gym → Home unless chaining to an adjacent event makes Gym → Event sensible.\n"
             let midpoint = (Baseline.dayStartMinute + Baseline.normalBoundaryMinute) / 2   // 14:15
             if g >= midpoint {
-                s += "- The gym is in the SECOND half of the day (weightlifting at/after \(hhmm(midpoint))), so ALSO add a short ~15-min morning shower in the morning routine — the user shouldn't go the whole day unshowered. The main shower still happens at home in the evening after the gym.\n"
+                s += "- The gym is in the SECOND half of the day (weightlifting at/after \(hhmm(midpoint))), so ALSO add a 20-min morning shower in the morning routine — the user shouldn't go the whole day unshowered. The main shower still happens at home in the evening after the gym (also 20 min).\n"
             } else {
                 s += "- The gym is in the first half of the day, so the shower at home after the gym is the only shower needed.\n"
             }

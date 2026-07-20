@@ -61,8 +61,14 @@ enum PlanValidation {
             }
         }
         if let lunch = timed.first(where: { $0.block.kind.lowercased() == "lunch" || $0.block.title.localizedCaseInsensitiveContains("lunch") }) {
+            // Window: 12:30 earliest, finish by 14:00 preferred, 14:30 hard latest start.
+            if lunch.start < 12 * 60 + 30 {
+                out.append(Violation(severity: .severe, message: "Lunch starts at \(hhmm(lunch.start)) — before the 12:30 earliest (no late-morning brunch)"))
+            }
             if lunch.start > 14 * 60 + 30 {
                 out.append(Violation(severity: .severe, message: "Lunch starts at \(hhmm(lunch.start)) — past the 14:30 Must-do deadline"))
+            } else if lunch.end > 14 * 60 {
+                out.append(Violation(severity: .quality, message: "Lunch finishes at \(hhmm(lunch.end)) — past the 14:00 finish preference"))
             }
         } else {
             out.append(Violation(severity: .severe, message: "Lunch (a Must-do) is missing from the plan"))

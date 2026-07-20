@@ -97,7 +97,7 @@ final class PlanValidationTests: XCTestCase {
         // Event 14:00–15:00, something dropped, nothing productive after → the bug.
         let plan = GeneratedPlan(
             blocks: [b("Interview prep — Reading", "08:00", "09:30", anchor: true),
-                     b("Lunch", "12:00", "12:45", kind: "lunch"),
+                     b("Lunch", "12:30", "13:00", kind: "lunch"),
                      b("Appt", "14:00", "15:00", anchor: true, kind: "event"),
                      b("Commute home", "15:00", "15:40", kind: "commute")],
             dropped: ["Job applications", "Reading habit"], shrunk: [], summary: "", boundaryTime: nil)
@@ -108,7 +108,7 @@ final class PlanValidationTests: XCTestCase {
     func testMiddayEventWithAfternoonWorkIsFine() {
         let plan = GeneratedPlan(
             blocks: [b("Interview prep — Reading", "08:00", "09:30", anchor: true),
-                     b("Lunch", "12:00", "12:45", kind: "lunch"),
+                     b("Lunch", "12:30", "13:00", kind: "lunch"),
                      b("Appt", "14:00", "15:00", anchor: true, kind: "event"),
                      b("Commute home", "15:00", "15:40", kind: "commute"),
                      b("Reading habit", "15:40", "17:10")],

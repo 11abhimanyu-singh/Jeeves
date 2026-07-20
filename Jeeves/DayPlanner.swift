@@ -43,7 +43,8 @@ enum DayPlanner {
     static let dayEndMinute = 20 * 60 + 30       // 8:30 PM — end of the productive window
     static let sleepMinute = 23 * 60             // 11:00 PM — fixed bedtime anchor
     static let photographyMinutes = 30
-    static let lunchDeadlineMinute = 14 * 60 + 30 // 2:30 PM — Lunch must start at or before this
+    static let lunchEarliestMinute = 12 * 60 + 30 // 12:30 PM — Lunch never starts before this
+    static let lunchDeadlineMinute = 14 * 60 + 30 // 2:30 PM — Lunch must start at or before this (finish by 14:00 preferred)
     // Below this, a leftover gap isn't worth scheduling as an activity — a
     // 1-minute "Discretionary time" block makes no sense, so we drop it and
     // leave the gap. Better to under-fill than to cram.
@@ -67,8 +68,8 @@ enum DayPlanner {
         // the day would otherwise start unshowered — add a short morning shower
         // (the post-gym shower still happens later).
         if let gymMinute, gymMinute >= (dayStartMinute + dayEndMinute) / 2 {
-            blocks.append(PlanBlock(title: "Shower", startMinute: cursor, durationMinutes: 15, note: "Morning shower — gym is later today", isAnchor: false))
-            cursor += 15
+            blocks.append(PlanBlock(title: "Shower", startMinute: cursor, durationMinutes: 20, note: "Morning shower — gym is later today", isAnchor: false))
+            cursor += 20
         }
         blocks.append(PlanBlock(title: "Chores", startMinute: cursor, durationMinutes: 40, note: nil, isAnchor: false))
         cursor += 40
@@ -78,9 +79,9 @@ enum DayPlanner {
         // Photography is now a flexible queue item (dropped first if the day is
         // full), not a fixed end-of-day anchor.
         var queue: [QueueItem] = [
-            ("Job applications", 90, nil, nil),
+            ("Job applications", 75, nil, nil),
             ("Reading (habit)", 90, nil, nil),
-            ("Lunch", 45, nil, nil),
+            ("Lunch", 30, nil, nil),
             ("Chore buffer", 30, nil, nil),
         ]
         queue.append(contentsOf: practiceQueue(from: prepSessions))
@@ -223,6 +224,13 @@ enum DayPlanner {
             if let pool, filled + item.minutes > pool {
                 overflow.append(item)
             } else {
+                // Lunch is never eaten before 12:30. On rest days (unbounded pool)
+                // hold with a short breather so lunch lands in its window; on gym
+                // days the pre-gym packing already seats it around the gym.
+                if item.title == "Lunch", pool == nil, cursor < lunchEarliestMinute {
+                    blocks.append(PlanBlock(title: "Free time", startMinute: cursor, durationMinutes: lunchEarliestMinute - cursor, note: "brief breather before lunch", isAnchor: false))
+                    cursor = lunchEarliestMinute
+                }
                 blocks.append(PlanBlock(title: item.title, startMinute: cursor, durationMinutes: item.minutes, note: item.note, isAnchor: false, prepCategory: item.category))
                 cursor += item.minutes
                 filled += item.minutes
