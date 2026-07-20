@@ -27,6 +27,9 @@ struct SettingsView: View {
     @State private var googleMapsInput = ""
     @State private var hasGoogleMaps = KeychainService.hasGoogleMapsAPIKey
 
+    @State private var openAIInput = ""
+    @State private var hasOpenAI = KeychainService.hasOpenAIAPIKey
+
     @State private var clientIDInput = ""
     @State private var hasClientID = KeychainService.hasGoogleClientID
     @State private var isCalendarConnected = KeychainService.isGoogleCalendarConnected
@@ -68,6 +71,17 @@ struct SettingsView: View {
                 explanation: "Optional — a fallback for covers/ISBNs when Open Library has no match. Enable the Books API in Google Cloud Console, then create a key.",
                 save: { KeychainService.saveGoogleBooksAPIKey($0) },
                 remove: { KeychainService.deleteGoogleBooksAPIKey() }
+            )
+            .listRowBackground(Color.surface)
+
+            keySection(
+                title: "OpenAI (ChatGPT)",
+                placeholder: "OpenAI API key (sk-…)",
+                input: $openAIInput,
+                hasKey: $hasOpenAI,
+                explanation: "Optional — used ONLY to run ChatGPT plan evals (an independent judge of Jeeves's plans). Never used to make plans. Needs billing enabled at platform.openai.com.",
+                save: { KeychainService.saveOpenAIAPIKey($0) },
+                remove: { KeychainService.deleteOpenAIAPIKey() }
             )
             .listRowBackground(Color.surface)
 

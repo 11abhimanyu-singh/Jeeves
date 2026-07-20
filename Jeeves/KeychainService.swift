@@ -77,6 +77,15 @@ enum KeychainService {
     static func deleteGoogleMapsAPIKey() { delete(account: googleMapsAccount) }
     static var hasGoogleMapsAPIKey: Bool { !(loadGoogleMapsAPIKey() ?? "").isEmpty }
 
+    // OpenAI — used only as an independent judge for plan evals (never for
+    // generating plans; that's Claude).
+    private static let openAIAccount = "openAIAPIKey"
+
+    static func saveOpenAIAPIKey(_ key: String) { save(key, account: openAIAccount) }
+    static func loadOpenAIAPIKey() -> String? { load(account: openAIAccount) }
+    static func deleteOpenAIAPIKey() { delete(account: openAIAccount) }
+    static var hasOpenAIAPIKey: Bool { !(loadOpenAIAPIKey() ?? "").isEmpty }
+
     // MARK: Google Calendar OAuth (iOS OAuth client ID + tokens)
 
     private static let googleClientIDAccount = "googleOAuthClientID"
