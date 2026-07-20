@@ -60,6 +60,21 @@ final class DayPlannerTests: XCTestCase {
         assertNoOverlaps(DayPlanner.generate(gymMinute: nil, prepSessions: [], leisureLogs: []))
     }
 
+    // MARK: Shower rule — morning shower on a second-half gym day
+
+    func testFirstHalfGymHasOnlyPostGymShower() {
+        let blocks = DayPlanner.generate(gymMinute: 11 * 60, prepSessions: [], leisureLogs: [])
+        XCTAssertEqual(blocks.filter { $0.title == "Shower" }.count, 1, "morning gym → one (post-gym) shower")
+    }
+
+    func testSecondHalfGymAddsMorningShower() {
+        let blocks = DayPlanner.generate(gymMinute: 17 * 60, prepSessions: [], leisureLogs: [])
+        let showers = blocks.filter { $0.title == "Shower" }
+        XCTAssertEqual(showers.count, 2, "evening gym → morning shower + post-gym shower")
+        XCTAssertTrue(showers.contains { $0.startMinute < 12 * 60 }, "one shower should be in the morning")
+        assertNoOverlaps(blocks)
+    }
+
     /// A leftover gap should never become a nonsensical tiny "Discretionary
     /// time" block — better to drop it and leave the gap. Sweep the whole range
     /// of gym times (plus rest day) to guard the floor.

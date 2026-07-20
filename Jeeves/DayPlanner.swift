@@ -62,6 +62,13 @@ enum DayPlanner {
         // Fixed morning anchor — always first, your stated peak-focus slot.
         blocks.append(PlanBlock(title: "Interview prep — Reading", startMinute: cursor, durationMinutes: 90, note: "Peak focus slot", isAnchor: true, prepCategory: .reading))
         cursor += 90
+        // Second-half gym (weightlifting at/after the 14:15 window midpoint) means
+        // the day would otherwise start unshowered — add a short morning shower
+        // (the post-gym shower still happens later).
+        if let gymMinute, gymMinute >= (dayStartMinute + dayEndMinute) / 2 {
+            blocks.append(PlanBlock(title: "Shower", startMinute: cursor, durationMinutes: 15, note: "Morning shower — gym is later today", isAnchor: false))
+            cursor += 15
+        }
         blocks.append(PlanBlock(title: "Chores", startMinute: cursor, durationMinutes: 40, note: nil, isAnchor: false))
         cursor += 40
         let choresEnd = cursor
@@ -132,12 +139,15 @@ enum DayPlanner {
         blocks.append(PlanBlock(title: "Shower", startMinute: gymCursor, durationMinutes: 20, note: nil, isAnchor: false))
         gymCursor += 20
 
+        let photographyStart = dayEndMinute - photographyMinutes
         for item in overflow {
+            // Don't pack past the fixed 20:00 Photography block — drop what
+            // won't fit rather than overlapping it.
+            guard gymCursor + item.minutes <= photographyStart else { continue }
             blocks.append(PlanBlock(title: item.title, startMinute: gymCursor, durationMinutes: item.minutes, note: item.note, isAnchor: false, prepCategory: item.category))
             gymCursor += item.minutes
         }
 
-        let photographyStart = dayEndMinute - photographyMinutes
         let postGymSlack = photographyStart - gymCursor
         if postGymSlack >= minDiscretionaryMinutes {
             let suggested = mostNeglectedLeisure(leisureLogs: leisureLogs, excluding: .photography)

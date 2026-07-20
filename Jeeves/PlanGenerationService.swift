@@ -173,6 +173,12 @@ enum PlanGenerationService {
         s += "TODAY'S ANCHORS:\n"
         if req.hasGymToday, let g = req.gymMinute {
             s += "- Gym: weightlifting starts at \(hhmm(g)). Gym routine is mobility, weightlifting, cardio, shower. Gym routing is always Home → Gym → Home unless chaining to an adjacent event makes Gym → Event sensible.\n"
+            let midpoint = (Baseline.dayStartMinute + Baseline.normalBoundaryMinute) / 2   // 14:15
+            if g >= midpoint {
+                s += "- The gym is in the SECOND half of the day (weightlifting at/after \(hhmm(midpoint))), so ALSO add a short ~15-min morning shower in the morning routine — the user shouldn't go the whole day unshowered — in addition to the usual post-gym shower.\n"
+            } else {
+                s += "- The gym is in the first half of the day, so the post-gym shower is the only shower needed.\n"
+            }
         } else {
             s += "- No gym today.\n"
         }
