@@ -13,6 +13,9 @@ struct JeevesApp: App {
     init() {
         // Show reminders even while the app is open.
         NotificationService.configure()
+        // Register the background commute-refresh handler before launch finishes
+        // (a hard requirement of BGTaskScheduler).
+        CommuteBackgroundRefresh.register(container: sharedModelContainer)
     }
 
     var sharedModelContainer: ModelContainer = {

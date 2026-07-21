@@ -52,6 +52,29 @@ enum NotificationService {
         UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true
     }
 
+    /// The banner text for a live traffic re-check. Pure, so it's unit-tested.
+    static func commuteUpdateBody(commuteTitle: String, newDepartMinute: Int, earlierByMinutes: Int) -> String {
+        let leaveBy = String(format: "%02d:%02d", (newDepartMinute / 60) % 24, newDepartMinute % 60)
+        if earlierByMinutes > 0 {
+            return "\(commuteTitle): traffic's heavier — leave by \(leaveBy), \(earlierByMinutes) min earlier than planned."
+        } else {
+            return "\(commuteTitle): traffic's lighter — you can leave by \(leaveBy)."
+        }
+    }
+
+    /// Tells the user their leave-by time moved after a live traffic re-check.
+    @MainActor
+    static func notifyCommuteUpdate(commuteTitle: String, newDepartMinute: Int, earlierByMinutes: Int) async {
+        guard remindersEnabled, await ensureAuthorized() else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Traffic update"
+        content.body = commuteUpdateBody(commuteTitle: commuteTitle, newDepartMinute: newDepartMinute, earlierByMinutes: earlierByMinutes)
+        content.sound = .default
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        let request = UNNotificationRequest(identifier: "jeeves-traffic-\(UUID().uuidString)", content: content, trigger: trigger)
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
     /// The banner text for a finished plan. Pure, so it's unit-tested.
     static func planReadyBody(isOffline: Bool) -> String {
         isOffline

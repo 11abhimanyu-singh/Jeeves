@@ -160,4 +160,74 @@ final class LiveAITests: XCTestCase {
         XCTAssertGreaterThan(m, 0)
         XCTAssertLessThan(m, 300)
     }
+
+    // MARK: Full chain — leg → departure → route → plan placement (deterministic)
+
+    /// The whole predictive-traffic path, end to end, WITHOUT the LLM judge:
+    /// with real saved locations, the plan's "Commute to gym" block length must
+    /// equal what Maps returns for that leg at its scheduled departure (±5, for
+    /// Claude rounding / traffic jitter between the two calls). Proves the plan
+    /// actually uses the routed minutes rather than the 30-min default.
+    @MainActor
+    func testLiveGymCommuteBlockMatchesMapsMinutes() async throws {
+        try XCTSkipUnless(KeychainService.hasAPIKey, "no Anthropic key in Keychain")
+        try XCTSkipUnless(KeychainService.hasGoogleMapsAPIKey, "no Google Maps key in Keychain")
+
+        let home = SavedLocation(kind: .home, address: "Koramangala, Bengaluru")
+        let gym = SavedLocation(kind: .gym, address: "Indiranagar, Bengaluru")
+        let gymMinute = 18 * 60
+        let planDate = Calendar.current.date(byAdding: .day, value: 1, to: Date())!.startOfDay
+
+        // Price Home→Gym independently, using the coordinator's OWN departure math.
+        let depMin = try XCTUnwrap(PlanCoordinator.legDepartureMinute(label: "Home→Gym", gymMinute: gymMinute, events: []))
+        let depDate = try XCTUnwrap(PlanCoordinator.departureDate(minuteOfDay: depMin, on: planDate))
+        let priced = await GoogleMapsService.commuteMinutes(from: home.address, to: gym.address, departure: depDate)
+        let expected = try XCTUnwrap(priced, "Maps should price the Home→Gym leg")
+
+        let result = await PlanCoordinator.generate(.init(
+            hasGym: true, gymMinute: gymMinute, events: [],
+            locations: [home, gym], prepSessions: [], planDate: planDate))
+        XCTAssertFalse(result.isOffline, "should be a live Claude plan")
+
+        let commute = try XCTUnwrap(result.plan.blocks.first { $0.kind == "commute" && $0.title.localizedCaseInsensitiveContains("gym") },
+                                    "plan should contain a commute-to-gym block")
+        let dur = try XCTUnwrap(commute.endMinute) - (try XCTUnwrap(commute.startMinute))
+        print("=== Home→Gym: Maps \(expected) min, plan block \(dur) min ===")
+        XCTAssertLessThanOrEqual(abs(dur - expected), 5,
+            "the plan's commute block (\(dur)) must reflect the Maps-computed minutes (\(expected)), not the 30-min default")
+    }
+
+    /// Same deterministic check for an EVENT commute (rest day, one appointment):
+    /// the outbound "Commute to <event>" block must match the Maps time for
+    /// Home→venue at its scheduled departure.
+    @MainActor
+    func testLiveEventCommuteBlockMatchesMapsMinutes() async throws {
+        try XCTSkipUnless(KeychainService.hasAPIKey, "no Anthropic key in Keychain")
+        try XCTSkipUnless(KeychainService.hasGoogleMapsAPIKey, "no Google Maps key in Keychain")
+
+        let home = SavedLocation(kind: .home, address: "Koramangala, Bengaluru")
+        let planDate = Calendar.current.date(byAdding: .day, value: 1, to: Date())!.startOfDay
+        let event = DailyEvent(date: planDate, title: "Appointment", startMinute: 15 * 60, endMinute: 16 * 60,
+                               destinationAddress: "MLR Convention Centre, Whitefield, Bengaluru",
+                               outboundStart: .home, source: .manual)
+
+        let depMin = try XCTUnwrap(PlanCoordinator.legDepartureMinute(label: "Home→Appointment", gymMinute: nil, events: [event]))
+        let depDate = try XCTUnwrap(PlanCoordinator.departureDate(minuteOfDay: depMin, on: planDate))
+        let priced = await GoogleMapsService.commuteMinutes(from: home.address, to: event.destinationAddress, departure: depDate)
+        let expected = try XCTUnwrap(priced, "Maps should price the Home→venue leg")
+
+        let result = await PlanCoordinator.generate(.init(
+            hasGym: false, gymMinute: nil, events: [event],
+            locations: [home], prepSessions: [], planDate: planDate))
+        XCTAssertFalse(result.isOffline, "should be a live Claude plan")
+
+        let blocks = result.plan.blocks
+        let evIdx = try XCTUnwrap(blocks.firstIndex { $0.kind == "event" }, "plan should anchor the event")
+        let outbound = try XCTUnwrap(blocks[..<evIdx].last { $0.kind == "commute" },
+                                     "there should be an outbound commute before the event")
+        let dur = try XCTUnwrap(outbound.endMinute) - (try XCTUnwrap(outbound.startMinute))
+        print("=== Home→venue: Maps \(expected) min, plan block \(dur) min ===")
+        XCTAssertLessThanOrEqual(abs(dur - expected), 5,
+            "the plan's outbound commute (\(dur)) must reflect the Maps-computed minutes (\(expected))")
+    }
 }

@@ -150,6 +150,8 @@ struct DayPlannerView: View {
             await NotificationService.reschedule(plan: result.plan, on: date)
             // If they backgrounded the app while it planned, tell them it's ready.
             await NotificationService.notifyPlanReady(isOffline: result.isOffline)
+            // Arm a background traffic re-check ~90 min before the next commute.
+            CommuteBackgroundRefresh.scheduleNext(context: modelContext)
             if result.isOffline { planError = "Couldn't reach the planning service — showing an offline plan.\(result.error.map { " (\($0))" } ?? "")" }
             isPlanning = false
         }

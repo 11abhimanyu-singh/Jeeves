@@ -355,6 +355,8 @@ struct JeevesChatView: View {
         try? modelContext.save()
         // Schedule on-device reminders for this plan's key blocks.
         Task { await NotificationService.reschedule(plan: plan, on: day) }
+        // Arm a background traffic re-check ~90 min before the next commute.
+        CommuteBackgroundRefresh.scheduleNext(context: modelContext)
     }
 
     /// Extracts events/gym from the message, persists any new ones, and returns

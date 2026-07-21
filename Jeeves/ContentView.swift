@@ -61,6 +61,7 @@ private let monthlyGoal = 20
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \CheckIn.date, order: .reverse) private var checkins: [CheckIn]
 
     enum Tab { case jeeves, planner, checkin, library, progress, history }
@@ -111,6 +112,17 @@ struct ContentView: View {
         .background(Color.bg)
         .onAppear { loadFields(for: selectedDate) }
         .onChange(of: selectedDate) { _, newDate in loadFields(for: newDate) }
+        .onChange(of: scenePhase) { _, phase in
+            // Reliable path: whenever the app comes to the foreground, re-price
+            // any commute departing within the next 90 min against live traffic
+            // and nudge the leave-by if it moved.
+            if phase == .active {
+                Task {
+                    await CommuteRefresh.run(context: modelContext)
+                    CommuteBackgroundRefresh.scheduleNext(context: modelContext)
+                }
+            }
+        }
     }
 
     // MARK: Per-tab chrome
