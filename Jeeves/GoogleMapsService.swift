@@ -10,11 +10,32 @@
 //  no key, no network, or an un-routable address returns nil, and the
 //  planner falls back to the user's default commute minutes.
 //
+//  Routes geocodes plain addresses and place names itself, but it can't read a
+//  Google Maps SHORT LINK (maps.app.goo.gl/…) — the form you get from the
+//  Maps "share" button and often paste into an event. So before routing we
+//  resolve such links to coordinates by following the redirect and pulling the
+//  lat/lng out of the expanded URL. Without this, a shared-link destination
+//  silently falls back to the default commute minutes.
+//
 
 import Foundation
 
 enum GoogleMapsService {
     private static let endpoint = URL(string: "https://routes.googleapis.com/directions/v2:computeRoutes")!
+
+    /// A routing endpoint — either a free-text address/place (Routes geocodes
+    /// it) or explicit coordinates (used once we've resolved a Maps link).
+    enum Waypoint: Equatable {
+        case address(String)
+        case location(lat: Double, lng: Double)
+
+        var requestJSON: [String: Any] {
+            switch self {
+            case .address(let a): return ["address": a]
+            case .location(let lat, let lng): return ["location": ["latLng": ["latitude": lat, "longitude": lng]]]
+            }
+        }
+    }
 
     /// Traffic-aware driving minutes between two addresses/place names, or nil
     /// if it can't be determined (missing key, bad address, network/API error).
@@ -30,7 +51,11 @@ enum GoogleMapsService {
         guard !o.isEmpty, !d.isEmpty,
               let apiKey = KeychainService.loadGoogleMapsAPIKey(), !apiKey.isEmpty else { return nil }
 
-        let body = requestBody(origin: o, destination: d, departure: departure, now: Date())
+        // Resolve any Maps short link to coordinates before routing; plain
+        // addresses pass straight through for Routes to geocode.
+        let originWaypoint = await resolveWaypoint(o)
+        let destinationWaypoint = await resolveWaypoint(d)
+        let body = requestBody(origin: originWaypoint, destination: destinationWaypoint, departure: departure, now: Date())
 
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -76,10 +101,10 @@ enum GoogleMapsService {
     /// doesn't race the server clock) upgrades to TRAFFIC_AWARE_OPTIMAL with a
     /// departureTime; a nil or past/imminent departure stays on plain
     /// TRAFFIC_AWARE live traffic, which the API prices as "leave now".
-    static func requestBody(origin: String, destination: String, departure: Date?, now: Date) -> [String: Any] {
+    static func requestBody(origin: Waypoint, destination: Waypoint, departure: Date?, now: Date) -> [String: Any] {
         var body: [String: Any] = [
-            "origin": ["address": origin],
-            "destination": ["address": destination],
+            "origin": origin.requestJSON,
+            "destination": destination.requestJSON,
             "travelMode": "DRIVE",
             "routingPreference": "TRAFFIC_AWARE",
         ]
@@ -88,6 +113,76 @@ enum GoogleMapsService {
             body["routingPreference"] = "TRAFFIC_AWARE_OPTIMAL" // predictive traffic model
         }
         return body
+    }
+
+    // MARK: Maps-link resolution
+
+    /// Turns a destination string into a routing waypoint. A Google Maps short
+    /// link is expanded to coordinates; anything else is passed through as an
+    /// address for Routes to geocode (including a link we couldn't resolve, so
+    /// there's no regression versus before).
+    static func resolveWaypoint(_ raw: String) async -> Waypoint {
+        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isMapsLink(s) else { return .address(s) }
+        // A long maps URL often already embeds the coordinates — try that first,
+        // no network needed.
+        if let c = extractCoordinates(fromText: s) { return .location(lat: c.lat, lng: c.lng) }
+        // Otherwise follow the (short) link and scan the final URL + page body.
+        if let text = await expand(s), let c = extractCoordinates(fromText: text) {
+            return .location(lat: c.lat, lng: c.lng)
+        }
+        return .address(s)
+    }
+
+    /// True for a Google Maps URL (short share link or a maps.google.com URL).
+    /// Plain addresses / place names are NOT links and route straight through.
+    static func isMapsLink(_ s: String) -> Bool {
+        guard s.lowercased().hasPrefix("http"), let url = URL(string: s),
+              let host = url.host?.lowercased() else { return false }
+        if host == "maps.app.goo.gl" || host == "goo.gl" || host == "maps.google.com" { return true }
+        return host.contains("google.") && url.path.lowercased().contains("maps")
+    }
+
+    /// Pulls a lat,lng out of a Maps URL (or a page's HTML), most-reliable form
+    /// first: the `!3d<lat>!4d<lng>` place-data param (the actual pin), then
+    /// explicit query params, then the `@lat,lng` viewport centre as a last
+    /// resort. Pure — unit-tested against real URL shapes. Coordinates outside
+    /// valid earth ranges are rejected.
+    static func extractCoordinates(fromText text: String) -> (lat: Double, lng: Double)? {
+        let patterns = [
+            #"!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)"#,
+            #"[?&](?:q|query|ll|destination|center|sll|daddr)=(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)"#,
+            #"@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)"#,
+        ]
+        for pattern in patterns {
+            if let c = firstCoordinate(pattern, in: text) { return c }
+        }
+        return nil
+    }
+
+    private static func firstCoordinate(_ pattern: String, in text: String) -> (lat: Double, lng: Double)? {
+        guard let re = try? NSRegularExpression(pattern: pattern),
+              let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              m.numberOfRanges >= 3,
+              let latRange = Range(m.range(at: 1), in: text),
+              let lngRange = Range(m.range(at: 2), in: text),
+              let lat = Double(text[latRange]), let lng = Double(text[lngRange]),
+              (-90...90).contains(lat), (-180...180).contains(lng) else { return nil }
+        return (lat, lng)
+    }
+
+    /// Follows a short link's redirects and returns the final URL plus a slice
+    /// of the page body, so coordinates in either can be extracted. Best-effort.
+    private static func expand(_ link: String) async -> String? {
+        guard let url = URL(string: link) else { return nil }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 15
+        // Some link shorteners serve a bare redirect only to a browser UA.
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        guard let (data, response) = try? await URLSession.shared.data(for: req) else { return nil }
+        let finalURL = response.url?.absoluteString ?? ""
+        let body = String(data: data.prefix(40_000), encoding: .utf8) ?? ""
+        return finalURL + " " + body
     }
 
     /// RFC 3339 / ISO 8601 UTC timestamp, the format computeRoutes expects

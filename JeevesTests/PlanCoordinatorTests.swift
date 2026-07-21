@@ -107,7 +107,7 @@ final class PlanCoordinatorTests: XCTestCase {
 
     func testFutureDepartureUpgradesToPredictiveTraffic() throws {
         let now = Date()
-        let body = GoogleMapsService.requestBody(origin: "A", destination: "B",
+        let body = GoogleMapsService.requestBody(origin: .address("A"), destination: .address("B"),
                                                  departure: now.addingTimeInterval(3600), now: now)
         XCTAssertEqual(body["routingPreference"] as? String, "TRAFFIC_AWARE_OPTIMAL")
         let ts = try XCTUnwrap(body["departureTime"] as? String)
@@ -117,11 +117,72 @@ final class PlanCoordinatorTests: XCTestCase {
     func testNilOrPastDepartureStaysOnLiveTraffic() {
         let now = Date()
         for departure in [nil, now.addingTimeInterval(-3600), now.addingTimeInterval(30)] {
-            let body = GoogleMapsService.requestBody(origin: "A", destination: "B", departure: departure, now: now)
+            let body = GoogleMapsService.requestBody(origin: .address("A"), destination: .address("B"), departure: departure, now: now)
             XCTAssertEqual(body["routingPreference"] as? String, "TRAFFIC_AWARE",
                            "past/imminent departure must fall back to live traffic")
             XCTAssertNil(body["departureTime"], "no departureTime may be sent for \(String(describing: departure))")
         }
+    }
+
+    // MARK: Maps-link resolution (pure)
+
+    func testCoordinateWaypointBuildsLatLngJSON() {
+        let json = GoogleMapsService.Waypoint.location(lat: 12.97, lng: 77.59).requestJSON
+        let latLng = (json["location"] as? [String: Any])?["latLng"] as? [String: Any]
+        XCTAssertEqual(latLng?["latitude"] as? Double, 12.97)
+        XCTAssertEqual(latLng?["longitude"] as? Double, 77.59)
+    }
+
+    func testAddressWaypointBuildsAddressJSON() {
+        XCTAssertEqual(GoogleMapsService.Waypoint.address("MLR, Bengaluru").requestJSON["address"] as? String,
+                       "MLR, Bengaluru")
+    }
+
+    func testIsMapsLinkDetectsShareLinksNotPlainAddresses() {
+        XCTAssertTrue(GoogleMapsService.isMapsLink("https://maps.app.goo.gl/tUVY5KumZEco"))
+        XCTAssertTrue(GoogleMapsService.isMapsLink("https://goo.gl/maps/abc123"))
+        XCTAssertTrue(GoogleMapsService.isMapsLink("https://www.google.com/maps/place/Foo"))
+        XCTAssertFalse(GoogleMapsService.isMapsLink("MLR Convention Centre, Bengaluru"))
+        XCTAssertFalse(GoogleMapsService.isMapsLink("12.97,77.59"))
+        XCTAssertFalse(GoogleMapsService.isMapsLink("https://example.com/not-maps"))
+    }
+
+    func testExtractCoordinatesPrefersPlacePinOverViewportCentre() {
+        // Real maps URL shape: @ is the viewport centre (12.9716…), the actual
+        // place pin is in !3d…!4d… (12.9721…) — we must pick the pin.
+        let url = "https://www.google.com/maps/place/Clinic/@12.9716,77.5946,17z/data=!3m1!4b1!4m6!3m5!8m2!3d12.9721!4d77.5951"
+        let c = GoogleMapsService.extractCoordinates(fromText: url)
+        XCTAssertEqual(c?.lat, 12.9721)
+        XCTAssertEqual(c?.lng, 77.5951)
+    }
+
+    func testExtractCoordinatesFromQueryParam() {
+        let c = GoogleMapsService.extractCoordinates(fromText: "https://maps.google.com/?q=40.7128,-74.0060")
+        XCTAssertEqual(c?.lat, 40.7128)
+        XCTAssertEqual(c?.lng, -74.0060)
+    }
+
+    func testExtractCoordinatesFallsBackToViewportCentre() {
+        let c = GoogleMapsService.extractCoordinates(fromText: "https://www.google.com/maps/@48.8584,2.2945,15z")
+        XCTAssertEqual(c?.lat, 48.8584)
+        XCTAssertEqual(c?.lng, 2.2945)
+    }
+
+    func testExtractCoordinatesRejectsOutOfRangeAndMissing() {
+        XCTAssertNil(GoogleMapsService.extractCoordinates(fromText: "no coordinates here"))
+        XCTAssertNil(GoogleMapsService.extractCoordinates(fromText: "@200.0,999.0"), "impossible earth coords are rejected")
+    }
+
+    /// A plain address must resolve to an .address waypoint without any network.
+    func testResolveWaypointPassesPlainAddressThrough() async {
+        let wp = await GoogleMapsService.resolveWaypoint("MLR Convention Centre, Bengaluru")
+        XCTAssertEqual(wp, .address("MLR Convention Centre, Bengaluru"))
+    }
+
+    /// A long maps URL with embedded coordinates resolves offline (no redirect).
+    func testResolveWaypointExtractsFromLongURLWithoutNetwork() async {
+        let wp = await GoogleMapsService.resolveWaypoint("https://www.google.com/maps/place/X/@1.0,2.0,17z/data=!3d3.5!4d4.5")
+        XCTAssertEqual(wp, .location(lat: 3.5, lng: 4.5))
     }
 
     // MARK: Departure minute → concrete Date on the plan day
