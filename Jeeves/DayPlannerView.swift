@@ -127,14 +127,19 @@ struct DayPlannerView: View {
         let date = selectedDate
         let dayEvents = selectedEvents
         Task {
-            let result = await PlanCoordinator.generate(.init(
-                hasGym: hasGymToday,
-                gymMinute: gymMinute,
-                events: dayEvents,
-                locations: locations,
-                prepSessions: prepSessions,
-                planDate: date
-            ))
+            // Hold a background assertion so planning survives the user
+            // switching away mid-request (otherwise iOS tears the call down and
+            // it falls back to the offline plan).
+            let result = await BackgroundActivity.run("plan-my-day") {
+                await PlanCoordinator.generate(.init(
+                    hasGym: hasGymToday,
+                    gymMinute: gymMinute,
+                    events: dayEvents,
+                    locations: locations,
+                    prepSessions: prepSessions,
+                    planDate: date
+                ))
+            }
             // Commit to this date's plan state so it persists and displays here.
             let state = planState(for: date) ?? {
                 let s = DailyPlanState(date: date.startOfDay, hasGymToday: hasGymToday, gymMinute: gymMinute)
@@ -143,6 +148,8 @@ struct DayPlannerView: View {
             state.storePlan(result.plan, isOffline: result.isOffline)
             try? modelContext.save()
             await NotificationService.reschedule(plan: result.plan, on: date)
+            // If they backgrounded the app while it planned, tell them it's ready.
+            await NotificationService.notifyPlanReady(isOffline: result.isOffline)
             if result.isOffline { planError = "Couldn't reach the planning service — showing an offline plan.\(result.error.map { " (\($0))" } ?? "")" }
             isPlanning = false
         }

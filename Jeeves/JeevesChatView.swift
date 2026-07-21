@@ -308,23 +308,30 @@ struct JeevesChatView: View {
         }
 
         Task {
-            // 1. Pull any events/gym mentioned in the message into real anchors,
-            //    so "MLR at 7pm, plan my day" works without manual event entry.
-            let planEvents = await extractAndCreateAnchors(from: userContext)
-            // 2. Generate (Claude, with deterministic fallback) via the shared
-            //    coordinator — same call the Day Planner uses.
-            let result = await PlanCoordinator.generate(.init(
-                userMessage: userContext,
-                hasGym: todayPlanState?.hasGymToday ?? false,
-                gymMinute: todayPlanState?.gymMinute,
-                events: planEvents,
-                locations: locations,
-                prepSessions: prepSessions,
-                planDate: today
-            ))
+            // Hold a background assertion so the whole flow (anchor extraction +
+            // planning) survives the user switching away mid-request.
+            let result = await BackgroundActivity.run("plan-my-day") { () -> PlanCoordinator.Result in
+                // 1. Pull any events/gym mentioned in the message into real
+                //    anchors, so "MLR at 7pm, plan my day" works without manual
+                //    event entry.
+                let planEvents = await extractAndCreateAnchors(from: userContext)
+                // 2. Generate (Claude, with deterministic fallback) via the
+                //    shared coordinator — same call the Day Planner uses.
+                return await PlanCoordinator.generate(.init(
+                    userMessage: userContext,
+                    hasGym: todayPlanState?.hasGymToday ?? false,
+                    gymMinute: todayPlanState?.gymMinute,
+                    events: planEvents,
+                    locations: locations,
+                    prepSessions: prepSessions,
+                    planDate: today
+                ))
+            }
             // 3. COMMIT it to the Day Planner for today so it persists across
             //    launches and shows on the planner — not just here in chat.
             commitPlan(result.plan, isOffline: result.isOffline, on: today)
+            // If they backgrounded the app while it planned, tell them it's ready.
+            await NotificationService.notifyPlanReady(isOffline: result.isOffline)
 
             if result.isOffline {
                 addTurn(role: .assistant, "I couldn't reach the planning service, so here's an offline plan from the built-in scheduler.\(result.error.map { " (\($0))" } ?? "")")

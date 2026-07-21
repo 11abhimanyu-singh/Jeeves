@@ -13,6 +13,7 @@
 
 import Foundation
 import UserNotifications
+import UIKit
 
 /// Makes reminders appear as banners even while the app is open (iOS hides them
 /// in-foreground by default). Set once at launch.
@@ -49,6 +50,30 @@ enum NotificationService {
     static var remindersEnabled: Bool {
         // Default on — a plan without reminders isn't much of a plan.
         UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true
+    }
+
+    /// The banner text for a finished plan. Pure, so it's unit-tested.
+    static func planReadyBody(isOffline: Bool) -> String {
+        isOffline
+            ? "Your day is planned (offline) — tap to review it in Jeeves."
+            : "Jeeves finished planning your day — tap to view it."
+    }
+
+    /// Announces a finished plan with a local notification — but ONLY when the
+    /// app isn't in the foreground (if it's on screen, the user already sees the
+    /// plan appear, so a banner would be noise). This is what tells the user
+    /// "your day is ready" after they backgrounded the app while it planned.
+    @MainActor
+    static func notifyPlanReady(isOffline: Bool) async {
+        guard UIApplication.shared.applicationState != .active else { return }
+        guard await ensureAuthorized() else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Your day is planned"
+        content.body = planReadyBody(isOffline: isOffline)
+        content.sound = .default
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        let request = UNNotificationRequest(identifier: "jeeves-plan-ready-\(UUID().uuidString)", content: content, trigger: trigger)
+        try? await UNUserNotificationCenter.current().add(request)
     }
 
     // MARK: Pure helpers (unit-tested)

@@ -51,4 +51,11 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertEqual(NotificationService.reminderBody(for: block("sleep", isAnchor: true, title: "Sleep")),
                        "Wind down — bedtime in 15 min")
     }
+
+    func testPlanReadyBodyDistinguishesOffline() {
+        XCTAssertEqual(NotificationService.planReadyBody(isOffline: false),
+                       "Jeeves finished planning your day — tap to view it.")
+        XCTAssertTrue(NotificationService.planReadyBody(isOffline: true).localizedCaseInsensitiveContains("offline"),
+                      "an offline plan should say so in the completion banner")
+    }
 }
