@@ -91,6 +91,21 @@ enum PlanValidation {
             }
         }
 
+        // 2c. The gym visit is ONE contiguous sequence — mobility, weight-
+        //     lifting, cardio back-to-back. Long activities may split around
+        //     anchors; the gym never does, so any time gap (or work wedged)
+        //     between gym-kind blocks is a severe violation.
+        if request.hasGymToday, request.gymMinute != nil {
+            let gymBlocks = timed.filter { $0.block.kind.lowercased() == "gym" }
+            // Only a genuine GAP is a "split"; overlaps are already reported by
+            // rule 1, and `!=` would double-report them with a contradictory
+            // message (and inflate the repair loop's violation count).
+            for (a, b) in zip(gymBlocks, gymBlocks.dropFirst()) where b.start > a.end {
+                out.append(Violation(severity: .severe,
+                    message: "Gym routine is split: \"\(b.block.title)\" starts at \(hhmm(b.start)) but \"\(a.block.title)\" ends at \(hhmm(a.end)) — mobility, weightlifting, cardio must run back-to-back"))
+            }
+        }
+
         // 3. A Must-do (morning reading, lunch) must never be dropped, and lunch
         //    must appear in the plan.
         for d in plan.dropped {

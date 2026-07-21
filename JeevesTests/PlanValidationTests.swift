@@ -190,6 +190,53 @@ final class PlanValidationTests: XCTestCase {
                        "…nor be flagged as a compressed workout")
     }
 
+    /// Work wedged into the middle of the gym routine (or any time gap between
+    /// gym blocks) is a severe violation — the gym is one contiguous sequence.
+    func testSplitGymRoutineIsSevere() {
+        let plan = GeneratedPlan(
+            blocks: [b("Interview prep — Reading", "08:00", "09:30", anchor: true),
+                     b("Mobility", "10:40", "11:00", kind: "gym"),
+                     b("Weightlifting", "11:00", "12:10", anchor: true, kind: "gym"),
+                     b("Job applications", "12:10", "12:40"),
+                     b("Cardio", "12:40", "13:15", kind: "gym"),
+                     b("Lunch", "13:15", "13:45", kind: "lunch")],
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        XCTAssertTrue(PlanValidation.severe(plan, request: gymRequest(gym: 11 * 60))
+            .contains { $0.message.contains("split") },
+            "job applications wedged between weightlifting and cardio must be flagged")
+    }
+
+    /// Overlapping gym blocks are an overlap (rule 1), NOT a "split" — the
+    /// contiguity check must only fire on genuine gaps, or it double-reports.
+    func testOverlappingGymBlocksReportOverlapNotSplit() {
+        let plan = GeneratedPlan(
+            blocks: [b("Interview prep — Reading", "08:00", "09:30", anchor: true),
+                     b("Mobility", "10:40", "11:00", kind: "gym"),
+                     b("Weightlifting", "11:00", "12:10", anchor: true, kind: "gym"),
+                     b("Cardio", "12:00", "12:35", kind: "gym"),   // overlaps weightlifting
+                     b("Lunch", "13:00", "13:30", kind: "lunch")],
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        let severe = PlanValidation.severe(plan, request: gymRequest(gym: 11 * 60))
+        XCTAssertTrue(severe.contains { $0.message.contains("overlaps") }, "the overlap must be reported")
+        XCTAssertFalse(severe.contains { $0.message.contains("split") }, "an overlap must not also be called a split")
+    }
+
+    /// The contiguous version of the same routine is clean — splitting a LONG
+    /// activity around the gym is fine; only splitting the gym itself is not.
+    func testContiguousGymWithSplitActivityAroundItIsFine() {
+        let plan = GeneratedPlan(
+            blocks: [b("Interview prep — Reading", "08:00", "09:30", anchor: true),
+                     b("Interview prep — practice (part 1 of 120)", "09:30", "10:40"),
+                     b("Mobility", "10:40", "11:00", kind: "gym"),
+                     b("Weightlifting", "11:00", "12:10", anchor: true, kind: "gym"),
+                     b("Cardio", "12:10", "12:45", kind: "gym"),
+                     b("Lunch", "13:00", "13:30", kind: "lunch"),
+                     b("Interview prep — practice (part 2 of 120)", "13:30", "14:20")],
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        XCTAssertTrue(PlanValidation.severe(plan, request: gymRequest(gym: 11 * 60)).isEmpty,
+                      "practice split around the gym + lunch is correct scheduling")
+    }
+
     /// After ~21:00 the full routine can't precede 23:00 sleep — the pinned-
     /// duration rule steps aside instead of making the rule set unsatisfiable.
     func testVeryLateGymSkipsPinnedDurationRule() {

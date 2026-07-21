@@ -152,6 +152,7 @@ enum PlanGenerationService {
         s += "- Only after dropping should you shrink survivors so the day fits exactly.\n"
         s += "- IMPORTANT-tier floor: never shrink an Important activity below 50% of its allocated time. If fitting the day would force any Important item below 50%, DROP one Important item entirely (vary which one day to day) so the rest run at full length. One activity done fully beats two done at 20 minutes each — you may even extend a surviving Important item into the freed time rather than leaving it idle.\n"
         s += "- Photography is a FLEXIBLE, discretionary-level activity: place it in leftover time or drop it like any Flexible item. It is NOT pinned to the end of the day and has no special end-of-day slot.\n"
+        s += "- SPLITTING: an activity of 120 min or longer may be split into TWO parts around an anchor when it can't fit whole — e.g. Interview prep — practice 90 min, then Lunch, then the remaining 30 min. Label the parts (e.g. \"part 1 of 120\"). Never split shorter activities, and at most one split per activity. The GYM routine must NEVER be split: mobility → weightlifting → cardio run back-to-back as one contiguous sequence with nothing scheduled between them.\n"
         s += "- Which item to drop/shrink first WITHIN a tier is your judgment (context-aware), not a fixed rule.\n"
         s += "- Always report what you dropped and shrank. Never silently omit anything.\n\n"
 
