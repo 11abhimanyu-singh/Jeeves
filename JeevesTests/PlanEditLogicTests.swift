@@ -77,4 +77,53 @@ final class PlanEditLogicTests: XCTestCase {
         let edited = b("Chores", "10:00", "10:40").edited(title: "Chores", note: "   ", durationMinutes: 40)
         XCTAssertNil(edited.note)
     }
+
+    // MARK: Full edit session (mirrors what the editor UI does end-to-end)
+
+    /// QA for the plan-editor feature: a real editing session — reorder two
+    /// movable blocks, then open one and change its title / location / length —
+    /// must produce a correct, contiguous, anchor-respecting plan, exactly as
+    /// the editor commits it.
+    func testFullEditSessionReorderThenEditDetail() {
+        var blocks = [
+            b("Interview prep — Reading", "08:00", "09:30", anchor: true), // pinned
+            b("Job applications", "09:30", "10:45"),                       // 75
+            b("Chores", "10:45", "11:25"),                                 // 40
+            b("Lunch", "13:00", "13:30", kind: "lunch"),                   // movable, 30
+            b("Weightlifting", "19:00", "20:10", anchor: true, kind: "gym"),// pinned
+        ]
+
+        // 1. Reorder: move Chores (index 2) above Job applications (index 1) —
+        //    the same op onMove performs — then re-time.
+        blocks.move(fromOffsets: IndexSet(integer: 2), toOffset: 1)
+        blocks = PlanEditLogic.retime(blocks)
+
+        // 2. Edit a block's detail: grow Job applications to 90 and relabel it —
+        //    the same op BlockDetailEditor performs — then re-time.
+        let jobIndex = blocks.firstIndex { $0.title == "Job applications" }!
+        blocks[jobIndex] = blocks[jobIndex].edited(title: "Applications + outreach",
+                                                   note: "LinkedIn + referrals", durationMinutes: 90)
+        blocks = PlanEditLogic.retime(blocks)
+
+        // 3. Save re-times once more (idempotent) — assert the committed result.
+        let final = PlanEditLogic.retime(blocks)
+
+        // Order reflects the reorder: Reading, Chores, Applications, Lunch, gym.
+        XCTAssertEqual(final.map(\.title),
+                       ["Interview prep — Reading", "Chores", "Applications + outreach", "Lunch", "Weightlifting"])
+        // Anchors stayed pinned to their clock times.
+        XCTAssertEqual(final[0].startTime, "08:00"); XCTAssertEqual(final[0].endTime, "09:30")
+        XCTAssertEqual(final[4].startTime, "19:00"); XCTAssertEqual(final[4].endTime, "20:10")
+        // Movable blocks flow contiguously from the day start.
+        XCTAssertEqual(final[1].startTime, "09:30"); XCTAssertEqual(final[1].endTime, "10:10") // Chores 40
+        XCTAssertEqual(final[2].startTime, "10:10"); XCTAssertEqual(final[2].endTime, "11:40") // Apps 90
+        XCTAssertEqual(final[3].startTime, "11:40"); XCTAssertEqual(final[3].endTime, "12:10") // Lunch 30
+        // The detail edit stuck.
+        XCTAssertEqual(final[2].note, "LinkedIn + referrals")
+        XCTAssertEqual(final[2].durationMinutes, 90)
+        // No movable block overlaps the next.
+        for (a, c) in zip(final, final.dropFirst()) where !c.isAnchor {
+            XCTAssertLessThanOrEqual(a.endMinute ?? 0, c.startMinute ?? 0, "\(c.title) overlaps \(a.title)")
+        }
+    }
 }

@@ -39,10 +39,13 @@ struct JeevesApp: App {
         // Capabilities in Xcode); until then, fall back to a plain local store
         // so the app still runs. No data is lost in the fallback — the local
         // store is migrated into the CloudKit-backed one once sync is enabled.
+        // CloudKit init crashes the XCTest host (no iCloud entitlement in the
+        // test sandbox), so use the plain local store when running tests.
+        let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
         let cloudConfig = ModelConfiguration(
             schema: schema, isStoredInMemoryOnly: false,
             cloudKitDatabase: .private("iCloud.abhimanyusingh.me.Jeeves"))
-        if let container = try? ModelContainer(for: schema, configurations: [cloudConfig]) {
+        if !isTesting, let container = try? ModelContainer(for: schema, configurations: [cloudConfig]) {
             return container
         }
 
