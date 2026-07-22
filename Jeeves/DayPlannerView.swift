@@ -39,6 +39,7 @@ struct DayPlannerView: View {
     @State private var calendarReview: CalendarReview?
     @State private var isImportingCalendar = false
     @State private var calendarError: String?
+    @State private var showPlanEditor = false
 
     private var today: Date { Date().startOfDay }
     private var isToday: Bool { selectedDate == today }
@@ -69,6 +70,11 @@ struct DayPlannerView: View {
         }
         .sheet(item: $calendarReview) { review in
             CalendarImportSheet(review: review, onAdd: addFromCalendar)
+        }
+        .sheet(isPresented: $showPlanEditor) {
+            if let plan = savedPlan {
+                PlanEditorView(original: plan, onSave: commitEditedPlan)
+            }
         }
         .onAppear { loadGymState() }
         .onChange(of: selectedDate) { _, _ in loadGymState() }
@@ -121,9 +127,25 @@ struct DayPlannerView: View {
     @ViewBuilder
     private var planCard: some View {
         if let plan = savedPlan {
+            HStack {
+                Spacer()
+                Button { showPlanEditor = true } label: {
+                    Label("Edit", systemImage: "slider.horizontal.3")
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.accentDeep)
+                }
+            }
             PlanTimelineCard(plan: plan, isOffline: selectedPlanState?.generatedPlanIsOffline ?? false)
             adherenceCard(for: plan)
         }
+    }
+
+    /// Persist a hand-edited plan and reschedule its reminders.
+    private func commitEditedPlan(_ plan: GeneratedPlan) {
+        guard let state = selectedPlanState else { return }
+        state.storePlan(plan, isOffline: state.generatedPlanIsOffline)
+        try? modelContext.save()
+        let date = selectedDate
+        Task { await NotificationService.reschedule(plan: plan, on: date) }
     }
 
     // MARK: Adherence — was the plan followed? (inferred from the day's logs)
