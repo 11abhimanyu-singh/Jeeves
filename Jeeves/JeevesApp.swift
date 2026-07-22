@@ -33,25 +33,17 @@ struct JeevesApp: App {
             RoutineActivity.self,
             PlanGenerationLog.self,
         ])
-        // Prefer syncing to the user's private iCloud database so their data
-        // backs up and follows them across devices. This only works once the
-        // iCloud/CloudKit capability is added to the target (Signing &
-        // Capabilities in Xcode); until then, fall back to a plain local store
-        // so the app still runs. No data is lost in the fallback — the local
-        // store is migrated into the CloudKit-backed one once sync is enabled.
-        // CloudKit init crashes the XCTest host (no iCloud entitlement in the
-        // test sandbox), so use the plain local store when running tests.
-        let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-        let cloudConfig = ModelConfiguration(
-            schema: schema, isStoredInMemoryOnly: false,
-            cloudKitDatabase: .private("iCloud.abhimanyusingh.me.Jeeves"))
-        if !isTesting, let container = try? ModelContainer(for: schema, configurations: [cloudConfig]) {
-            return container
-        }
-
-        let localConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        // Local store. CloudKit sync is intentionally NOT enabled here yet:
+        // pointing the container at a CloudKit database WITHOUT the iCloud
+        // entitlement present is a hard OS-level termination on device (not a
+        // catchable error), so it must only be turned on AFTER the iCloud/
+        // CloudKit capability is added to the target in Xcode. Once that's done,
+        // re-enable by adding `cloudKitDatabase:
+        // .private("iCloud.abhimanyusingh.me.Jeeves")` to this configuration —
+        // the schema is already CloudKit-ready.
+        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
-            return try ModelContainer(for: schema, configurations: [localConfig])
+            return try ModelContainer(for: schema, configurations: [modelConfiguration])
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
