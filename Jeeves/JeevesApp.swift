@@ -33,17 +33,20 @@ struct JeevesApp: App {
             RoutineActivity.self,
             PlanGenerationLog.self,
         ])
-        // Local store. CloudKit sync is intentionally NOT enabled here yet:
-        // pointing the container at a CloudKit database WITHOUT the iCloud
-        // entitlement present is a hard OS-level termination on device (not a
-        // catchable error), so it must only be turned on AFTER the iCloud/
-        // CloudKit capability is added to the target in Xcode. Once that's done,
-        // re-enable by adding `cloudKitDatabase:
-        // .private("iCloud.abhimanyusingh.me.Jeeves")` to this configuration —
-        // the schema is already CloudKit-ready.
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        // Sync to the user's private iCloud database so their data backs up and
+        // follows them across devices. The iCloud/CloudKit capability is present
+        // (Jeeves.entitlements), so this initializes cleanly on device and
+        // handles a signed-out iCloud account gracefully (local until sign-in).
+        //
+        // The XCTest host has no usable iCloud in its sandbox, so tests use a
+        // plain local store — CloudKit init there crashes the runner.
+        let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        let configuration: ModelConfiguration = isTesting
+            ? ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+            : ModelConfiguration(schema: schema, isStoredInMemoryOnly: false,
+                                 cloudKitDatabase: .private("iCloud.abhimanyusingh.me.Jeeves"))
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            return try ModelContainer(for: schema, configurations: [configuration])
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
