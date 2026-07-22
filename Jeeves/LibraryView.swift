@@ -409,7 +409,7 @@ struct LibraryView: View {
             .buttonStyle(.plain)
             VStack(alignment: .leading, spacing: 4) {
                 Text("UP NEXT").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.textMuted)
-                Text(book.title).font(.system(size: 14.5, weight: .bold)).foregroundStyle(Color.textPrimary)
+                Text(book.title).font(.serif(15)).foregroundStyle(Color.textPrimary)
                 Text(book.author).font(.system(size: 12.5)).foregroundStyle(Color.textSoft)
             }
             Spacer()
@@ -621,7 +621,7 @@ private struct CurrentlyReadingRow: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(book.title)
-                        .font(.system(size: 15, weight: .bold))
+                        .font(.serif(16))
                         .foregroundStyle(Color.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(book.author)
@@ -875,7 +875,7 @@ private struct AddBooksView: View {
         return HStack(spacing: 12) {
             libraryThumbnail(urlString: result.thumbnailURLString)
             VStack(alignment: .leading, spacing: 2) {
-                Text(result.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.textPrimary)
+                Text(result.title).font(.serif(14)).foregroundStyle(Color.textPrimary)
                 Text(result.author).font(.system(size: 12)).foregroundStyle(Color.textSoft)
             }
             Spacer()
