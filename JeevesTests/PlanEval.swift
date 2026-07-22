@@ -25,6 +25,7 @@ final class PlanEval: XCTestCase {
         let events: [DailyEvent]
         let now: Date          // pinned reference clock
         let showSchedule: Bool // print the full timeline (for the travel days)
+        var routine: [BaselineActivity]? = nil  // a custom routine (exercises the routine catalog); nil = default
     }
 
     private func at(_ h: Int, _ day: Date) -> Date {
@@ -64,6 +65,29 @@ final class PlanEval: XCTestCase {
                      hasGym: false, gym: nil,
                      events: [event(jul22, 8 * 60, 12 * 60 + 30, "Travel (returning)")],
                      now: at(7, jul22), showSchedule: true),
+
+            // Two events in one day — an appointment and an evening show.
+            Scenario(name: "Two events — appointment + evening show", userMessage: "", hasGym: false, gym: nil,
+                     events: [event(today, 11 * 60, 12 * 60, "Dentist"),
+                              event(today, 19 * 60, 21 * 60 + 30, "Theatre")],
+                     now: morning, showSchedule: true),
+
+            // Morning gym AND an evening event — two kinds of anchor in one day.
+            Scenario(name: "Morning gym + evening event", userMessage: "", hasGym: true, gym: 11 * 60,
+                     events: [event(today, 19 * 60, 21 * 60, "Dinner with friends")],
+                     now: morning, showSchedule: false),
+
+            // Custom routine (routine catalog): a lighter, re-prioritized day —
+            // Chores dropped, Language practice added, Photography kept.
+            Scenario(name: "Custom routine — language practice, no chores", userMessage: "", hasGym: false, gym: nil,
+                     events: [], now: morning, showSchedule: true, routine: [
+                        BaselineActivity(name: "Interview prep — Reading", durationMinutes: 90, tier: .mustDo, note: "Morning peak-focus slot"),
+                        BaselineActivity(name: "Lunch", durationMinutes: 30, tier: .mustDo, note: "Start no earlier than 12:30; finish by 14:00 if possible"),
+                        BaselineActivity(name: "Language practice", durationMinutes: 45, tier: .important, note: nil),
+                        BaselineActivity(name: "Job applications", durationMinutes: 75, tier: .important, note: nil),
+                        BaselineActivity(name: "Reading habit", durationMinutes: 90, tier: .important, note: nil),
+                        BaselineActivity(name: "Photography", durationMinutes: 30, tier: .flexible, note: nil),
+                     ]),
         ]
     }
 
@@ -77,7 +101,8 @@ final class PlanEval: XCTestCase {
         for s in scenarios {
             let result = await PlanCoordinator.generate(.init(
                 userMessage: s.userMessage, hasGym: s.hasGym, gymMinute: s.gym,
-                events: s.events, locations: [], prepSessions: [], referenceNow: s.now))
+                events: s.events, locations: [], prepSessions: [],
+                routine: s.routine ?? Baseline.activities, referenceNow: s.now))
             let plan = result.plan
             let request = PlanRequest(userMessage: s.userMessage, hasGymToday: s.hasGym, gymMinute: s.gym,
                                       events: s.events, locations: [], defaultCommuteMinutes: 30,
