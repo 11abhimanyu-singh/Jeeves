@@ -33,10 +33,22 @@ struct JeevesApp: App {
             RoutineActivity.self,
             PlanGenerationLog.self,
         ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        // Prefer syncing to the user's private iCloud database so their data
+        // backs up and follows them across devices. This only works once the
+        // iCloud/CloudKit capability is added to the target (Signing &
+        // Capabilities in Xcode); until then, fall back to a plain local store
+        // so the app still runs. No data is lost in the fallback — the local
+        // store is migrated into the CloudKit-backed one once sync is enabled.
+        let cloudConfig = ModelConfiguration(
+            schema: schema, isStoredInMemoryOnly: false,
+            cloudKitDatabase: .private("iCloud.abhimanyusingh.me.Jeeves"))
+        if let container = try? ModelContainer(for: schema, configurations: [cloudConfig]) {
+            return container
+        }
 
+        let localConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            return try ModelContainer(for: schema, configurations: [localConfig])
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
