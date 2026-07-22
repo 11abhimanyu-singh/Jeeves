@@ -30,6 +30,18 @@ extension GeneratedBlock {
     func withDuration(_ minutes: Int) -> GeneratedBlock {
         placed(at: startMinute ?? 0, durationMinutes: minutes)
     }
+
+    /// A copy with an edited title, note/location, and length (start unchanged;
+    /// re-timing fixes the clock).
+    func edited(title: String, note: String?, durationMinutes: Int) -> GeneratedBlock {
+        let start = startMinute ?? 0
+        let cleaned = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return GeneratedBlock(title: title,
+                              startTime: Self.hhmm(start),
+                              endTime: Self.hhmm(start + durationMinutes),
+                              note: (cleaned?.isEmpty ?? true) ? nil : cleaned,
+                              isAnchor: isAnchor, kind: kind)
+    }
 }
 
 enum PlanEditLogic {

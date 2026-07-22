@@ -62,4 +62,19 @@ final class PlanEditLogicTests: XCTestCase {
         XCTAssertEqual(block.endTime, "08:45")
         XCTAssertEqual(block.durationMinutes, 45)
     }
+
+    func testEditedUpdatesTitleNoteAndDuration() {
+        let edited = b("Commute to gym", "18:00", "18:30", kind: "commute")
+            .edited(title: "Commute to studio", note: "Home → Downtown studio", durationMinutes: 45)
+        XCTAssertEqual(edited.title, "Commute to studio")
+        XCTAssertEqual(edited.note, "Home → Downtown studio")
+        XCTAssertEqual(edited.durationMinutes, 45)
+        XCTAssertEqual(edited.kind, "commute", "kind is preserved")
+        XCTAssertEqual(edited.startTime, "18:00", "start is kept; retime handles the clock")
+    }
+
+    func testEditedBlankNoteBecomesNil() {
+        let edited = b("Chores", "10:00", "10:40").edited(title: "Chores", note: "   ", durationMinutes: 40)
+        XCTAssertNil(edited.note)
+    }
 }
