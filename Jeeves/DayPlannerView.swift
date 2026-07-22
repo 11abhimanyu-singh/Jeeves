@@ -92,7 +92,7 @@ struct DayPlannerView: View {
             Button(action: planMyDay) {
                 HStack(spacing: 6) {
                     Image(systemName: "wand.and.stars").font(.system(size: 13, weight: .semibold))
-                    Text(savedPlan == nil ? "Plan my day" : "Re-plan").font(.system(size: 14.5, weight: .semibold))
+                    Text(savedPlan == nil ? "Plan my day" : "Re-plan").font(.serif(16))
                 }
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
@@ -214,7 +214,7 @@ struct DayPlannerView: View {
                         Circle().fill(Color.accent).frame(width: 50, height: 50)
                     }
                     Text(date.formatted(.dateTime.day()))
-                        .font(.system(size: numberSize, weight: .bold))
+                        .font(.serif(numberSize))
                         .foregroundStyle(numberColor)
                 }
                 .frame(width: 50, height: 50)
@@ -327,7 +327,7 @@ struct DayPlannerView: View {
                 Rectangle().fill(Color.accent).frame(width: 3).cornerRadius(1.5)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(event.title)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.serif(16))
                         .foregroundStyle(Color.textPrimary)
                     Text("\(hhmm(event.startMinute))–\(hhmm(event.endMinute)) · from \(event.outboundStart.rawValue)")
                         .font(.system(size: 11.5))
@@ -427,7 +427,7 @@ struct DayPlannerView: View {
     private var gymCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Toggle(isOn: $hasGymToday) {
-                Text(isToday ? "Gym today" : "Gym this day").font(.system(size: 14.5, weight: .semibold)).foregroundStyle(Color.textPrimary)
+                Text(isToday ? "Gym today" : "Gym this day").font(.serif(17)).foregroundStyle(Color.textPrimary)
             }
             .tint(Color.accent)
 
@@ -501,7 +501,7 @@ private struct CalendarImportSheet: View {
                                     .font(.system(size: 22))
                                     .foregroundStyle(selected.contains(event.id) ? Color.accent : Color.textMuted.opacity(0.5))
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(event.title).font(.system(size: 14.5, weight: .semibold)).foregroundStyle(Color.textPrimary)
+                                    Text(event.title).font(.serif(15)).foregroundStyle(Color.textPrimary)
                                     Text("\(hhmm(event.startMinute))–\(hhmm(event.endMinute))\(event.location.isEmpty ? "" : " · \(event.location)")")
                                         .font(.system(size: 12)).foregroundStyle(Color.textSoft).lineLimit(1)
                                 }

@@ -451,7 +451,7 @@ struct PlanTimelineCard: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(isOffline ? "OFFLINE PLAN" : "TODAY'S PLAN")
-                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.textMuted)
+                    .font(.system(size: 11, weight: .semibold)).tracking(1.2).foregroundStyle(Color.accent)
                 Spacer()
                 if let boundary = plan.boundaryTime {
                     Text("until \(boundary)").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.accentDeep)
@@ -488,7 +488,7 @@ struct PlanTimelineCard: View {
                 .frame(width: 3).cornerRadius(1.5)
             VStack(alignment: .leading, spacing: 1) {
                 Text(block.title)
-                    .font(.system(size: 14, weight: block.isAnchor ? .bold : .semibold))
+                    .font(.serif(15))
                     .foregroundStyle(Color.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let note = block.note, !note.isEmpty {

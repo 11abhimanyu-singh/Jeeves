@@ -34,11 +34,18 @@ extension Color {
     static let sageLight = Color(hex: "E1EECC")
 }
 
-// Stand-in for Caprasimo until the real font file is added to the project.
-// .rounded gives a similarly friendly, bold display feel from system fonts.
+// Editorial serif display face — Georgia, the PT Serif stand-in used in the
+// new UI design. Screen titles, activity names, and big stat numbers render in
+// it; body text, labels, and eyebrows stay in the system sans for legibility.
+// (Georgia ships with iOS, so nothing needs bundling; swap the family name here
+// if real PT Serif files are ever added.)
 extension Font {
+    static func serif(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
+        .custom("Georgia", size: size).weight(weight)
+    }
+    /// Kept for existing call sites; now resolves to the serif display face.
     static func heading(_ size: CGFloat) -> Font {
-        .system(size: size, weight: .semibold, design: .rounded)
+        serif(size)
     }
 }
 
