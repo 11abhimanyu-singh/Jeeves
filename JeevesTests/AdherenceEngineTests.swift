@@ -68,4 +68,45 @@ final class AdherenceEngineTests: XCTestCase {
         var e = DayEvidence(); e.leisureLogged = [.photography]
         XCTAssertEqual(AdherenceEngine.infer(plan: p, evidence: e), [.done])
     }
+
+    // MARK: Manual overrides
+
+    func testManualMarkWinsOverInferred() {
+        let p = plan([b("Reading habit"), b("Photography")])
+        let inferred: [BlockOutcome] = [.skipped, .done]
+        let manual = [AdherenceEngine.key(p.blocks[0]): BlockOutcome.done]  // "actually I did read"
+        let eff = AdherenceEngine.effective(plan: p, inferred: inferred, manual: manual)
+        XCTAssertEqual(eff, [.done, .done])
+    }
+
+    func testKeyIsStablePerBlock() {
+        let block = b("Lunch", kind: "lunch")
+        XCTAssertEqual(AdherenceEngine.key(block), "08:00|Lunch")
+    }
+
+    // MARK: Tier-weighted score
+
+    private var routine: [BaselineActivity] { Baseline.activities }
+
+    func testWeightedScorePenalizesMissedMustDoMore() {
+        // Reading (Interview prep — Reading, Must-do=3) missed, Photography
+        // (Flexible=1) done → 1 / (3+1) = 0.25, much lower than equal-weight 0.5.
+        let p = plan([b("Interview prep — Reading"), b("Photography")])
+        let outcomes: [BlockOutcome] = [.skipped, .done]
+        let w = AdherenceEngine.weightedScore(plan: p, outcomes: outcomes, routine: routine)!
+        XCTAssertEqual(w, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(AdherenceEngine.score(outcomes)!, 0.5, accuracy: 0.0001)
+    }
+
+    func testWeightedScoreRewardsKeepingTheMustDo() {
+        // Must-do done, Flexible skipped → 3 / (3+1) = 0.75.
+        let p = plan([b("Interview prep — Reading"), b("Photography")])
+        let w = AdherenceEngine.weightedScore(plan: p, outcomes: [.done, .skipped], routine: routine)!
+        XCTAssertEqual(w, 0.75, accuracy: 0.0001)
+    }
+
+    func testWeightedScoreNilWhenNothingAssessable() {
+        let p = plan([b("Lunch", kind: "lunch")])
+        XCTAssertNil(AdherenceEngine.weightedScore(plan: p, outcomes: [.unknown], routine: routine))
+    }
 }

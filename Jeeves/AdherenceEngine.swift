@@ -78,4 +78,47 @@ enum AdherenceEngine {
     static func assessableCount(_ outcomes: [BlockOutcome]) -> Int {
         outcomes.filter { $0 != .unknown }.count
     }
+
+    // MARK: Manual overrides
+
+    /// Stable per-block key for storing a manual done/skipped mark.
+    static func key(_ block: GeneratedBlock) -> String { "\(block.startTime)|\(block.title)" }
+
+    /// The user's manual mark wins over the inferred outcome, block by block.
+    static func effective(plan: GeneratedPlan, inferred: [BlockOutcome], manual: [String: BlockOutcome]) -> [BlockOutcome] {
+        zip(plan.blocks, inferred).map { block, auto in manual[key(block)] ?? auto }
+    }
+
+    // MARK: Tier-weighted score
+
+    /// Like `score`, but a missed Must-do hurts more than a missed Flexible.
+    /// Weights: Must-do 3, Important 2, Flexible 1 (unmatched blocks 2). Nil
+    /// when nothing is assessable.
+    static func weightedScore(plan: GeneratedPlan, outcomes: [BlockOutcome], routine: [BaselineActivity]) -> Double? {
+        var earned = 0.0, possible = 0.0
+        for (block, outcome) in zip(plan.blocks, outcomes) where outcome != .unknown {
+            let w = weight(for: block, routine: routine)
+            possible += w
+            if outcome == .done { earned += w }
+        }
+        return possible == 0 ? nil : earned / possible
+    }
+
+    private static func weight(for block: GeneratedBlock, routine: [BaselineActivity]) -> Double {
+        switch tier(for: block, routine: routine) {
+        case .mustDo: return 3
+        case .important: return 2
+        case .flexible: return 1
+        case nil: return 2   // gym/unclassified: treat as Important
+        }
+    }
+
+    private static func tier(for block: GeneratedBlock, routine: [BaselineActivity]) -> PriorityTier? {
+        if block.kind.lowercased() == "gym" { return .important }
+        let t = block.title.lowercased()
+        if let match = routine.first(where: { t == $0.name.lowercased() || t.contains($0.name.lowercased()) }) {
+            return match.tier
+        }
+        return nil
+    }
 }

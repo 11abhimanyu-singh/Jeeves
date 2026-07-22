@@ -127,6 +127,9 @@ struct DayPlannerView: View {
     @ViewBuilder
     private var planCard: some View {
         if let plan = savedPlan {
+            let inferred = AdherenceEngine.infer(plan: plan, evidence: evidence(for: selectedDate))
+            let effective = AdherenceEngine.effective(plan: plan, inferred: inferred,
+                                                      manual: selectedPlanState?.manualOutcomes ?? [:])
             HStack {
                 Spacer()
                 Button { showPlanEditor = true } label: {
@@ -134,9 +137,26 @@ struct DayPlannerView: View {
                         .font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.accentDeep)
                 }
             }
-            PlanTimelineCard(plan: plan, isOffline: selectedPlanState?.generatedPlanIsOffline ?? false)
-            adherenceCard(for: plan)
+            PlanTimelineCard(
+                plan: plan,
+                isOffline: selectedPlanState?.generatedPlanIsOffline ?? false,
+                outcomes: outcomeMap(plan, effective),
+                onToggle: { block, current in toggleOutcome(block, current: current) }
+            )
+            adherenceCard(plan: plan, outcomes: effective)
         }
+    }
+
+    private func outcomeMap(_ plan: GeneratedPlan, _ effective: [BlockOutcome]) -> [String: BlockOutcome] {
+        Dictionary(zip(plan.blocks.map(AdherenceEngine.key), effective), uniquingKeysWith: { _, b in b })
+    }
+
+    /// Cycle a block's manual mark: none → done → skipped → none.
+    private func toggleOutcome(_ block: GeneratedBlock, current: BlockOutcome) {
+        guard let state = selectedPlanState else { return }
+        let next: BlockOutcome? = current == .done ? .skipped : (current == .skipped ? nil : .done)
+        state.setManualOutcome(next, forKey: AdherenceEngine.key(block))
+        try? modelContext.save()
     }
 
     /// Persist a hand-edited plan and reschedule its reminders.
@@ -163,16 +183,17 @@ struct DayPlannerView: View {
     }
 
     @ViewBuilder
-    private func adherenceCard(for plan: GeneratedPlan) -> some View {
-        let outcomes = AdherenceEngine.infer(plan: plan, evidence: evidence(for: selectedDate))
+    private func adherenceCard(plan: GeneratedPlan, outcomes: [BlockOutcome]) -> some View {
         let assessed = AdherenceEngine.assessableCount(outcomes)
-        if let score = AdherenceEngine.score(outcomes), assessed > 0 {
+        let routine = Baseline.routine(from: routineActivities)
+        if let score = AdherenceEngine.weightedScore(plan: plan, outcomes: outcomes, routine: routine), assessed > 0 {
             let pct = Int((score * 100).rounded())
+            let done = outcomes.filter { $0 == .done }.count
             HStack(spacing: 12) {
                 Text("\(pct)%").font(.serif(26)).foregroundStyle(Color.accent)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Plan followed").font(.serif(15)).foregroundStyle(Color.textPrimary)
-                    Text("\(Int((score * Double(assessed)).rounded())) of \(assessed) tracked activities, from your logs")
+                    Text("\(done) of \(assessed) tracked — from your logs, tap a row to correct")
                         .font(.system(size: 12)).foregroundStyle(Color.textMuted)
                 }
                 Spacer(minLength: 0)
@@ -180,7 +201,6 @@ struct DayPlannerView: View {
             .padding(14)
             .background(RoundedRectangle(cornerRadius: 16).fill(Color.surface))
             .task(id: "\(selectedDate.timeIntervalSince1970)-\(pct)-\(assessed)") {
-                // Persist for later trend analysis, without a body side effect.
                 if let state = selectedPlanState {
                     state.adherenceScore = score
                     state.adherenceAssessed = assessed

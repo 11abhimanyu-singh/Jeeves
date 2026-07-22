@@ -24,9 +24,13 @@ final class DailyPlanState {
     var generatedPlanIsOffline: Bool = false
 
     // How much of this day's plan was actually followed (0–1), inferred from the
-    // day's own logs. Nil until there's something assessable to score.
+    // day's own logs (and any manual corrections). Nil until assessable.
     var adherenceScore: Double? = nil
     var adherenceAssessed: Int = 0   // how many blocks we could judge
+
+    // Manual done/skipped marks the user tapped, keyed by block (JSON). These
+    // override the inferred outcome for that block.
+    var manualOutcomesJSON: String? = nil
 
     init(date: Date, hasGymToday: Bool, gymMinute: Int?, planConfirmed: Bool = false) {
         self.date = date
@@ -43,5 +47,19 @@ final class DailyPlanState {
     func storePlan(_ plan: GeneratedPlan, isOffline: Bool) {
         generatedPlanJSON = (try? JSONEncoder().encode(plan)).flatMap { String(data: $0, encoding: .utf8) }
         generatedPlanIsOffline = isOffline
+    }
+
+    /// Manual done/skipped marks, decoded (block key → outcome).
+    var manualOutcomes: [String: BlockOutcome] {
+        guard let json = manualOutcomesJSON, let data = json.data(using: .utf8),
+              let raw = try? JSONDecoder().decode([String: String].self, from: data) else { return [:] }
+        return raw.reduce(into: [:]) { if let o = BlockOutcome(rawValue: $1.value) { $0[$1.key] = o } }
+    }
+
+    /// Set (or clear, with nil) the manual mark for one block key.
+    func setManualOutcome(_ outcome: BlockOutcome?, forKey key: String) {
+        var raw = manualOutcomes.mapValues(\.rawValue)
+        if let outcome { raw[key] = outcome.rawValue } else { raw[key] = nil }
+        manualOutcomesJSON = raw.isEmpty ? nil : (try? JSONEncoder().encode(raw)).flatMap { String(data: $0, encoding: .utf8) }
     }
 }

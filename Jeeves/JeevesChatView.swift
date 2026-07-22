@@ -448,6 +448,10 @@ struct JeevesChatView: View {
 struct PlanTimelineCard: View {
     let plan: GeneratedPlan
     let isOffline: Bool
+    // Adherence: effective outcome per block (keyed by AdherenceEngine.key) and
+    // a tap handler. When onToggle is nil the card is read-only (e.g. in chat).
+    var outcomes: [String: BlockOutcome] = [:]
+    var onToggle: ((GeneratedBlock, BlockOutcome) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -498,9 +502,21 @@ struct PlanTimelineCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 6)
+            if let onToggle {
+                let outcome = outcomes[AdherenceEngine.key(block)] ?? .unknown
+                Button { onToggle(block, outcome) } label: { checkbox(outcome) }
+                    .buttonStyle(.plain)
+            }
         }
         .padding(.vertical, 5)
+        .opacity(outcomes[AdherenceEngine.key(block)] == .skipped ? 0.55 : 1)
+    }
+
+    private func checkbox(_ o: BlockOutcome) -> some View {
+        Image(systemName: o == .done ? "checkmark.circle.fill" : (o == .skipped ? "xmark.circle" : "circle"))
+            .font(.system(size: 20))
+            .foregroundStyle(o == .done ? Color.sageDeep : (o == .skipped ? Color.textMuted : Color.surfaceDeep))
     }
 
     private func changeLine(label: String, items: [String]) -> some View {
