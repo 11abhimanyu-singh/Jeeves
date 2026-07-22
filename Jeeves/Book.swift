@@ -34,17 +34,17 @@ enum BookRating: String, Codable, CaseIterable {
 
 @Model
 final class Book {
-    var id: UUID
-    var title: String
-    var author: String
+    var id: UUID = UUID()
+    var title: String = ""
+    var author: String = ""
     var genre: String?
     var isFiction: Bool?
-    var libraryStatus: LibraryStatus
-    var status: ReadingStatus
+    var libraryStatus: LibraryStatus = LibraryStatus.owned
+    var status: ReadingStatus = ReadingStatus.unread
     var rating: BookRating?
     var totalPages: Int?
-    var currentPage: Int
-    var dateAdded: Date
+    var currentPage: Int = 0
+    var dateAdded: Date = Date.distantPast
     var dateFinished: Date?
     var isbn: String?
     var thumbnailURLString: String?
@@ -96,9 +96,9 @@ final class Book {
 /// let the day planner check completion.
 @Model
 final class ReadingLog {
-    var date: Date          // startOfDay
-    var bookID: UUID
-    var pagesRead: Int
+    var date: Date = Date.distantPast   // startOfDay
+    var bookID: UUID = UUID()
+    var pagesRead: Int = 0
 
     init(date: Date, bookID: UUID, pagesRead: Int) {
         self.date = date

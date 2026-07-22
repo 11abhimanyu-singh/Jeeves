@@ -11,8 +11,8 @@ import SwiftData
 
 @Model
 final class JobApplication {
-    var date: Date          // startOfDay — one record per day you applied
-    var appliedToday: Bool
+    var date: Date = Date.distantPast   // startOfDay — one record per day you applied
+    var appliedToday: Bool = false
     var company: String?    // optional, just for your own reference
     var notes: String?
 
@@ -34,9 +34,9 @@ enum PrepCategory: String, Codable, CaseIterable {
 
 @Model
 final class PrepSession {
-    var date: Date
-    var categoryRaw: String     // stores PrepCategory.rawValue (SwiftData needs primitive types)
-    var durationMinutes: Double
+    var date: Date = Date.distantPast
+    var categoryRaw: String = PrepCategory.reading.rawValue   // stores PrepCategory.rawValue (SwiftData needs primitive types)
+    var durationMinutes: Double = 0
     var rating: Int?            // optional 1–5 self-rating of how it went
 
     var category: PrepCategory {

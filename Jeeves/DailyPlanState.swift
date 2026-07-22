@@ -12,8 +12,8 @@ import SwiftData
 
 @Model
 final class DailyPlanState {
-    var date: Date          // startOfDay — one record per day
-    var hasGymToday: Bool
+    var date: Date = Date.distantPast   // startOfDay — one record per day
+    var hasGymToday: Bool = false
     var gymMinute: Int?     // minutes-since-midnight for weightlifting start
     var planConfirmed: Bool = false // true once the gym-input tile has been submitted or dismissed
 

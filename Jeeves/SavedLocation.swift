@@ -31,9 +31,9 @@ enum LocationKind: String, Codable, CaseIterable, Identifiable {
 
 @Model
 final class SavedLocation {
-    var kindRaw: String
-    var address: String
-    var facilities: [String]
+    var kindRaw: String = LocationKind.home.rawValue
+    var address: String = ""
+    var facilities: [String] = []
 
     var kind: LocationKind {
         get { LocationKind(rawValue: kindRaw) ?? .home }

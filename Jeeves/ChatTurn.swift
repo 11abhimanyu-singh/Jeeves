@@ -14,13 +14,13 @@ import SwiftData
 
 @Model
 final class ChatTurn {
-    var id: UUID
-    var timestamp: Date
-    var day: Date            // startOfDay — session scoping
-    var roleRaw: String      // "user" | "assistant"
-    var content: String
+    var id: UUID = UUID()
+    var timestamp: Date = Date.distantPast
+    var day: Date = Date.distantPast   // startOfDay — session scoping
+    var roleRaw: String = "assistant"   // "user" | "assistant"
+    var content: String = ""
     var planJSON: String?    // encoded GeneratedPlan when this turn is a plan
-    var isOfflinePlan: Bool
+    var isOfflinePlan: Bool = false
     @Attribute(.externalStorage) var imageData: Data?  // uploaded ticket, shown in-thread
 
     init(

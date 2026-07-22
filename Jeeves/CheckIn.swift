@@ -10,12 +10,12 @@ import SwiftData
 
 @Model
 final class CheckIn {
-    var date: Date              // normalized to start-of-day, one CheckIn per day
-    var workedOut: Bool
-    var weightTraining: Bool
-    var stretching: Bool
-    var mobility: Bool
-    var cardio: Bool
+    var date: Date = Date.distantPast   // normalized to start-of-day, one CheckIn per day
+    var workedOut: Bool = false
+    var weightTraining: Bool = false
+    var stretching: Bool = false
+    var mobility: Bool = false
+    var cardio: Bool = false
     var cardioType: String?     // "Running" or "Inclined Walk"
     var cardioDuration: Double? // minutes
     var cardioIncline: Double?  // percent

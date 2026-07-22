@@ -20,13 +20,13 @@ enum EventSource: String, Codable, CaseIterable {
 
 @Model
 final class DailyEvent {
-    var date: Date              // startOfDay — which day this event belongs to
-    var title: String
-    var startMinute: Int        // minutes since midnight
-    var endMinute: Int
-    var destinationAddress: String
-    var outboundStartRaw: String   // LocationKind.rawValue — where the user leaves from, asked per day
-    var sourceRaw: String
+    var date: Date = Date.distantPast   // startOfDay — which day this event belongs to
+    var title: String = ""
+    var startMinute: Int = 0        // minutes since midnight
+    var endMinute: Int = 0
+    var destinationAddress: String = ""
+    var outboundStartRaw: String = LocationKind.home.rawValue   // LocationKind.rawValue — where the user leaves from, asked per day
+    var sourceRaw: String = EventSource.manual.rawValue
 
     var outboundStart: LocationKind {
         get { LocationKind(rawValue: outboundStartRaw) ?? .home }

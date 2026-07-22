@@ -19,9 +19,9 @@ enum DiscretionaryActivity: String, Codable, CaseIterable {
 
 @Model
 final class LeisureLog {
-    var date: Date
-    var activityRaw: String
-    var durationMinutes: Double
+    var date: Date = Date.distantPast
+    var activityRaw: String = DiscretionaryActivity.tv.rawValue
+    var durationMinutes: Double = 0
 
     var activity: DiscretionaryActivity {
         get { DiscretionaryActivity(rawValue: activityRaw) ?? .tv }
