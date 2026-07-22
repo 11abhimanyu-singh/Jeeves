@@ -117,7 +117,12 @@ struct ContentView: View {
             tabBar
         }
         .background(Color.bg)
-        .onAppear { loadFields(for: selectedDate) }
+        .onAppear {
+            loadFields(for: selectedDate)
+            // Any plan generation still "pending" from a prior run never
+            // returned (crash/kill/hang) — record that truthfully.
+            PlanDiagnostics.sweepAbandoned(context: modelContext)
+        }
         .onChange(of: selectedDate) { _, newDate in loadFields(for: newDate) }
         .onChange(of: scenePhase) { _, phase in
             // Reliable path: whenever the app comes to the foreground, re-price

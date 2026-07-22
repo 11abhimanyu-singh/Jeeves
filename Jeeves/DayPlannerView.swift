@@ -19,6 +19,9 @@ struct DayPlannerView: View {
     @Query private var events: [DailyEvent]
     @Query private var locations: [SavedLocation]
     @Query private var routineActivities: [RoutineActivity]
+    @Query private var checkins: [CheckIn]
+    @Query private var jobApplications: [JobApplication]
+    @Query private var readingLogs: [ReadingLog]
 
     @State private var hasGymToday = true
     @State private var gymTime: Date = Calendar.current.date(bySettingHour: 11, minute: 0, second: 0, of: Date()) ?? Date()
@@ -119,6 +122,49 @@ struct DayPlannerView: View {
     private var planCard: some View {
         if let plan = savedPlan {
             PlanTimelineCard(plan: plan, isOffline: selectedPlanState?.generatedPlanIsOffline ?? false)
+            adherenceCard(for: plan)
+        }
+    }
+
+    // MARK: Adherence — was the plan followed? (inferred from the day's logs)
+
+    private func evidence(for date: Date) -> DayEvidence {
+        let day = date.startOfDay
+        let cal = Calendar.current
+        var e = DayEvidence()
+        if let c = checkins.first(where: { cal.isDate($0.date, inSameDayAs: day) }) { e.workedOut = c.workedOut }
+        e.prepCategoriesLogged = Set(prepSessions.filter { cal.isDate($0.date, inSameDayAs: day) }.map(\.category))
+        e.appliedToJobs = jobApplications.contains { cal.isDate($0.date, inSameDayAs: day) && $0.appliedToday }
+        e.readToday = readingLogs.contains { cal.isDate($0.date, inSameDayAs: day) }
+        e.leisureLogged = Set(leisureLogs.filter { cal.isDate($0.date, inSameDayAs: day) }.map(\.activity))
+        return e
+    }
+
+    @ViewBuilder
+    private func adherenceCard(for plan: GeneratedPlan) -> some View {
+        let outcomes = AdherenceEngine.infer(plan: plan, evidence: evidence(for: selectedDate))
+        let assessed = AdherenceEngine.assessableCount(outcomes)
+        if let score = AdherenceEngine.score(outcomes), assessed > 0 {
+            let pct = Int((score * 100).rounded())
+            HStack(spacing: 12) {
+                Text("\(pct)%").font(.serif(26)).foregroundStyle(Color.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Plan followed").font(.serif(15)).foregroundStyle(Color.textPrimary)
+                    Text("\(Int((score * Double(assessed)).rounded())) of \(assessed) tracked activities, from your logs")
+                        .font(.system(size: 12)).foregroundStyle(Color.textMuted)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Color.surface))
+            .task(id: "\(selectedDate.timeIntervalSince1970)-\(pct)-\(assessed)") {
+                // Persist for later trend analysis, without a body side effect.
+                if let state = selectedPlanState {
+                    state.adherenceScore = score
+                    state.adherenceAssessed = assessed
+                    try? modelContext.save()
+                }
+            }
         }
     }
 
@@ -132,7 +178,7 @@ struct DayPlannerView: View {
             // switching away mid-request (otherwise iOS tears the call down and
             // it falls back to the offline plan).
             let result = await BackgroundActivity.run("plan-my-day") {
-                await PlanCoordinator.generate(.init(
+                await PlanCoordinator.generateLogged(.init(
                     hasGym: hasGymToday,
                     gymMinute: gymMinute,
                     events: dayEvents,
@@ -140,7 +186,7 @@ struct DayPlannerView: View {
                     prepSessions: prepSessions,
                     routine: Baseline.routine(from: routineActivities),
                     planDate: date
-                ))
+                ), context: modelContext, trigger: .planner)
             }
             // Commit to this date's plan state so it persists and displays here.
             let state = planState(for: date) ?? {

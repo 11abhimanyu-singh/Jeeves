@@ -16,6 +16,7 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var locations: [SavedLocation]
     @Query private var dailyPlans: [DailyPlanState]
+    @Query(sort: \PlanGenerationLog.startedAt, order: .reverse) private var genLogs: [PlanGenerationLog]
 
     @AppStorage(NotificationService.enabledKey) private var remindersEnabled = true
 
@@ -100,6 +101,9 @@ struct SettingsView: View {
             remindersSection
                 .listRowBackground(Color.surface)
 
+            diagnosticsSection
+                .listRowBackground(Color.surface)
+
             locationsSection
                 .listRowBackground(Color.surface)
         }
@@ -107,6 +111,36 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { seedLocationsIfNeeded(); Baseline.seed(into: modelContext) }
+    }
+
+    // MARK: Diagnostics — how the planner is performing
+
+    private var diagnosticsSection: some View {
+        let s = PlanDiagnostics.summarize(genLogs)
+        return Section {
+            if s.total == 0 {
+                Text("No plans generated yet.").font(.system(size: 14)).foregroundStyle(Color.textMuted)
+            } else {
+                diagRow("Plans generated", "\(s.total)")
+                diagRow("Returned successfully", "\(Int((s.successRate * 100).rounded()))%")
+                diagRow("Typical time (p50)", "\(String(format: "%.1f", Double(s.p50Ms) / 1000))s")
+                diagRow("Slowest 5% (p95)", "\(String(format: "%.1f", Double(s.p95Ms) / 1000))s")
+                if s.offline > 0 { diagRow("Offline fallbacks", "\(s.offline)") }
+                if s.abandoned > 0 { diagRow("Never returned", "\(s.abandoned)") }
+            }
+        } header: {
+            Text("Planner diagnostics")
+        } footer: {
+            Text("How long Jeeves takes to return a plan, and how often it succeeds — recorded on-device. \"Never returned\" counts generations interrupted by a crash or force-quit.")
+        }
+    }
+
+    private func diagRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).font(.system(size: 14)).foregroundStyle(Color.textSoft)
+            Spacer()
+            Text(value).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.textPrimary)
+        }
     }
 
     // MARK: Reminders

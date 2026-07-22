@@ -31,6 +31,7 @@ struct JeevesApp: App {
             DailyEvent.self,
             ChatTurn.self,
             RoutineActivity.self,
+            PlanGenerationLog.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 

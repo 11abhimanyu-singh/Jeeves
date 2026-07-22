@@ -10,6 +10,7 @@
 //
 
 import Foundation
+import SwiftData
 
 enum PlanCoordinator {
     struct Inputs {
@@ -28,6 +29,19 @@ enum PlanCoordinator {
         let plan: GeneratedPlan
         let isOffline: Bool
         let error: String?
+        var retryCount: Int = 0   // 1 when a repair round-trip was made
+    }
+
+    /// Same as `generate`, but records a diagnostics log (duration + outcome,
+    /// with a pending record up front so a generation that never returns is
+    /// still captured). Views use this; tests/eval call `generate` directly.
+    static func generateLogged(_ inputs: Inputs, context: ModelContext, trigger: PlanGenTrigger) async -> Result {
+        let started = Date()
+        let log = PlanDiagnostics.begin(trigger: trigger, context: context)
+        let result = await generate(inputs)
+        PlanDiagnostics.finish(log, isOffline: result.isOffline, retryCount: result.retryCount,
+                               errorClass: result.error, startedAt: started, context: context)
+        return result
     }
 
     /// Generates a plan, preferring Claude and falling back to the deterministic
@@ -53,7 +67,7 @@ enum PlanCoordinator {
         }
         let repairedViolations = PlanValidation.severe(repaired, request: request)
         let best = repairedViolations.count <= firstViolations.count ? repaired : first
-        return Result(plan: best, isOffline: false, error: nil)
+        return Result(plan: best, isOffline: false, error: nil, retryCount: 1)
     }
 
     private static func requestWithCorrections(_ req: PlanRequest, violations: [PlanValidation.Violation]) -> PlanRequest {

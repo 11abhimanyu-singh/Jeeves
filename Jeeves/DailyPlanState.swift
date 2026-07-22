@@ -23,6 +23,11 @@ final class DailyPlanState {
     var generatedPlanJSON: String? = nil
     var generatedPlanIsOffline: Bool = false
 
+    // How much of this day's plan was actually followed (0–1), inferred from the
+    // day's own logs. Nil until there's something assessable to score.
+    var adherenceScore: Double? = nil
+    var adherenceAssessed: Int = 0   // how many blocks we could judge
+
     init(date: Date, hasGymToday: Bool, gymMinute: Int?, planConfirmed: Bool = false) {
         self.date = date
         self.hasGymToday = hasGymToday

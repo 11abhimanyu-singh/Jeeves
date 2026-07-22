@@ -318,7 +318,7 @@ struct JeevesChatView: View {
                 let planEvents = await extractAndCreateAnchors(from: userContext)
                 // 2. Generate (Claude, with deterministic fallback) via the
                 //    shared coordinator — same call the Day Planner uses.
-                return await PlanCoordinator.generate(.init(
+                return await PlanCoordinator.generateLogged(.init(
                     userMessage: userContext,
                     hasGym: todayPlanState?.hasGymToday ?? false,
                     gymMinute: todayPlanState?.gymMinute,
@@ -327,7 +327,7 @@ struct JeevesChatView: View {
                     prepSessions: prepSessions,
                     routine: Baseline.routine(from: routineActivities),
                     planDate: today
-                ))
+                ), context: modelContext, trigger: .chat)
             }
             // 3. COMMIT it to the Day Planner for today so it persists across
             //    launches and shows on the planner — not just here in chat.
