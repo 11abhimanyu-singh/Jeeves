@@ -86,6 +86,17 @@ struct SettingsView: View {
             )
             .listRowBackground(Color.surface)
 
+            Section {
+                NavigationLink { RoutineCatalogView() } label: {
+                    Label("Daily routine", systemImage: "list.bullet.rectangle")
+                }
+            } header: {
+                Text("Planning")
+            } footer: {
+                Text("The activities Jeeves plans your day around — their durations, priorities, and what's on or off.")
+            }
+            .listRowBackground(Color.surface)
+
             remindersSection
                 .listRowBackground(Color.surface)
 
@@ -95,7 +106,7 @@ struct SettingsView: View {
         .jeevesFormChrome()
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { seedLocationsIfNeeded() }
+        .onAppear { seedLocationsIfNeeded(); Baseline.seed(into: modelContext) }
     }
 
     // MARK: Reminders

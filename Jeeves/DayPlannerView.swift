@@ -18,6 +18,7 @@ struct DayPlannerView: View {
     @Query private var dailyPlans: [DailyPlanState]
     @Query private var events: [DailyEvent]
     @Query private var locations: [SavedLocation]
+    @Query private var routineActivities: [RoutineActivity]
 
     @State private var hasGymToday = true
     @State private var gymTime: Date = Calendar.current.date(bySettingHour: 11, minute: 0, second: 0, of: Date()) ?? Date()
@@ -137,6 +138,7 @@ struct DayPlannerView: View {
                     events: dayEvents,
                     locations: locations,
                     prepSessions: prepSessions,
+                    routine: Baseline.routine(from: routineActivities),
                     planDate: date
                 ))
             }

@@ -23,6 +23,7 @@ struct JeevesChatView: View {
     @Query private var events: [DailyEvent]
     @Query private var locations: [SavedLocation]
     @Query private var prepSessions: [PrepSession]
+    @Query private var routineActivities: [RoutineActivity]
     // Persisted conversation, oldest first — survives tab switches and restarts.
     @Query(sort: \ChatTurn.timestamp, order: .forward) private var allTurns: [ChatTurn]
 
@@ -324,6 +325,7 @@ struct JeevesChatView: View {
                     events: planEvents,
                     locations: locations,
                     prepSessions: prepSessions,
+                    routine: Baseline.routine(from: routineActivities),
                     planDate: today
                 ))
             }

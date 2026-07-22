@@ -26,6 +26,7 @@ struct PlanRequest {
     var defaultCommuteMinutes: Int     // fallback when a real Maps time isn't available
     var commuteEstimates: [String: Int] // "From→To" → minutes (real, from Google Maps when available)
     var prepNeglectNote: String?       // e.g. "Fewest sessions this week: Behavioral, then Strategy"
+    var routine: [BaselineActivity]? = nil  // the user's editable routine; nil = the hardcoded default
     var referenceNow: Date? = nil      // pinned "now" for evals; nil = real device clock
 }
 
@@ -135,7 +136,7 @@ enum PlanGenerationService {
         s += "TODAY'S REQUEST FROM THE USER:\n\(req.userMessage.isEmpty ? "(no extra context — plan a normal day)" : req.userMessage)\n\n"
 
         s += "BASELINE ROUTINE (movable blocks, each with a priority tier):\n"
-        for a in Baseline.activities {
+        for a in (req.routine ?? Baseline.activities) {
             s += "- \(a.name): \(a.durationMinutes) min [\(a.tier.rawValue)]"
             if let n = a.note { s += " — \(n)" }
             s += "\n"
