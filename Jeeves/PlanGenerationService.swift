@@ -26,6 +26,7 @@ struct PlanRequest {
     var defaultCommuteMinutes: Int     // fallback when a real Maps time isn't available
     var commuteEstimates: [String: Int] // "From→To" → minutes (real, from Google Maps when available)
     var prepNeglectNote: String?       // e.g. "Fewest sessions this week: Behavioral, then Strategy"
+    var adherenceNote: String? = nil   // what the user actually does/skips, so the plan adapts
     var routine: [BaselineActivity]? = nil  // the user's editable routine; nil = the hardcoded default
     var referenceNow: Date? = nil      // pinned "now" for evals; nil = real device clock
 }
@@ -143,6 +144,9 @@ enum PlanGenerationService {
         }
         if let neglect = req.prepNeglectNote {
             s += "Practice split guidance: \(neglect). Give the most-neglected the most time (deterministic default 45/35/25/15 by rank).\n"
+        }
+        if let adherence = req.adherenceNote {
+            s += "\(adherence)\n"
         }
         s += "\n"
 

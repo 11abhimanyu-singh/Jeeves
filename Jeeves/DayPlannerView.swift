@@ -171,21 +171,17 @@ struct DayPlannerView: View {
     // MARK: Adherence — was the plan followed? (inferred from the day's logs)
 
     private func evidence(for date: Date) -> DayEvidence {
-        let day = date.startOfDay
-        let cal = Calendar.current
-        var e = DayEvidence()
-        if let c = checkins.first(where: { cal.isDate($0.date, inSameDayAs: day) }) { e.workedOut = c.workedOut }
-        e.prepCategoriesLogged = Set(prepSessions.filter { cal.isDate($0.date, inSameDayAs: day) }.map(\.category))
-        e.appliedToJobs = jobApplications.contains { cal.isDate($0.date, inSameDayAs: day) && $0.appliedToday }
-        e.readToday = readingLogs.contains { cal.isDate($0.date, inSameDayAs: day) }
-        e.leisureLogged = Set(leisureLogs.filter { cal.isDate($0.date, inSameDayAs: day) }.map(\.activity))
-        return e
+        // Shared with the history builder (AdherenceHistory) so the live card and
+        // the adaptive-planning signal read the logs identically.
+        AdherenceHistory.evidence(day: date.startOfDay, checkins: checkins, prep: prepSessions,
+                                  jobs: jobApplications, reading: readingLogs, leisure: leisureLogs)
     }
 
     @ViewBuilder
     private func adherenceCard(plan: GeneratedPlan, outcomes: [BlockOutcome]) -> some View {
         let assessed = AdherenceEngine.assessableCount(outcomes)
         let routine = Baseline.routine(from: routineActivities)
+        let reviewable = selectedDate.startOfDay <= today
         if let score = AdherenceEngine.weightedScore(plan: plan, outcomes: outcomes, routine: routine), assessed > 0 {
             let pct = Int((score * 100).rounded())
             let done = outcomes.filter { $0 == .done }.count
@@ -193,8 +189,11 @@ struct DayPlannerView: View {
                 Text("\(pct)%").font(.serif(26)).foregroundStyle(Color.accent)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Plan followed").font(.serif(15)).foregroundStyle(Color.textPrimary)
-                    Text("\(done) of \(assessed) tracked — from your logs, tap a row to correct")
+                    // Every activity is markable, not just the auto-tracked ones —
+                    // Jeeves learns from all of them and adapts your coming days.
+                    Text("\(done) of \(assessed) so far — tap any activity above to mark it done or skipped. Jeeves learns from all of them.")
                         .font(.system(size: 12)).foregroundStyle(Color.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
             }
@@ -207,6 +206,18 @@ struct DayPlannerView: View {
                     try? modelContext.save()
                 }
             }
+        } else if reviewable {
+            // Nothing assessed yet — invite feedback on the whole day, so the
+            // app learns from every activity, not just the log-inferred ones.
+            HStack(spacing: 10) {
+                Image(systemName: "checklist").font(.system(size: 19)).foregroundStyle(Color.accent)
+                Text("How did the day go? Tap each activity above to mark it done or skipped — Jeeves learns from all of them and adapts your coming days.")
+                    .font(.system(size: 12.5)).foregroundStyle(Color.textSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Color.surface))
         }
     }
 
@@ -227,6 +238,7 @@ struct DayPlannerView: View {
                     locations: locations,
                     prepSessions: prepSessions,
                     routine: Baseline.routine(from: routineActivities),
+                    adherenceNote: AdherenceHistory.planningNote(context: modelContext, for: date),
                     planDate: date
                 ), context: modelContext, trigger: .planner)
             }

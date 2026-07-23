@@ -121,4 +121,62 @@ enum AdherenceEngine {
         }
         return nil
     }
+
+    // MARK: Adherence history → adaptive planning signal
+
+    /// How reliably one activity gets done when it's scheduled, tallied across
+    /// recent days. Only assessable appearances count (a `.done`/`.skipped`
+    /// outcome — `.unknown` days the activity wasn't observed are ignored).
+    struct ActivityAdherence: Equatable {
+        let name: String
+        var done: Int
+        var skipped: Int
+        var scheduled: Int { done + skipped }
+        var skipRate: Double { scheduled == 0 ? 0 : Double(skipped) / Double(scheduled) }
+    }
+
+    /// Group a normalizing title so the same activity tallies across days and
+    /// isn't fragmented by trailing detail (gym sub-blocks stay separate; that's
+    /// fine — they move together anyway).
+    static func historyName(_ title: String) -> String {
+        title.trimmingCharacters(in: .whitespaces).lowercased()
+    }
+
+    /// Aggregate recent days' effective outcomes into a per-activity record of
+    /// what actually gets done. `days` is (plan, effective-outcomes) pairs;
+    /// only `.done`/`.skipped` blocks are counted. Sorted worst-adherence first.
+    static func history(_ days: [(plan: GeneratedPlan, outcomes: [BlockOutcome])]) -> [ActivityAdherence] {
+        var tally: [String: (title: String, done: Int, skipped: Int)] = [:]
+        for day in days {
+            for (block, outcome) in zip(day.plan.blocks, day.outcomes) {
+                guard outcome == .done || outcome == .skipped else { continue }
+                let key = historyName(block.title)
+                var t = tally[key] ?? (block.title.trimmingCharacters(in: .whitespaces), 0, 0)
+                if outcome == .done { t.done += 1 } else { t.skipped += 1 }
+                tally[key] = t
+            }
+        }
+        return tally.values
+            .map { ActivityAdherence(name: $0.title, done: $0.done, skipped: $0.skipped) }
+            .sorted { ($0.skipRate, $0.scheduled) > ($1.skipRate, $1.scheduled) }
+    }
+
+    /// A planner-facing note naming the activities the user tends NOT to do when
+    /// scheduled, so the model can adapt (move, shrink, or drop them) instead of
+    /// re-scheduling the same thing that never sticks. Nil when there isn't
+    /// enough signal. Lunch and other Must-dos are never flagged — they stay.
+    static func adherenceNote(_ history: [ActivityAdherence],
+                              minSamples: Int = 2, skipThreshold: Double = 0.5) -> String? {
+        let flagged = history.filter {
+            $0.scheduled >= minSamples
+                && $0.skipRate >= skipThreshold
+                && !$0.name.lowercased().contains("lunch")
+        }
+        guard !flagged.isEmpty else { return nil }
+        let list = flagged
+            .map { "\($0.name) (skipped \($0.skipped) of \($0.scheduled) times scheduled)" }
+            .joined(separator: "; ")
+        return "ADHERENCE HISTORY — the user tends NOT to do these when scheduled: \(list). "
+            + "Adapt to what actually sticks: try a different time of day, a shorter block, or a lower priority — don't just re-schedule it the same way. Must-do items (like lunch) still stay."
+    }
 }

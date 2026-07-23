@@ -21,6 +21,7 @@ enum PlanCoordinator {
         var locations: [SavedLocation]
         var prepSessions: [PrepSession]
         var routine: [BaselineActivity] = Baseline.activities  // the user's editable routine
+        var adherenceNote: String? = nil // recent done/skip history, so the plan adapts to what sticks
         var planDate: Date = Date()     // the day being planned — commute legs use its scheduled departure times for predictive traffic
         var referenceNow: Date? = nil   // pinned "now" for evals; nil = real clock
     }
@@ -170,6 +171,7 @@ enum PlanCoordinator {
             defaultCommuteMinutes: 30,
             commuteEstimates: commutes,
             prepNeglectNote: prepNeglectNote(i.prepSessions),
+            adherenceNote: i.adherenceNote,
             routine: i.routine,
             referenceNow: i.referenceNow
         )

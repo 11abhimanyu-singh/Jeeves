@@ -407,6 +407,7 @@ struct JeevesChatView: View {
             locations: locations,
             prepSessions: prepSessions,
             routine: Baseline.routine(from: routineActivities),
+            adherenceNote: AdherenceHistory.planningNote(context: modelContext, for: date),
             planDate: date
         ), context: modelContext, trigger: .chat)
         commitPlan(result.plan, isOffline: result.isOffline, on: date)
@@ -491,6 +492,7 @@ struct JeevesChatView: View {
                     locations: locations,
                     prepSessions: prepSessions,
                     routine: Baseline.routine(from: routineActivities),
+                    adherenceNote: AdherenceHistory.planningNote(context: modelContext, for: today),
                     planDate: today
                 ), context: modelContext, trigger: .chat)
             }

@@ -117,4 +117,55 @@ final class AdherenceEngineTests: XCTestCase {
         let p = plan([b("Lunch", kind: "lunch")])
         XCTAssertNil(AdherenceEngine.weightedScore(plan: p, outcomes: [.unknown], routine: routine))
     }
+
+    // MARK: Adherence history → adaptive note
+
+    func testHistoryTalliesPerActivityAcrossDays() {
+        let p1 = plan([b("Interview prep — Reading"), b("Chores")])
+        let p2 = plan([b("Interview prep — Reading"), b("Chores")])
+        let days: [(plan: GeneratedPlan, outcomes: [BlockOutcome])] = [
+            (p1, [.skipped, .done]),
+            (p2, [.skipped, .skipped]),
+        ]
+        let history = AdherenceEngine.history(days)
+        let reading = history.first { $0.name == "Interview prep — Reading" }
+        let chores = history.first { $0.name == "Chores" }
+        XCTAssertEqual(reading, .init(name: "Interview prep — Reading", done: 0, skipped: 2))
+        XCTAssertEqual(reading?.skipRate ?? 0, 1.0, accuracy: 0.0001)
+        XCTAssertEqual(chores, .init(name: "Chores", done: 1, skipped: 1))
+        XCTAssertEqual(chores?.skipRate ?? 0, 0.5, accuracy: 0.0001)
+        // Worst-adherence first.
+        XCTAssertEqual(history.first?.name, "Interview prep — Reading")
+    }
+
+    func testHistoryIgnoresUnknownAppearances() {
+        // Lunch appears twice but is never assessed → it isn't in the tally.
+        let p = plan([b("Lunch", kind: "lunch")])
+        let history = AdherenceEngine.history([(p, [.unknown]), (p, [.unknown])])
+        XCTAssertTrue(history.isEmpty)
+    }
+
+    func testAdherenceNoteFlagsFrequentlySkipped() {
+        let history = [
+            AdherenceEngine.ActivityAdherence(name: "Interview prep — Reading", done: 0, skipped: 3),
+            AdherenceEngine.ActivityAdherence(name: "Job applications", done: 3, skipped: 0),
+        ]
+        let note = AdherenceEngine.adherenceNote(history)
+        XCTAssertNotNil(note)
+        XCTAssertTrue(note!.contains("Interview prep — Reading"), "the skipped item is named")
+        XCTAssertFalse(note!.contains("Job applications"), "a reliably-done item isn't flagged")
+    }
+
+    func testAdherenceNoteNeedsEnoughSamples() {
+        // Skipped once, only scheduled once → below the 2-sample floor.
+        let history = [AdherenceEngine.ActivityAdherence(name: "Chores", done: 0, skipped: 1)]
+        XCTAssertNil(AdherenceEngine.adherenceNote(history))
+    }
+
+    func testAdherenceNoteNeverFlagsLunch() {
+        // Even if the data says lunch is skipped, a Must-do is never flagged for
+        // rescheduling/dropping.
+        let history = [AdherenceEngine.ActivityAdherence(name: "Lunch", done: 0, skipped: 4)]
+        XCTAssertNil(AdherenceEngine.adherenceNote(history))
+    }
 }

@@ -80,6 +80,7 @@ enum AutoPlanService {
                 locations: locations,
                 prepSessions: prepSessions,
                 routine: routine,
+                adherenceNote: AdherenceHistory.planningNote(context: context, for: day),
                 planDate: day
             ))
             // An offline (deterministic) plan is a poor thing to silently pin
