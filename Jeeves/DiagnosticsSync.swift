@@ -13,6 +13,17 @@
 
 import Foundation
 
+extension DateFormatter {
+    /// All human-facing timestamps render in India Standard Time.
+    static let istTimestamp: DateFormatter = {
+        let f = DateFormatter()
+        f.timeZone = TimeZone(identifier: "Asia/Kolkata")
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss 'IST'"
+        return f
+    }()
+}
+
 enum DiagnosticsSync {
     private static let containerID = "iCloud.abhimanyusingh.me.Jeeves"
     private static let fileName = "jeeves-diagnostics.json"
@@ -71,7 +82,7 @@ enum DiagnosticsSync {
     static let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.outputFormatting = [.prettyPrinted, .sortedKeys]
-        e.dateEncodingStrategy = .iso8601
+        e.dateEncodingStrategy = .formatted(.istTimestamp)   // IST, not UTC
         return e
     }()
 }

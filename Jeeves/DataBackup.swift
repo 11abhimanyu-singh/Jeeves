@@ -41,8 +41,8 @@ enum DataBackup {
                 }
             }
 
-            // A tiny manifest so it's obvious when the snapshot was taken.
-            let stamp = ISO8601DateFormatter().string(from: now)
+            // A tiny manifest so it's obvious when the snapshot was taken (IST).
+            let stamp = DateFormatter.istTimestamp.string(from: now)
             try? Data("{\"backedUpAt\":\"\(stamp)\"}".utf8)
                 .write(to: backupDir.appendingPathComponent("manifest.json"), options: .atomic)
         }
