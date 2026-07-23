@@ -125,6 +125,10 @@ struct SettingsView: View {
                 diagRow("Returned successfully", "\(Int((s.successRate * 100).rounded()))%")
                 diagRow("Typical time (p50)", "\(String(format: "%.1f", Double(s.p50Ms) / 1000))s")
                 diagRow("Slowest 5% (p95)", "\(String(format: "%.1f", Double(s.p95Ms) / 1000))s")
+                if s.p50ClaudeMs > 0 || s.p50CommuteMs > 0 {
+                    diagRow("  ↳ Claude (p50)", "\(String(format: "%.1f", Double(s.p50ClaudeMs) / 1000))s")
+                    diagRow("  ↳ Commute lookups (p50)", "\(String(format: "%.1f", Double(s.p50CommuteMs) / 1000))s")
+                }
                 if s.offline > 0 { diagRow("Offline fallbacks", "\(s.offline)") }
                 if s.abandoned > 0 { diagRow("Never returned", "\(s.abandoned)") }
             }

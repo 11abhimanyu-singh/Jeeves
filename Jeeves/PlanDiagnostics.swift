@@ -27,6 +27,8 @@ enum PlanGenOutcome: String, Codable {
 final class PlanGenerationLog {
     var startedAt: Date = Date.distantPast
     var durationMs: Int = 0
+    var commuteMs: Int = 0    // sub-span: time fetching commute times (Maps)
+    var claudeMs: Int = 0     // sub-span: time in the Claude call(s)
     var triggerRaw: String = PlanGenTrigger.planner.rawValue
     var outcomeRaw: String = PlanGenOutcome.pending.rawValue
     var retryCount: Int = 0
@@ -60,8 +62,10 @@ enum PlanDiagnostics {
     }
 
     /// Resolve the pending record once generation returns.
-    static func finish(_ log: PlanGenerationLog, isOffline: Bool, retryCount: Int, errorClass: String?, startedAt: Date, context: ModelContext) {
+    static func finish(_ log: PlanGenerationLog, isOffline: Bool, retryCount: Int, commuteMs: Int, claudeMs: Int, errorClass: String?, startedAt: Date, context: ModelContext) {
         log.durationMs = Int(Date().timeIntervalSince(startedAt) * 1000)
+        log.commuteMs = commuteMs
+        log.claudeMs = claudeMs
         log.outcome = outcome(isOffline: isOffline, retryCount: retryCount)
         log.retryCount = retryCount
         log.errorClass = errorClass
@@ -87,6 +91,8 @@ enum PlanDiagnostics {
         var abandoned = 0
         var p50Ms = 0
         var p95Ms = 0
+        var p50CommuteMs = 0  // median of the Maps sub-span
+        var p50ClaudeMs = 0   // median of the Claude sub-span
         var successRate: Double { total == 0 ? 0 : Double(succeeded) / Double(total) }
     }
 
@@ -98,11 +104,19 @@ enum PlanDiagnostics {
         s.succeeded = finished.filter { $0.outcome == .success || $0.outcome == .repaired }.count
         s.offline = finished.filter { $0.outcome == .offlineFallback }.count
         s.abandoned = finished.filter { $0.outcome == .abandoned }.count
-        let durations = finished.filter { $0.outcome != .abandoned }.map(\.durationMs).sorted()
-        if !durations.isEmpty {
-            s.p50Ms = durations[durations.count / 2]
-            s.p95Ms = durations[min(durations.count - 1, Int(Double(durations.count) * 0.95))]
+        let real = finished.filter { $0.outcome != .abandoned }
+        func median(_ values: [Int]) -> Int {
+            let sorted = values.sorted()
+            return sorted.isEmpty ? 0 : sorted[sorted.count / 2]
         }
+        func p95(_ values: [Int]) -> Int {
+            let sorted = values.sorted()
+            return sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
+        }
+        s.p50Ms = median(real.map(\.durationMs))
+        s.p95Ms = p95(real.map(\.durationMs))
+        s.p50CommuteMs = median(real.map(\.commuteMs))
+        s.p50ClaudeMs = median(real.map(\.claudeMs))
         return s
     }
 }

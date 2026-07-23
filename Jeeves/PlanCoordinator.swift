@@ -30,6 +30,8 @@ enum PlanCoordinator {
         let isOffline: Bool
         let error: String?
         var retryCount: Int = 0   // 1 when a repair round-trip was made
+        var commuteMs: Int = 0    // time spent fetching commute times (Maps)
+        var claudeMs: Int = 0     // time spent in the Claude call(s)
     }
 
     /// Same as `generate`, but records a diagnostics log (duration + outcome,
@@ -40,6 +42,7 @@ enum PlanCoordinator {
         let log = PlanDiagnostics.begin(trigger: trigger, context: context)
         let result = await generate(inputs)
         PlanDiagnostics.finish(log, isOffline: result.isOffline, retryCount: result.retryCount,
+                               commuteMs: result.commuteMs, claudeMs: result.claudeMs,
                                errorClass: result.error, startedAt: started, context: context)
         return result
     }
@@ -50,24 +53,31 @@ enum PlanCoordinator {
     /// Must-do, wasted afternoon, overlap, out-of-bounds work) is retried once
     /// with the problems fed back, and the cleaner of the two is kept.
     static func generate(_ inputs: Inputs) async -> Result {
-        let request = await buildRequest(inputs)
+        let t0 = Date()
+        let request = await buildRequest(inputs)   // Maps commute lookups happen here
+        let commuteMs = Int(Date().timeIntervalSince(t0) * 1000)
 
+        let tClaude = Date()
         guard let first = try? await PlanGenerationService.generate(request) else {
-            return Result(plan: deterministic(inputs), isOffline: true, error: "planning service unreachable")
+            return Result(plan: deterministic(inputs), isOffline: true, error: "planning service unreachable",
+                          commuteMs: commuteMs, claudeMs: Int(Date().timeIntervalSince(tClaude) * 1000))
         }
         let firstViolations = PlanValidation.severe(first, request: request)
         if firstViolations.isEmpty {
-            return Result(plan: first, isOffline: false, error: nil)
+            return Result(plan: first, isOffline: false, error: nil,
+                          commuteMs: commuteMs, claudeMs: Int(Date().timeIntervalSince(tClaude) * 1000))
         }
 
         // One repair pass: tell the model exactly what was wrong.
         let repairRequest = requestWithCorrections(request, violations: firstViolations)
         guard let repaired = try? await PlanGenerationService.generate(repairRequest) else {
-            return Result(plan: first, isOffline: false, error: nil) // keep the first plan if the retry can't run
+            return Result(plan: first, isOffline: false, error: nil, // keep the first plan if the retry can't run
+                          commuteMs: commuteMs, claudeMs: Int(Date().timeIntervalSince(tClaude) * 1000))
         }
         let repairedViolations = PlanValidation.severe(repaired, request: request)
         let best = repairedViolations.count <= firstViolations.count ? repaired : first
-        return Result(plan: best, isOffline: false, error: nil, retryCount: 1)
+        return Result(plan: best, isOffline: false, error: nil, retryCount: 1,
+                      commuteMs: commuteMs, claudeMs: Int(Date().timeIntervalSince(tClaude) * 1000))
     }
 
     private static func requestWithCorrections(_ req: PlanRequest, violations: [PlanValidation.Violation]) -> PlanRequest {

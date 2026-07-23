@@ -87,13 +87,18 @@ enum GoogleMapsService {
     /// leg carries its scheduled departure so estimates use predicted traffic
     /// for that time of day (nil departure = live traffic now).
     static func commuteEstimates(legs: [(label: String, from: String, to: String, departure: Date?)]) async -> [String: Int] {
-        var result: [String: Int] = [:]
-        for leg in legs {
-            if let mins = await commuteMinutes(from: leg.from, to: leg.to, departure: leg.departure) {
-                result[leg.label] = mins
+        // Fetch every leg concurrently — they're independent network calls, so
+        // running them in parallel turns N sequential round-trips into one.
+        await withTaskGroup(of: (String, Int?).self) { group in
+            for leg in legs {
+                group.addTask { (leg.label, await commuteMinutes(from: leg.from, to: leg.to, departure: leg.departure)) }
             }
+            var result: [String: Int] = [:]
+            for await (label, mins) in group where mins != nil {
+                result[label] = mins
+            }
+            return result
         }
-        return result
     }
 
     /// The computeRoutes request body. Pure (injected `now`) and unit-tested:

@@ -48,4 +48,21 @@ final class PlanDiagnosticsTests: XCTestCase {
         XCTAssertEqual(s.total, 0)
         XCTAssertEqual(s.successRate, 0)
     }
+
+    func testSummaryBreaksDownClaudeVsCommute() {
+        func spanned(_ total: Int, claude: Int, commute: Int) -> PlanGenerationLog {
+            let l = PlanGenerationLog(startedAt: .distantPast, trigger: .planner)
+            l.outcome = .success; l.durationMs = total; l.claudeMs = claude; l.commuteMs = commute
+            return l
+        }
+        // Claude dominates; commute is small — the breakdown should show it.
+        let s = PlanDiagnostics.summarize([
+            spanned(38000, claude: 35000, commute: 3000),
+            spanned(40000, claude: 37000, commute: 3000),
+            spanned(34000, claude: 31000, commute: 3000),
+        ])
+        XCTAssertEqual(s.p50ClaudeMs, 35000)
+        XCTAssertEqual(s.p50CommuteMs, 3000)
+        XCTAssertGreaterThan(s.p50ClaudeMs, s.p50CommuteMs, "Claude is the bottleneck, not the Maps lookups")
+    }
 }
