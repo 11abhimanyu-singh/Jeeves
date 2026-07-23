@@ -136,6 +136,12 @@ struct ContentView: View {
                 Task {
                     await CommuteRefresh.run(context: modelContext)
                     CommuteBackgroundRefresh.scheduleNext(context: modelContext)
+                    // Backstop for the overnight auto-planner: if the system
+                    // never granted a background slot, fill any missing upcoming
+                    // day now so today's plan is ready the moment they open the
+                    // app. A no-op once the window is already planned.
+                    await AutoPlanService.ensureUpcomingPlans(context: modelContext)
+                    AutoPlanService.scheduleNext(context: modelContext)
                 }
             }
         }

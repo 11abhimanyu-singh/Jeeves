@@ -5,6 +5,7 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>abhimanyusingh.me.Jeeves.commute-refresh</string>
+		<string>abhimanyusingh.me.Jeeves.auto-plan</string>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>
