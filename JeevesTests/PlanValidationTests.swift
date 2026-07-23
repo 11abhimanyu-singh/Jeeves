@@ -38,6 +38,44 @@ final class PlanValidationTests: XCTestCase {
         XCTAssertTrue(PlanValidation.validate(plan, request: request()).isEmpty)
     }
 
+    // MARK: Mid-day re-plan relaxations
+
+    func testReplanBeforeLunchWindowStillRequiresLunch() {
+        // 11:00 re-plan, lunch not yet had and omitted → still a severe miss.
+        let plan = GeneratedPlan(
+            blocks: [b("Job applications", "11:00", "12:30"), b("Free time", "12:30", "20:30", kind: "free")],
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        let v = PlanValidation.severe(plan, request: request(), replanNowMinute: 11 * 60)
+        XCTAssertTrue(v.contains { $0.message.localizedCaseInsensitiveContains("lunch") },
+                      "before 14:30, a re-plan must still schedule lunch")
+    }
+
+    func testReplanAfterLunchWindowAllowsMissingLunch() {
+        // 15:00 re-plan, lunch was skipped (never happened) → not a violation.
+        let plan = GeneratedPlan(
+            blocks: [b("Job applications", "15:00", "16:30"), b("Free time", "16:30", "20:30", kind: "free")],
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        XCTAssertTrue(PlanValidation.severe(plan, request: request(), replanNowMinute: 15 * 60).isEmpty,
+                      "past 14:30, a skipped lunch is legitimate")
+    }
+
+    func testReplanStillCatchesOverlap() {
+        // The structural seam invariant is NOT relaxed for a re-plan.
+        let plan = GeneratedPlan(
+            blocks: [b("Massage", "10:30", "13:30", kind: "event"), b("Reading", "13:00", "14:00")],
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        let v = PlanValidation.severe(plan, request: request(), replanNowMinute: 13 * 60 + 30)
+        XCTAssertTrue(v.contains { $0.message.localizedCaseInsensitiveContains("overlap") })
+    }
+
+    func testNormalPathStillRequiresLunchAfterWindow() {
+        // Without replanNowMinute, a missing lunch is always severe (eval-safe).
+        let plan = GeneratedPlan(
+            blocks: [b("Job applications", "15:00", "16:30")],
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        XCTAssertTrue(PlanValidation.severe(plan, request: request()).contains { $0.message.localizedCaseInsensitiveContains("lunch") })
+    }
+
     // MARK: Severe violations
 
     func testOverlapIsSevere() {

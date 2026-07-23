@@ -350,7 +350,14 @@ struct JeevesChatView: View {
         }
         let c = Calendar.current
         let nowMinute = c.component(.hour, from: Date()) * 60 + c.component(.minute, from: Date())
-        // Preserve everything already finished; the planner rebuilds only the rest.
+        // Past the 20:30 work boundary there's no work day left to re-shape —
+        // the rest is wind-down and sleep. Decline gracefully rather than ask the
+        // planner for an impossible "from 21:00 to 20:30" window.
+        guard nowMinute < 20 * 60 + 30 else {
+            return .init(text: "It's past the 20:30 work boundary, so the work day is done — the rest of the evening is wind-down and sleep. Tell the user there's nothing left to re-plan tonight; offer to sort out tomorrow instead.")
+        }
+        // Preserve everything already finished; the planner rebuilds only the
+        // rest, and PlanCoordinator stitches + validates the merged day.
         let locked = PlanCoordinator.lockedBlocks(committed, endedBy: nowMinute)
         let doneNote = locked.map(\.title).joined(separator: ", ")
 
@@ -365,22 +372,17 @@ struct JeevesChatView: View {
             adherenceNote: AdherenceHistory.planningNote(context: modelContext, for: today),
             replanFromMinute: nowMinute,
             alreadyDoneNote: doneNote.isEmpty ? nil : doneNote,
+            lockedBlocks: locked,
             planDate: today
         ), context: modelContext, trigger: .chat)
 
         guard !result.isOffline else {
             return .init(text: "Couldn't reach the planner to re-plan — your current schedule is unchanged.\(result.error.map { " (\($0))" } ?? "")")
         }
-        // Stitch the preserved morning onto the freshly re-planned remainder.
-        let merged = GeneratedPlan(
-            blocks: locked + result.plan.blocks,
-            dropped: result.plan.dropped, shrunk: result.plan.shrunk,
-            summary: result.plan.summary, boundaryTime: result.plan.boundaryTime
-        )
-        commitPlan(merged, isOffline: false, on: today)
+        commitPlan(result.plan, isOffline: false, on: today)
         await NotificationService.notifyPlanReady(isOffline: false)
         return .init(text: "Re-planned from \(hhmm(nowMinute)), keeping what you'd already done. \(result.plan.summary)",
-                     plan: merged, isOfflinePlan: false)
+                     plan: result.plan, isOfflinePlan: false)
     }
 
     @MainActor

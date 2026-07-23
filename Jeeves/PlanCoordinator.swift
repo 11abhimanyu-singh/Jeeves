@@ -24,6 +24,7 @@ enum PlanCoordinator {
         var adherenceNote: String? = nil // recent done/skip history, so the plan adapts to what sticks
         var replanFromMinute: Int? = nil // mid-day re-plan: schedule only from here forward
         var alreadyDoneNote: String? = nil // titles done earlier today, so the re-plan doesn't re-add them
+        var lockedBlocks: [GeneratedBlock] = [] // already-elapsed blocks to preserve verbatim across a re-plan
         var planDate: Date = Date()     // the day being planned — commute legs use its scheduled departure times for predictive traffic
         var referenceNow: Date? = nil   // pinned "now" for evals; nil = real clock
     }
@@ -68,12 +69,32 @@ enum PlanCoordinator {
             return Result(plan: deterministic(inputs), isOffline: true, error: "planning service unreachable",
                           commuteMs: commuteMs, claudeMs: Int(Date().timeIntervalSince(tClaude) * 1000))
         }
-        // A mid-day re-plan covers only the remainder, so the normal-day
-        // invariants (lunch window, full 08:00 start, everything-present) don't
-        // hold — skip the strict validator/retry and take the plan as produced.
-        if inputs.replanFromMinute != nil {
-            return Result(plan: first, isOffline: false, error: nil,
-                          commuteMs: commuteMs, claudeMs: Int(Date().timeIntervalSince(tClaude) * 1000))
+        // A mid-day re-plan produces only the REMAINDER; stitch the preserved
+        // (already-elapsed) blocks back on and validate the whole merged plan —
+        // with the re-plan relaxations (lunch window past its time, midday-event
+        // rule). The structural invariants (non-overlap seam, events present,
+        // lunch-still-present while reachable) are still enforced and repaired.
+        if let from = inputs.replanFromMinute {
+            func merge(_ remainder: GeneratedPlan) -> GeneratedPlan {
+                GeneratedPlan(blocks: inputs.lockedBlocks + remainder.blocks,
+                              dropped: remainder.dropped, shrunk: remainder.shrunk,
+                              summary: remainder.summary, boundaryTime: remainder.boundaryTime)
+            }
+            let elapsed = { Int(Date().timeIntervalSince(tClaude) * 1000) }
+            let mergedFirst = merge(first)
+            let v = PlanValidation.severe(mergedFirst, request: request, replanNowMinute: from)
+            if v.isEmpty {
+                return Result(plan: mergedFirst, isOffline: false, error: nil, commuteMs: commuteMs, claudeMs: elapsed())
+            }
+            // One repair pass, same as the normal path.
+            let repairRequest = requestWithCorrections(request, violations: v)
+            guard let repaired = try? await PlanGenerationService.generate(repairRequest) else {
+                return Result(plan: mergedFirst, isOffline: false, error: nil, commuteMs: commuteMs, claudeMs: elapsed())
+            }
+            let mergedRepaired = merge(repaired)
+            let rv = PlanValidation.severe(mergedRepaired, request: request, replanNowMinute: from)
+            let best = rv.count <= v.count ? mergedRepaired : mergedFirst
+            return Result(plan: best, isOffline: false, error: nil, retryCount: 1, commuteMs: commuteMs, claudeMs: elapsed())
         }
         let firstViolations = PlanValidation.severe(first, request: request)
         if firstViolations.isEmpty {

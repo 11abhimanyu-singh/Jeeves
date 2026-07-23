@@ -24,8 +24,18 @@ enum PlanValidation {
     static let boundary = 20 * 60 + 30
 
     /// Returns every rule violation in the plan. Empty == valid.
-    static func validate(_ plan: GeneratedPlan, request: PlanRequest) -> [Violation] {
+    ///
+    /// `replanNowMinute` (set on a mid-day re-plan) relaxes only what genuinely
+    /// no longer holds for a partial day: the lunch window/presence once its
+    /// window has passed, and the midday-event-wastes-afternoon rule. The
+    /// structural invariants (non-overlap, work bounds, gym, events-present, and
+    /// lunch-still-present while its window is reachable) stay enforced. Nil =
+    /// the normal full-day path, byte-for-byte unchanged.
+    static func validate(_ plan: GeneratedPlan, request: PlanRequest, replanNowMinute: Int? = nil) -> [Violation] {
         var out: [Violation] = []
+        // Lunch is still relevant unless we're re-planning after its hard-latest
+        // start (14:30) — past that a re-planned lunch legitimately can't fit.
+        let lunchRelevant = replanNowMinute.map { $0 < 14 * 60 + 30 } ?? true
 
         let timed: [(block: GeneratedBlock, start: Int, end: Int)] = plan.blocks.compactMap {
             guard let s = $0.startMinute, let e = $0.endMinute else { return nil }
@@ -117,16 +127,21 @@ enum PlanValidation {
             }
         }
         if let lunch = timed.first(where: { $0.block.kind.lowercased() == "lunch" || $0.block.title.localizedCaseInsensitiveContains("lunch") }) {
-            // Window: 12:30 earliest, finish by 14:00 preferred, 14:30 hard latest start.
-            if lunch.start < 12 * 60 + 30 {
-                out.append(Violation(severity: .severe, message: "Lunch starts at \(hhmm(lunch.start)) — before the 12:30 earliest (no late-morning brunch)"))
+            // Window: 12:30 earliest, finish by 14:00 preferred, 14:30 hard latest
+            // start. On a re-plan past the window, a preserved/late lunch is fine.
+            if lunchRelevant {
+                if lunch.start < 12 * 60 + 30 {
+                    out.append(Violation(severity: .severe, message: "Lunch starts at \(hhmm(lunch.start)) — before the 12:30 earliest (no late-morning brunch)"))
+                }
+                if lunch.start > 14 * 60 + 30 {
+                    out.append(Violation(severity: .severe, message: "Lunch starts at \(hhmm(lunch.start)) — past the 14:30 Must-do deadline"))
+                } else if lunch.end > 14 * 60 {
+                    out.append(Violation(severity: .quality, message: "Lunch finishes at \(hhmm(lunch.end)) — past the 14:00 finish preference"))
+                }
             }
-            if lunch.start > 14 * 60 + 30 {
-                out.append(Violation(severity: .severe, message: "Lunch starts at \(hhmm(lunch.start)) — past the 14:30 Must-do deadline"))
-            } else if lunch.end > 14 * 60 {
-                out.append(Violation(severity: .quality, message: "Lunch finishes at \(hhmm(lunch.end)) — past the 14:00 finish preference"))
-            }
-        } else {
+        } else if lunchRelevant {
+            // Once the lunch window has passed on a re-plan, a missing lunch is
+            // legitimate (it was skipped); before then it must still appear.
             out.append(Violation(severity: .severe, message: "Lunch (a Must-do) is missing from the plan"))
         }
 
@@ -139,8 +154,10 @@ enum PlanValidation {
 
         // 5. A midday event must not discard the rest of the day: if the last
         //    event ends with hours to spare and work was dropped, there must be
-        //    productive work after it. (The exact bug we fixed.)
-        if let lastEventEnd = timed.filter({ $0.block.kind.lowercased() == "event" }).map(\.end).max(),
+        //    productive work after it. (The exact bug we fixed.) A mid-day
+        //    re-plan is already a partial day, so this doesn't apply there.
+        if replanNowMinute == nil,
+           let lastEventEnd = timed.filter({ $0.block.kind.lowercased() == "event" }).map(\.end).max(),
            lastEventEnd <= 17 * 60, !plan.dropped.isEmpty {
             let workAfter = timed.contains { $0.start >= lastEventEnd && ["activity", "lunch"].contains($0.block.kind.lowercased()) }
             if !workAfter {
@@ -152,8 +169,8 @@ enum PlanValidation {
         return out
     }
 
-    static func severe(_ plan: GeneratedPlan, request: PlanRequest) -> [Violation] {
-        validate(plan, request: request).filter { $0.severity == .severe }
+    static func severe(_ plan: GeneratedPlan, request: PlanRequest, replanNowMinute: Int? = nil) -> [Violation] {
+        validate(plan, request: request, replanNowMinute: replanNowMinute).filter { $0.severity == .severe }
     }
 
     private static func hhmm(_ m: Int) -> String { String(format: "%02d:%02d", m / 60, m % 60) }

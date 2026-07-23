@@ -194,7 +194,7 @@ struct DayPlannerView: View {
         let assessed = AdherenceEngine.assessableCount(outcomes)
         let routine = Baseline.routine(from: routineActivities)
         let reviewable = selectedDate.startOfDay <= today
-        if let score = AdherenceEngine.weightedScore(plan: plan, outcomes: outcomes, routine: routine), assessed > 0 {
+        if reviewable, let score = AdherenceEngine.weightedScore(plan: plan, outcomes: outcomes, routine: routine), assessed > 0 {
             let pct = Int((score * 100).rounded())
             let done = outcomes.filter { $0 == .done }.count
             HStack(spacing: 12) {
