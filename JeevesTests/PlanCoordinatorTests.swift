@@ -19,6 +19,33 @@ final class PlanCoordinatorTests: XCTestCase {
                    destinationAddress: "somewhere", outboundStart: .home, source: .manual)
     }
 
+    private func blk(_ title: String, _ start: String, _ end: String, kind: String = "activity") -> GeneratedBlock {
+        GeneratedBlock(title: title, startTime: start, endTime: end, note: nil, isAnchor: false, kind: kind)
+    }
+
+    // MARK: Mid-day re-plan — which blocks are preserved
+
+    func testLockedBlocksArePreciselyThoseFullyElapsed() {
+        let plan = GeneratedPlan(blocks: [
+            blk("Morning shower", "09:36", "09:56"),
+            blk("Massage", "10:30", "13:00", kind: "event"),
+            blk("Lunch", "13:00", "13:30", kind: "lunch"),
+            blk("Reading", "13:30", "14:30"),                 // ends after cutoff → not locked
+            blk("Sleep", "23:00", "07:00", kind: "sleep"),    // wraps midnight → never locked
+        ], dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+
+        let locked = PlanCoordinator.lockedBlocks(plan, endedBy: 14 * 60) // 14:00
+        XCTAssertEqual(locked.map(\.title), ["Morning shower", "Massage", "Lunch"],
+                       "only blocks fully ended by 14:00, excluding the wrap-around Sleep")
+    }
+
+    func testLockedBlocksEmptyEarlyInDay() {
+        let plan = GeneratedPlan(blocks: [blk("Reading", "08:00", "09:30")],
+                                 dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        XCTAssertTrue(PlanCoordinator.lockedBlocks(plan, endedBy: 7 * 60).isEmpty,
+                      "nothing has elapsed at 07:00")
+    }
+
     // MARK: Gym legs
 
     func testHomeToGymLeavesFiftyMinutesBeforeWeights() {

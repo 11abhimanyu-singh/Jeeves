@@ -27,6 +27,8 @@ struct PlanRequest {
     var commuteEstimates: [String: Int] // "From→To" → minutes (real, from Google Maps when available)
     var prepNeglectNote: String?       // e.g. "Fewest sessions this week: Behavioral, then Strategy"
     var adherenceNote: String? = nil   // what the user actually does/skips, so the plan adapts
+    var replanFromMinute: Int? = nil   // set on a mid-day re-plan: schedule ONLY from here forward
+    var alreadyDoneNote: String? = nil // "Morning shower, Photography, Massage" — done earlier, don't re-add
     var routine: [BaselineActivity]? = nil  // the user's editable routine; nil = the hardcoded default
     var referenceNow: Date? = nil      // pinned "now" for evals; nil = real device clock
 }
@@ -135,6 +137,15 @@ enum PlanGenerationService {
 
         s += JeevesChatService.dateContext(for: req.referenceNow ?? Date()) + "\n\n"
         s += "TODAY'S REQUEST FROM THE USER:\n\(req.userMessage.isEmpty ? "(no extra context — plan a normal day)" : req.userMessage)\n\n"
+
+        if let from = req.replanFromMinute {
+            s += "MID-DAY RE-PLAN — the day is ALREADY IN PROGRESS and it is now \(hhmm(from)). "
+            s += "Plan ONLY THE REMAINDER of the day, from \(hhmm(from)) to the 20:30 work boundary, then the wind-down block and Sleep. Your FIRST block must begin at approximately \(hhmm(from)); do NOT schedule anything before \(hhmm(from)) (the earlier part of the day already happened and is preserved separately). "
+            if let done = req.alreadyDoneNote, !done.isEmpty {
+                s += "Already done earlier today — do NOT re-schedule these: \(done). "
+            }
+            s += "Absorb whatever delay the user described by pushing the remaining activities into the shorter window, dropping/shrinking per the usual tier rules. A Must-do (like lunch) that already happened is in the done list — don't re-add it; one that hasn't AND still fits its window, keep it.\n\n"
+        }
 
         s += "BASELINE ROUTINE (movable blocks, each with a priority tier):\n"
         for a in (req.routine ?? Baseline.activities) {

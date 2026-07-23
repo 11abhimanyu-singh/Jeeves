@@ -334,8 +334,53 @@ struct JeevesChatView: View {
         case "set_gym":        return toolSetGym(call.input)
         case "fetch_calendar": return await toolFetchCalendar(call.input)
         case "plan_day":       return await toolPlanDay(call.input)
+        case "replan_today":   return await toolReplanToday(call.input)
         default:               return .init(text: "Unknown tool \(call.name).")
         }
+    }
+
+    /// Re-plan only the rest of today from now, preserving what's already done —
+    /// the deviation path (a late event, an overrun commute, "I'm behind").
+    @MainActor
+    private func toolReplanToday(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
+        let note = (input["note"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        let state = planState(on: today)
+        guard let committed = state.plan else {
+            return .init(text: "There's no plan for today yet, so there's nothing to re-plan. Offer to plan the day first.")
+        }
+        let c = Calendar.current
+        let nowMinute = c.component(.hour, from: Date()) * 60 + c.component(.minute, from: Date())
+        // Preserve everything already finished; the planner rebuilds only the rest.
+        let locked = PlanCoordinator.lockedBlocks(committed, endedBy: nowMinute)
+        let doneNote = locked.map(\.title).joined(separator: ", ")
+
+        let result = await PlanCoordinator.generateLogged(.init(
+            userMessage: note,
+            hasGym: state.hasGymToday,
+            gymMinute: state.gymMinute,
+            events: eventsOn(today),
+            locations: locations,
+            prepSessions: prepSessions,
+            routine: Baseline.routine(from: routineActivities),
+            adherenceNote: AdherenceHistory.planningNote(context: modelContext, for: today),
+            replanFromMinute: nowMinute,
+            alreadyDoneNote: doneNote.isEmpty ? nil : doneNote,
+            planDate: today
+        ), context: modelContext, trigger: .chat)
+
+        guard !result.isOffline else {
+            return .init(text: "Couldn't reach the planner to re-plan — your current schedule is unchanged.\(result.error.map { " (\($0))" } ?? "")")
+        }
+        // Stitch the preserved morning onto the freshly re-planned remainder.
+        let merged = GeneratedPlan(
+            blocks: locked + result.plan.blocks,
+            dropped: result.plan.dropped, shrunk: result.plan.shrunk,
+            summary: result.plan.summary, boundaryTime: result.plan.boundaryTime
+        )
+        commitPlan(merged, isOffline: false, on: today)
+        await NotificationService.notifyPlanReady(isOffline: false)
+        return .init(text: "Re-planned from \(hhmm(nowMinute)), keeping what you'd already done. \(result.plan.summary)",
+                     plan: merged, isOfflinePlan: false)
     }
 
     @MainActor

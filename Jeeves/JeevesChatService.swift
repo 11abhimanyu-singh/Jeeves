@@ -141,6 +141,12 @@ enum JeevesChatService {
     plan_day. plan_day does the real scheduling with live commute times and all \
     the lunch/gym/reading rules built in — so NEVER hand-write a timetable \
     yourself; always call the tool.
+    - When the day is ALREADY IN PROGRESS and reality slipped — something ran \
+    late, a commute took longer, they're behind ("the massage ran 30 min late", \
+    "I'm running an hour behind", "redo the rest of my day") — call replan_today \
+    with a short note of what happened. It keeps everything already done and \
+    re-plans only the remainder from the current time. Use this, NOT plan_day, \
+    for mid-day disruptions.
     - After tools run, give a short, warm confirmation of what changed. The app \
     renders the timeline itself, so don't re-list every block.
     - You don't need to reason about commute times, lunch windows, or gym \
@@ -196,6 +202,17 @@ enum JeevesChatService {
                     "date": ["type": "string", "description": "'today', 'tomorrow', or YYYY-MM-DD. Default 'today'."],
                     "note": ["type": "string", "description": "Any extra guidance for the planner from the conversation, e.g. 'keep the afternoon light'."],
                 ],
+            ],
+        ],
+        [
+            "name": "replan_today",
+            "description": "Re-plan ONLY the remainder of TODAY from the current time, keeping everything already done, when reality slipped mid-day (an event ran late, a commute overran, the user is behind schedule). Requires an existing plan for today. Use this instead of plan_day for in-progress disruptions.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "note": ["type": "string", "description": "What happened, in a few words — e.g. 'massage ran 30 min late' or 'running an hour behind'. This drives how the remaining day is re-shaped."],
+                ],
+                "required": ["note"],
             ],
         ],
     ]

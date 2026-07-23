@@ -22,6 +22,8 @@ enum PlanCoordinator {
         var prepSessions: [PrepSession]
         var routine: [BaselineActivity] = Baseline.activities  // the user's editable routine
         var adherenceNote: String? = nil // recent done/skip history, so the plan adapts to what sticks
+        var replanFromMinute: Int? = nil // mid-day re-plan: schedule only from here forward
+        var alreadyDoneNote: String? = nil // titles done earlier today, so the re-plan doesn't re-add them
         var planDate: Date = Date()     // the day being planned — commute legs use its scheduled departure times for predictive traffic
         var referenceNow: Date? = nil   // pinned "now" for evals; nil = real clock
     }
@@ -64,6 +66,13 @@ enum PlanCoordinator {
         let tClaude = Date()
         guard let first = try? await PlanGenerationService.generate(request) else {
             return Result(plan: deterministic(inputs), isOffline: true, error: "planning service unreachable",
+                          commuteMs: commuteMs, claudeMs: Int(Date().timeIntervalSince(tClaude) * 1000))
+        }
+        // A mid-day re-plan covers only the remainder, so the normal-day
+        // invariants (lunch window, full 08:00 start, everything-present) don't
+        // hold — skip the strict validator/retry and take the plan as produced.
+        if inputs.replanFromMinute != nil {
+            return Result(plan: first, isOffline: false, error: nil,
                           commuteMs: commuteMs, claudeMs: Int(Date().timeIntervalSince(tClaude) * 1000))
         }
         let firstViolations = PlanValidation.severe(first, request: request)
@@ -120,6 +129,17 @@ enum PlanCoordinator {
         return nil
     }
 
+    /// The blocks of an existing plan that have fully elapsed by `minute` — the
+    /// part of the day to PRESERVE verbatim across a mid-day re-plan. Excludes
+    /// wrap-around blocks (Sleep 23:00→07:00, whose end < start) so they aren't
+    /// mistaken for already-done. Pure + unit-tested.
+    static func lockedBlocks(_ plan: GeneratedPlan, endedBy minute: Int) -> [GeneratedBlock] {
+        plan.blocks.filter {
+            guard let s = $0.startMinute, let e = $0.endMinute else { return false }
+            return s <= e && e <= minute
+        }
+    }
+
     /// A concrete Date on `day` at wall-clock `minuteOfDay` (bySettingHour, so
     /// a 13:30 leg means 13:30 local even across a DST transition — elapsed-
     /// minute arithmetic would drift an hour on changeover days).
@@ -172,6 +192,8 @@ enum PlanCoordinator {
             commuteEstimates: commutes,
             prepNeglectNote: prepNeglectNote(i.prepSessions),
             adherenceNote: i.adherenceNote,
+            replanFromMinute: i.replanFromMinute,
+            alreadyDoneNote: i.alreadyDoneNote,
             routine: i.routine,
             referenceNow: i.referenceNow
         )
