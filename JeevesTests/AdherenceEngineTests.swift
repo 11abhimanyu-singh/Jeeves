@@ -89,9 +89,9 @@ final class AdherenceEngineTests: XCTestCase {
     private var routine: [BaselineActivity] { Baseline.activities }
 
     func testWeightedScorePenalizesMissedMustDoMore() {
-        // Reading (Interview prep — Reading, Must-do=3) missed, Photography
-        // (Flexible=1) done → 1 / (3+1) = 0.25, much lower than equal-weight 0.5.
-        let p = plan([b("Interview prep — Reading"), b("Photography")])
+        // Lunch (Must-do=3) missed, Photography (Flexible=1) done → 1 / (3+1) =
+        // 0.25, much lower than equal-weight 0.5.
+        let p = plan([b("Lunch", kind: "lunch"), b("Photography")])
         let outcomes: [BlockOutcome] = [.skipped, .done]
         let w = AdherenceEngine.weightedScore(plan: p, outcomes: outcomes, routine: routine)!
         XCTAssertEqual(w, 0.25, accuracy: 0.0001)
@@ -100,9 +100,17 @@ final class AdherenceEngineTests: XCTestCase {
 
     func testWeightedScoreRewardsKeepingTheMustDo() {
         // Must-do done, Flexible skipped → 3 / (3+1) = 0.75.
-        let p = plan([b("Interview prep — Reading"), b("Photography")])
+        let p = plan([b("Lunch", kind: "lunch"), b("Photography")])
         let w = AdherenceEngine.weightedScore(plan: p, outcomes: [.done, .skipped], routine: routine)!
         XCTAssertEqual(w, 0.75, accuracy: 0.0001)
+    }
+
+    func testReadingIsImportantWeightNotMustDo() {
+        // Reading is now Important (weight 2): missed reading + done flexible →
+        // 1 / (2+1) = 0.333, not the 0.25 a Must-do would give.
+        let p = plan([b("Interview prep — Reading"), b("Photography")])
+        let w = AdherenceEngine.weightedScore(plan: p, outcomes: [.skipped, .done], routine: routine)!
+        XCTAssertEqual(w, 1.0 / 3.0, accuracy: 0.0001)
     }
 
     func testWeightedScoreNilWhenNothingAssessable() {

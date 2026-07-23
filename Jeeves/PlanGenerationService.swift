@@ -163,7 +163,7 @@ enum PlanGenerationService {
         if !req.events.isEmpty {
             s += "- Events are FIXED ANCHORS you schedule work AROUND, not a wall that ends the day. Each event is an out-and-back trip: leave in time, attend, return home. Fill EVERY free window with productive work — before the first event, between events, and (crucially) AFTER you return home from an event, right up to 20:30.\n"
             s += "- Do NOT drop work just because it doesn't fit before an event. A midday event (e.g. a 2 PM appointment) leaves the whole afternoon and evening free after you return — use it. The ONLY time post-event hours are unavailable is when the event itself runs so late that you get home near or after 20:30.\n"
-            s += "- The 08:00 morning peak-focus slot must hold Interview prep — Reading whenever it's free. Never leave the morning empty while dropping a Must-do; with the full 08:00–20:30 window there is almost always room, so dropping a Must-do should essentially never happen.\n"
+            s += "- STRONGLY PREFER placing Interview prep — Reading early in the morning (the 08:00 peak-focus slot) when it's free — but it is a HIGH-PREFERENCE Important item, NOT an anchor: it may move later, or be dropped like any Important item when the day is genuinely too full. Do not lock it to 08:00.\n"
         }
         s += "\n"
 
@@ -220,7 +220,7 @@ enum PlanGenerationService {
         RESPOND WITH STRICT JSON ONLY, exactly this shape, no prose outside it:
         {
           "blocks": [
-            {"title": "Interview prep — Reading", "startTime": "08:00", "endTime": "09:30", "note": "peak focus", "isAnchor": true, "kind": "activity"}
+            {"title": "Interview prep — Reading", "startTime": "08:00", "endTime": "09:30", "note": "preferred early slot", "isAnchor": false, "kind": "activity"}
           ],
           "dropped": ["Chores", "Photography"],
           "shrunk": ["Interview prep — practice 120→70"],
@@ -230,7 +230,7 @@ enum PlanGenerationService {
         Rules for the JSON:
         - Times are 24-hour "HH:MM". Blocks must be in chronological order and must not overlap.
         - kind is one of: "activity", "commute", "gym", "event", "lunch", "free", "sleep".
-        - Mark gym sub-blocks, events, the morning peak-focus reading, and Sleep as isAnchor: true.
+        - Mark gym sub-blocks, events, and Sleep as isAnchor: true. Interview prep — Reading is NOT an anchor (isAnchor false).
         - Always end the day with a {"kind":"sleep","title":"Sleep","startTime":"23:00","endTime":"07:00","isAnchor":true} block.
         - boundaryTime is the hard boundary in force (20:30 on a normal day, else the departure time).
         - dropped/shrunk list the human-readable names; leave them as [] if nothing was dropped/shrunk.

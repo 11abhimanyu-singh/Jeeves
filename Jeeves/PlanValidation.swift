@@ -106,11 +106,13 @@ enum PlanValidation {
             }
         }
 
-        // 3. A Must-do (morning reading, lunch) must never be dropped, and lunch
-        //    must appear in the plan.
+        // 3. A Must-do (lunch) must never be dropped, and lunch must appear.
+        //    (Interview-prep reading is now a high-preference Important item —
+        //    it MAY be dropped when the day is too full, so it's not checked
+        //    here.)
         for d in plan.dropped {
             let dl = d.lowercased()
-            if dl.contains("must-do") || dl.contains("lunch") || (dl.contains("interview prep") && dl.contains("reading")) {
+            if dl.contains("must-do") || dl.contains("lunch") {
                 out.append(Violation(severity: .severe, message: "Must-do dropped: \(d)"))
             }
         }

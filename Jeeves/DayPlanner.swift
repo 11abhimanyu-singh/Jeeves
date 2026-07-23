@@ -62,7 +62,7 @@ enum DayPlanner {
         var cursor = dayStartMinute
 
         // Fixed morning anchor — always first, your stated peak-focus slot.
-        blocks.append(PlanBlock(title: "Interview prep — Reading", startMinute: cursor, durationMinutes: 90, note: "Peak focus slot", isAnchor: true, prepCategory: .reading))
+        blocks.append(PlanBlock(title: "Interview prep — Reading", startMinute: cursor, durationMinutes: 90, note: "Preferred early slot", isAnchor: false, prepCategory: .reading))
         cursor += 90
         // Second-half gym (weightlifting at/after the 14:15 window midpoint) means
         // the day would otherwise start unshowered — add a short morning shower

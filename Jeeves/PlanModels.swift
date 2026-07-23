@@ -29,7 +29,7 @@ enum Baseline {
     /// The user's fixed daily routine. Anchors (gym, events) sit above all of
     /// these and are supplied per-day, not here.
     static let activities: [BaselineActivity] = [
-        BaselineActivity(name: "Interview prep — Reading", durationMinutes: 90, tier: .mustDo, note: "Morning peak-focus slot"),
+        BaselineActivity(name: "Interview prep — Reading", durationMinutes: 90, tier: .important, note: "High preference: schedule early in the morning when possible, but it can move and can be dropped like any Important item"),
         BaselineActivity(name: "Lunch", durationMinutes: 30, tier: .mustDo, note: "Start no earlier than 12:30; finish by 14:00 if possible (hard deadline: start by 14:30)"),
         BaselineActivity(name: "Job applications", durationMinutes: 75, tier: .important, note: nil),
         BaselineActivity(name: "Interview prep — practice", durationMinutes: 120, tier: .important, note: "Split across Product Sense / Execution / Strategy / Behavioral, weighted toward the most-neglected"),

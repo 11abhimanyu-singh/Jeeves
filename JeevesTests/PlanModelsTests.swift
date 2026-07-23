@@ -31,10 +31,13 @@ final class PlanModelsTests: XCTestCase {
 
     // MARK: Baseline routine (PRD §5.1)
 
-    func testBaselineHasBothMustDosAndCorrectWindow() {
+    func testBaselineTiersAndWindow() {
         let mustDos = Baseline.activities.filter { $0.tier == .mustDo }.map(\.name)
         XCTAssertTrue(mustDos.contains("Lunch"), "Lunch must be a Must-do")
-        XCTAssertTrue(mustDos.contains("Interview prep — Reading"), "morning reading must be a Must-do")
+        // Interview-prep reading is now a HIGH-PREFERENCE Important item, not a
+        // Must-do anchor — it can move and can be dropped when the day is full.
+        let reading = Baseline.activities.first { $0.name == "Interview prep — Reading" }
+        XCTAssertEqual(reading?.tier, .important, "reading is Important (high preference), not Must-do")
         XCTAssertEqual(Baseline.dayStartMinute, 8 * 60)
         XCTAssertEqual(Baseline.normalBoundaryMinute, 20 * 60 + 30)
     }

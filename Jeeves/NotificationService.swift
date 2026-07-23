@@ -109,19 +109,19 @@ enum NotificationService {
     }
 
     /// Minutes of lead time before a block's start that its reminder fires.
-    /// Events and sleep get a 15-minute heads-up so you can wrap up and head
+    /// Events and sleep get a 10-minute heads-up so you can wrap up and head
     /// out (or wind down); everything else reminds right at its start time.
     static func leadMinutes(for block: GeneratedBlock) -> Int {
-        ["event", "sleep"].contains(block.kind.lowercased()) ? 15 : 0
+        ["event", "sleep"].contains(block.kind.lowercased()) ? 10 : 0
     }
 
-    /// The reminder text for a block. Events/sleep fire 15 min early, so their
+    /// The reminder text for a block. Events/sleep fire 10 min early, so their
     /// copy says so.
     static func reminderBody(for block: GeneratedBlock) -> String {
         switch block.kind.lowercased() {
         case "commute": return "Time to leave — \(block.title)"
-        case "event":   return "In 15 min: \(block.title)\(startLabel(block).map { " at \($0)" } ?? "")"
-        case "sleep":   return "Wind down — bedtime in 15 min"
+        case "event":   return "In 10 min: \(block.title)\(startLabel(block).map { " at \($0)" } ?? "")"
+        case "sleep":   return "Wind down — bedtime in 10 min"
         default:        return block.title
         }
     }
