@@ -145,12 +145,21 @@ final class AdherenceEngineTests: XCTestCase {
         XCTAssertTrue(history.isEmpty)
     }
 
+    func testHistoryExcludesAnchorsAndFixedBlocks() {
+        // A skipped gym and a skipped fixed-kind block must NOT be tallied — only
+        // movable "activity" work adapts to a skip.
+        let p = plan([b("Weightlifting", kind: "gym"), b("Lunch", kind: "lunch"),
+                      b("Sleep", kind: "sleep"), b("Chores")])
+        let history = AdherenceEngine.history([(p, [.skipped, .skipped, .skipped, .skipped])])
+        XCTAssertEqual(history.map(\.name), ["Chores"], "gym/lunch/sleep are anchors — never in adherence history")
+    }
+
     func testAdherenceNoteFlagsFrequentlySkipped() {
         let history = [
             AdherenceEngine.ActivityAdherence(name: "Interview prep — Reading", done: 0, skipped: 3),
             AdherenceEngine.ActivityAdherence(name: "Job applications", done: 3, skipped: 0),
         ]
-        let note = AdherenceEngine.adherenceNote(history)
+        let note = AdherenceEngine.adherenceNote(history, routine: routine)
         XCTAssertNotNil(note)
         XCTAssertTrue(note!.contains("Interview prep — Reading"), "the skipped item is named")
         XCTAssertFalse(note!.contains("Job applications"), "a reliably-done item isn't flagged")
@@ -159,13 +168,28 @@ final class AdherenceEngineTests: XCTestCase {
     func testAdherenceNoteNeedsEnoughSamples() {
         // Skipped once, only scheduled once → below the 2-sample floor.
         let history = [AdherenceEngine.ActivityAdherence(name: "Chores", done: 0, skipped: 1)]
-        XCTAssertNil(AdherenceEngine.adherenceNote(history))
+        XCTAssertNil(AdherenceEngine.adherenceNote(history, routine: routine))
     }
 
     func testAdherenceNoteNeverFlagsLunch() {
         // Even if the data says lunch is skipped, a Must-do is never flagged for
         // rescheduling/dropping.
         let history = [AdherenceEngine.ActivityAdherence(name: "Lunch", done: 0, skipped: 4)]
-        XCTAssertNil(AdherenceEngine.adherenceNote(history))
+        XCTAssertNil(AdherenceEngine.adherenceNote(history, routine: routine))
+    }
+
+    func testAdherenceNoteNeverFlagsAUserDesignatedMustDo() {
+        // If the user marks an activity Must-do in their routine, a skip streak
+        // must not suggest de-prioritizing it — the tier comes from the routine.
+        let custom: [BaselineActivity] = [
+            BaselineActivity(name: "Reading habit", durationMinutes: 30, tier: .mustDo, note: nil),
+        ]
+        let history = [AdherenceEngine.ActivityAdherence(name: "Reading habit", done: 0, skipped: 5)]
+        XCTAssertNil(AdherenceEngine.adherenceNote(history, routine: custom))
+        // Same activity as an Important item IS flagged.
+        let asImportant: [BaselineActivity] = [
+            BaselineActivity(name: "Reading habit", durationMinutes: 30, tier: .important, note: nil),
+        ]
+        XCTAssertNotNil(AdherenceEngine.adherenceNote(history, routine: asImportant))
     }
 }

@@ -46,7 +46,8 @@ enum AdherenceHistory {
     static func planningNote(context: ModelContext, for date: Date) -> String? {
         let days = recentOutcomes(context: context, endingBefore: date)
         guard !days.isEmpty else { return nil }
-        return AdherenceEngine.adherenceNote(AdherenceEngine.history(days))
+        let routine = Baseline.routine(from: (try? context.fetch(FetchDescriptor<RoutineActivity>())) ?? [])
+        return AdherenceEngine.adherenceNote(AdherenceEngine.history(days), routine: routine)
     }
 
     /// The day's ground-truth evidence, reduced from its logs. Shared by the

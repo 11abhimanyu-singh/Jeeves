@@ -31,6 +31,12 @@ enum AutoPlanService {
     /// so "the next few days" are always ready.
     static let windowDays = 4
 
+    /// After a pass that couldn't fill every gap (the planner was unreachable),
+    /// wait this long before trying again — otherwise a persistent outage would
+    /// re-run up to `windowDays` doomed ~180s generations on every foregrounding.
+    static let failureCooldown: TimeInterval = 30 * 60
+    private static let cooldownKey = "autoPlanCooldownUntil"
+
     // MARK: Which days need a plan (pure, testable)
 
     /// The days in `[from, from+days)` that have no committed plan yet — the
@@ -56,7 +62,16 @@ enum AutoPlanService {
         let plans = (try? context.fetch(FetchDescriptor<DailyPlanState>())) ?? []
         let plannedDays = Set(plans.filter { $0.plan != nil }.map { $0.date.startOfDay })
         let needed = daysNeedingPlans(from: referenceNow, days: windowDays, plannedDays: plannedDays)
-        guard !needed.isEmpty else { return 0 }
+        guard !needed.isEmpty else {
+            // Nothing to do → clear any prior back-off; the window is healthy.
+            UserDefaults.standard.removeObject(forKey: cooldownKey)
+            return 0
+        }
+        // Back off after a recent failed pass so a persistent outage doesn't burn
+        // minutes of doomed network work on every foregrounding.
+        if let until = UserDefaults.standard.object(forKey: cooldownKey) as? Date, referenceNow < until {
+            return 0
+        }
 
         let allEvents = (try? context.fetch(FetchDescriptor<DailyEvent>())) ?? []
         let locations = (try? context.fetch(FetchDescriptor<SavedLocation>())) ?? []
@@ -92,6 +107,13 @@ enum AutoPlanService {
             try? context.save()
             await NotificationService.reschedule(plan: result.plan, on: day)
             filled += 1
+        }
+        // If any gap survived (a day fell back to offline / the planner was
+        // unreachable), arm the cooldown; a fully-filled window clears it.
+        if filled < needed.count {
+            UserDefaults.standard.set(referenceNow.addingTimeInterval(failureCooldown), forKey: cooldownKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: cooldownKey)
         }
         return filled
     }

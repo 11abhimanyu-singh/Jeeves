@@ -150,6 +150,12 @@ enum AdherenceEngine {
         for day in days {
             for (block, outcome) in zip(day.plan.blocks, day.outcomes) {
                 guard outcome == .done || outcome == .skipped else { continue }
+                // Only MOVABLE routine work adapts to a skip. Anchors and fixed
+                // blocks (gym sub-blocks, events, sleep, lunch, commute, the
+                // wind-down) are kept regardless of adherence, so never tally
+                // them — otherwise a missed gym would wrongly tell the planner
+                // to "move or shorten" the gym.
+                guard block.kind.lowercased() == "activity" else { continue }
                 let key = historyName(block.title)
                 var t = tally[key] ?? (block.title.trimmingCharacters(in: .whitespaces), 0, 0)
                 if outcome == .done { t.done += 1 } else { t.skipped += 1 }
@@ -164,13 +170,15 @@ enum AdherenceEngine {
     /// A planner-facing note naming the activities the user tends NOT to do when
     /// scheduled, so the model can adapt (move, shrink, or drop them) instead of
     /// re-scheduling the same thing that never sticks. Nil when there isn't
-    /// enough signal. Lunch and other Must-dos are never flagged — they stay.
-    static func adherenceNote(_ history: [ActivityAdherence],
+    /// enough signal. Must-dos are never flagged (the planner keeps them) — the
+    /// `routine` decides an activity's tier, so a user who marks something
+    /// Must-do won't see it suggested for de-prioritizing.
+    static func adherenceNote(_ history: [ActivityAdherence], routine: [BaselineActivity],
                               minSamples: Int = 2, skipThreshold: Double = 0.5) -> String? {
         let flagged = history.filter {
             $0.scheduled >= minSamples
                 && $0.skipRate >= skipThreshold
-                && !$0.name.lowercased().contains("lunch")
+                && tierByName($0.name, routine: routine) != .mustDo
         }
         guard !flagged.isEmpty else { return nil }
         let list = flagged
@@ -178,5 +186,13 @@ enum AdherenceEngine {
             .joined(separator: "; ")
         return "ADHERENCE HISTORY — the user tends NOT to do these when scheduled: \(list). "
             + "Adapt to what actually sticks: try a different time of day, a shorter block, or a lower priority — don't just re-schedule it the same way. Must-do items (like lunch) still stay."
+    }
+
+    /// The routine tier for an activity name (nil if it matches no routine
+    /// item). Same name-matching as `tier(for:)`, but keyed by the aggregated
+    /// history name rather than a live block.
+    private static func tierByName(_ name: String, routine: [BaselineActivity]) -> PriorityTier? {
+        let n = name.lowercased()
+        return routine.first { n == $0.name.lowercased() || n.contains($0.name.lowercased()) }?.tier
     }
 }

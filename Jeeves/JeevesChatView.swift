@@ -312,6 +312,11 @@ struct JeevesChatView: View {
                 for made in reply.plans {
                     addTurn(role: .assistant, "", plan: made.plan, isOfflinePlan: made.isOffline)
                 }
+                // Never leave the turn visibly silent: if the model exhausted the
+                // tool-loop with no closing text and no plan, still acknowledge.
+                if reply.text.isEmpty && reply.plans.isEmpty {
+                    addTurn(role: .assistant, "Done — anything else?")
+                }
             case .failure(let error):
                 errorText = error.localizedDescription
             }
@@ -516,10 +521,13 @@ struct JeevesChatView: View {
     /// tab shows it and it survives relaunches.
     private func commitPlan(_ plan: GeneratedPlan, isOffline: Bool, on date: Date) {
         let day = date.startOfDay
-        let state = dailyPlans.first { $0.date == day } ?? {
-            let s = DailyPlanState(date: day, hasGymToday: false, gymMinute: nil)
-            modelContext.insert(s); return s
-        }()
+        // Fresh-fetch (via planState), NOT the @Query snapshot: inside one
+        // agentic turn the view never re-renders, so `dailyPlans` predates the
+        // state a set_gym/plan_day tool already inserted for this day. Reading
+        // the stale snapshot here would insert a SECOND DailyPlanState — a
+        // duplicate row that also splits the gym flag and the plan across two
+        // records.
+        let state = planState(on: day)
         state.storePlan(plan, isOffline: isOffline)
         try? modelContext.save()
         // Schedule on-device reminders for this plan's key blocks.
