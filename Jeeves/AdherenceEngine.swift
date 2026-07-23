@@ -31,11 +31,21 @@ struct DayEvidence {
 enum AdherenceEngine {
 
     /// Infer an outcome for every block in the plan from the day's evidence.
-    static func infer(plan: GeneratedPlan, evidence: DayEvidence) -> [BlockOutcome] {
-        plan.blocks.map { outcome(for: $0, evidence: evidence) }
+    /// `cutoffMinute` (minutes since midnight) makes assessment time-aware for
+    /// the CURRENT day: a block that hasn't finished by the cutoff hasn't been
+    /// done OR skipped — it simply hasn't happened, so it's `.unknown`, never a
+    /// premature "skipped". Pass nil for a past day (everything has elapsed).
+    static func infer(plan: GeneratedPlan, evidence: DayEvidence, cutoffMinute: Int? = nil) -> [BlockOutcome] {
+        plan.blocks.map { outcome(for: $0, evidence: evidence, cutoffMinute: cutoffMinute) }
     }
 
-    private static func outcome(for block: GeneratedBlock, evidence: DayEvidence) -> BlockOutcome {
+    private static func outcome(for block: GeneratedBlock, evidence: DayEvidence, cutoffMinute: Int?) -> BlockOutcome {
+        // Not yet elapsed → not judgeable. (Keyed on the END time: an activity
+        // still in progress hasn't been skipped.) Sleep wraps past midnight, but
+        // it's `.unknown` regardless, so the end-time compare is harmless there.
+        if let cutoff = cutoffMinute, let end = block.endMinute, end > cutoff {
+            return .unknown
+        }
         let t = block.title.lowercased()
         let kind = block.kind.lowercased()
 

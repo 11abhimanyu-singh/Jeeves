@@ -31,6 +31,19 @@ final class AdherenceEngineTests: XCTestCase {
         XCTAssertEqual(AdherenceEngine.infer(plan: p, evidence: DayEvidence()), [.skipped])
     }
 
+    func testFutureBlocksAreNotPrematurelySkipped() {
+        // At 10:00, a reading block that ended 09:30 is assessable (skipped, no
+        // log); one ending 14:00 hasn't happened yet → unknown, NOT skipped.
+        let past = GeneratedBlock(title: "Reading habit", startTime: "08:00", endTime: "09:30", note: nil, isAnchor: false, kind: "activity")
+        let future = GeneratedBlock(title: "Interview prep — Reading", startTime: "13:00", endTime: "14:00", note: nil, isAnchor: false, kind: "activity")
+        let p = plan([past, future])
+        XCTAssertEqual(AdherenceEngine.infer(plan: p, evidence: DayEvidence(), cutoffMinute: 10 * 60),
+                       [.skipped, .unknown], "a block that hasn't ended isn't skipped")
+        // A past day (no cutoff) assesses everything.
+        XCTAssertEqual(AdherenceEngine.infer(plan: p, evidence: DayEvidence()),
+                       [.skipped, .skipped])
+    }
+
     func testGymDoneWhenWorkedOut() {
         let p = plan([b("Weightlifting", kind: "gym"), b("Cardio", kind: "gym")])
         var e = DayEvidence(); e.workedOut = true

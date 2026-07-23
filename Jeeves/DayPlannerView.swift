@@ -127,7 +127,8 @@ struct DayPlannerView: View {
     @ViewBuilder
     private var planCard: some View {
         if let plan = savedPlan {
-            let inferred = AdherenceEngine.infer(plan: plan, evidence: evidence(for: selectedDate))
+            let inferred = AdherenceEngine.infer(plan: plan, evidence: evidence(for: selectedDate),
+                                                 cutoffMinute: adherenceCutoff)
             let effective = AdherenceEngine.effective(plan: plan, inferred: inferred,
                                                       manual: selectedPlanState?.manualOutcomes ?? [:])
             HStack {
@@ -175,6 +176,17 @@ struct DayPlannerView: View {
         // the adaptive-planning signal read the logs identically.
         AdherenceHistory.evidence(day: date.startOfDay, checkins: checkins, prep: prepSessions,
                                   jobs: jobApplications, reading: readingLogs, leisure: leisureLogs)
+    }
+
+    /// The "as of now" cutoff for judging the selected day: nil for a past day
+    /// (everything elapsed), the current minute for today (don't pre-judge blocks
+    /// that haven't happened), and -1 for a future day (nothing elapsed).
+    private var adherenceCutoff: Int? {
+        let sel = selectedDate.startOfDay
+        if sel < today { return nil }
+        if sel > today { return -1 }
+        let c = Calendar.current
+        return c.component(.hour, from: Date()) * 60 + c.component(.minute, from: Date())
     }
 
     @ViewBuilder
