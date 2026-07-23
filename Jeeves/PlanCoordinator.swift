@@ -44,6 +44,9 @@ enum PlanCoordinator {
         PlanDiagnostics.finish(log, isOffline: result.isOffline, retryCount: result.retryCount,
                                commuteMs: result.commuteMs, claudeMs: result.claudeMs,
                                errorClass: result.error, startedAt: started, context: context)
+        // Mirror the updated diagnostics to iCloud Drive for hands-free reading.
+        let allLogs = (try? context.fetch(FetchDescriptor<PlanGenerationLog>())) ?? []
+        DiagnosticsSync.write(DiagnosticsSync.entries(from: allLogs))
         return result
     }
 
