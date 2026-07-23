@@ -273,12 +273,18 @@ struct JeevesChatView: View {
             .map { ChatMessage(role: $0.isUser ? .user : .assistant, content: $0.content) }
     }
 
-    // MARK: Free-text chat
+    // MARK: Agentic chat
 
+    /// The conversational agent. The model can add events, set the gym, and
+    /// build the day's plan through tools — so typing "dinner at 8, plan
+    /// tomorrow" actually creates the event and generates the schedule,
+    /// instead of pointing the user at the button. Tool execution runs here
+    /// because it needs SwiftData and today's context.
     private func sendChat() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         let priorHistory = chatHistory
+        let stateNote = currentStateNote()
         addTurn(role: .user, text)
         inputText = ""
         errorText = nil
@@ -286,14 +292,152 @@ struct JeevesChatView: View {
         isSending = true
 
         Task {
-            do {
-                let reply = try await JeevesChatService.send(history: priorHistory, newMessage: text)
-                addTurn(role: .assistant, reply)
-            } catch {
+            // Hold a background assertion: an agentic turn can call plan_day,
+            // which is slow, so it must survive the user switching away.
+            let outcome = await BackgroundActivity.run("jeeves-chat") { () -> Result<JeevesChatService.AgenticReply, Error> in
+                do {
+                    let reply = try await JeevesChatService.sendAgentic(
+                        history: priorHistory, newMessage: text, stateNote: stateNote,
+                        execute: { call in await runTool(call) }
+                    )
+                    return .success(reply)
+                } catch {
+                    return .failure(error)
+                }
+            }
+            switch outcome {
+            case .success(let reply):
+                if !reply.text.isEmpty { addTurn(role: .assistant, reply.text) }
+                // Any plans the agent built, as timeline cards after the reply.
+                for made in reply.plans {
+                    addTurn(role: .assistant, "", plan: made.plan, isOfflinePlan: made.isOffline)
+                }
+            case .failure(let error):
                 errorText = error.localizedDescription
             }
             isSending = false
         }
+    }
+
+    // MARK: Chat tools
+
+    /// Dispatches one tool call from the agent to its handler.
+    @MainActor
+    private func runTool(_ call: JeevesChatService.ToolCall) async -> JeevesChatService.ToolResult {
+        switch call.name {
+        case "add_event": return toolAddEvent(call.input)
+        case "set_gym":   return toolSetGym(call.input)
+        case "plan_day":  return await toolPlanDay(call.input)
+        default:          return .init(text: "Unknown tool \(call.name).")
+        }
+    }
+
+    @MainActor
+    private func toolAddEvent(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let date = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
+        let title = (input["title"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        guard !title.isEmpty, let startStr = input["start_time"] as? String,
+              let start = GeneratedBlock.minutes(from: startStr) else {
+            return .init(text: "Couldn't add it — I need a title and a start time. Ask the user for whatever's missing.")
+        }
+        let end = (input["end_time"] as? String).flatMap(GeneratedBlock.minutes(from:)) ?? (start + 180)
+        let venue = (input["venue"] as? String) ?? ""
+        let from = LocationKind(rawValue: (input["leaving_from"] as? String) ?? "Home") ?? .home
+        if eventsOn(date).contains(where: { $0.title.lowercased() == title.lowercased() }) {
+            return .init(text: "\"\(title)\" is already on \(dayLabel(date)); didn't add a duplicate.")
+        }
+        let event = DailyEvent(
+            date: date, title: title, startMinute: start, endMinute: end,
+            destinationAddress: venue, outboundStart: from, source: .manual
+        )
+        modelContext.insert(event)
+        try? modelContext.save()
+        return .init(text: "Added \"\(title)\" \(hhmm(start))–\(hhmm(end)) on \(dayLabel(date))\(venue.isEmpty ? "" : " at \(venue)").")
+    }
+
+    @MainActor
+    private func toolSetGym(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let date = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
+        let gymToday = input["gym_today"] as? Bool ?? false
+        let state = planState(on: date)
+        state.hasGymToday = gymToday
+        if gymToday {
+            if let gt = (input["gym_time"] as? String).flatMap(GeneratedBlock.minutes(from:)) { state.gymMinute = gt }
+            try? modelContext.save()
+            let at = state.gymMinute.map { " at \(hhmm($0))" } ?? " (no time set — ask when weightlifting starts)"
+            return .init(text: "Gym set for \(dayLabel(date))\(at).")
+        } else {
+            state.gymMinute = nil
+            try? modelContext.save()
+            return .init(text: "Cleared the gym for \(dayLabel(date)).")
+        }
+    }
+
+    @MainActor
+    private func toolPlanDay(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
+        let date = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
+        let note = (input["note"] as? String) ?? ""
+        let state = planState(on: date)
+        let result = await PlanCoordinator.generateLogged(.init(
+            userMessage: note,
+            hasGym: state.hasGymToday,
+            gymMinute: state.gymMinute,
+            events: eventsOn(date),
+            locations: locations,
+            prepSessions: prepSessions,
+            routine: Baseline.routine(from: routineActivities),
+            planDate: date
+        ), context: modelContext, trigger: .chat)
+        commitPlan(result.plan, isOffline: result.isOffline, on: date)
+        await NotificationService.notifyPlanReady(isOffline: result.isOffline)
+        let summary = result.isOffline
+            ? "Built an offline plan for \(dayLabel(date)) — couldn't reach the planning service.\(result.error.map { " (\($0))" } ?? "")"
+            : "Planned \(dayLabel(date)). \(result.plan.summary)"
+        return .init(text: summary, plan: result.plan, isOfflinePlan: result.isOffline)
+    }
+
+    // MARK: Tool context helpers
+
+    /// Fresh fetch (not the @Query snapshot) so a plan_day call sees events an
+    /// add_event call created earlier in the same agentic turn.
+    private func eventsOn(_ date: Date) -> [DailyEvent] {
+        let day = date.startOfDay
+        let all = (try? modelContext.fetch(FetchDescriptor<DailyEvent>())) ?? events
+        return all.filter { $0.date == day }.sorted { $0.startMinute < $1.startMinute }
+    }
+
+    /// The DailyPlanState for a day, creating one if needed.
+    private func planState(on date: Date) -> DailyPlanState {
+        let day = date.startOfDay
+        let all = (try? modelContext.fetch(FetchDescriptor<DailyPlanState>())) ?? dailyPlans
+        if let s = all.first(where: { $0.date == day }) { return s }
+        let s = DailyPlanState(date: day, hasGymToday: false, gymMinute: nil)
+        modelContext.insert(s)
+        return s
+    }
+
+    /// A one-line summary of today's anchors, given to the model so it knows
+    /// what's already set before deciding whether to add or plan.
+    private func currentStateNote() -> String {
+        var lines: [String] = []
+        let e = todayEvents
+        lines.append(e.isEmpty
+            ? "Today has no events set."
+            : "Today's events: " + e.map { "\($0.title) \(hhmm($0.startMinute))–\(hhmm($0.endMinute))" }.joined(separator: "; ") + ".")
+        if let s = todayPlanState, s.hasGymToday {
+            lines.append("Gym today" + (s.gymMinute.map { " at \(hhmm($0))" } ?? "") + ".")
+        } else {
+            lines.append("No gym set for today.")
+        }
+        if todayPlanState?.plan != nil { lines.append("A plan for today already exists — planning again replaces it.") }
+        return "CURRENT STATE (today = \(dayLabel(today))):\n" + lines.joined(separator: "\n")
+    }
+
+    private func dayLabel(_ date: Date) -> String {
+        let day = date.startOfDay
+        if day == today { return "today" }
+        if day == Calendar.current.date(byAdding: .day, value: 1, to: today) { return "tomorrow" }
+        let f = DateFormatter(); f.dateFormat = "EEE d MMM"; return f.string(from: day)
     }
 
     // MARK: Plan generation

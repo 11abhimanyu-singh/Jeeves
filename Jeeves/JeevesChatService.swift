@@ -2,11 +2,18 @@
 //  JeevesChatService.swift
 //  Jeeves
 //
-//  Multi-turn chat with the Claude API — the proof-of-concept loop for the
-//  Jeeves conversational agent (PRD §5.6, §9 step 3: "prove the loop: user
-//  message → API → response rendered, with session history"). Plan
-//  generation, chaining logic, and structured schedule output are later
-//  phases; right now this just talks.
+//  The Jeeves conversational agent. Two entry points:
+//
+//  • `send` — plain multi-turn chat (text in, text out). Still used by the
+//    live smoke test.
+//  • `sendAgentic` — the real assistant: the model is given tools (add an
+//    event, set the gym, build the day's plan) and we run the tool-use loop,
+//    so a conversation can actually change the day instead of just talking
+//    about it. Tool *execution* is delegated to the caller (the view), which
+//    owns SwiftData and today's context.
+//
+//  Raw REST against the Anthropic Messages API — Swift has no official SDK.
+//  Key stored in Keychain; the repo is public, so nothing is hardcoded.
 //
 
 import Foundation
@@ -52,6 +59,8 @@ enum JeevesChatService {
         return "The current date and time on the user's device is \(f.string(from: date))."
     }
 
+    // MARK: - Plain chat (unchanged; used by the live smoke test)
+
     private static let systemPrompt = """
     You are Jeeves, a personal day-planning assistant living inside the user's own \
     iOS productivity app. Have a natural, helpful conversation about their day and \
@@ -80,15 +89,214 @@ enum JeevesChatService {
             "messages": messages,
         ]
 
+        let decoded = try await post(body: body, apiKey: apiKey)
+        guard let text = decoded.text, !text.isEmpty else { throw JeevesChatError.emptyResponse }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - Agentic chat (tool use)
+
+    /// One tool invocation from the model. Execution is delegated to the caller
+    /// (the view) because it needs SwiftData + the day's context.
+    struct ToolCall {
+        let id: String
+        let name: String
+        let input: [String: Any]
+    }
+
+    /// The caller's answer to a tool call: text the model reads next, plus an
+    /// optional plan to surface as a timeline card (when the tool was plan_day).
+    struct ToolResult {
+        let text: String
+        var plan: GeneratedPlan? = nil
+        var isOfflinePlan: Bool = false
+    }
+
+    /// The end of an agentic turn: the final assistant text and any plans that
+    /// were generated along the way, in the order they happened.
+    struct AgenticReply {
+        let text: String
+        var plans: [(plan: GeneratedPlan, isOffline: Bool)] = []
+    }
+
+    private static let agenticSystemPrompt = """
+    You are Jeeves, a personal day-planning assistant inside the user's own iOS \
+    productivity app. Unlike a plain chatbot, you can take real actions through \
+    tools: record events, set gym plans, and build the full structured schedule \
+    for a day.
+
+    How to work:
+    - Talk naturally and briefly, in the voice of a sharp, warm assistant.
+    - When the user mentions an event or a gym plan, confirm only the specifics \
+    you're genuinely unsure about (an ambiguous time, a missing place) in one \
+    short question — then record it with add_event / set_gym. Don't ask \
+    permission to use a tool; once the details are clear, just do it.
+    - When the user wants their day planned ("plan my day", "sort out tomorrow"), \
+    make sure the events and gym for that day are recorded first, then call \
+    plan_day. plan_day does the real scheduling with live commute times and all \
+    the lunch/gym/reading rules built in — so NEVER hand-write a timetable \
+    yourself; always call the tool.
+    - After tools run, give a short, warm confirmation of what changed. The app \
+    renders the timeline itself, so don't re-list every block.
+    - You don't need to reason about commute times, lunch windows, or gym \
+    durations — plan_day owns all of that.
+    """
+
+    private static let toolSchemas: [[String: Any]] = [
+        [
+            "name": "add_event",
+            "description": "Record a fixed appointment/event on a day (a show, meeting, dinner, flight…). The planner schedules everything else around it. Call this once the event's details are clear.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "title": ["type": "string", "description": "Short event name, e.g. 'Dinner with Sam' or 'MLR show'"],
+                    "start_time": ["type": "string", "description": "24-hour HH:MM, e.g. '19:00'"],
+                    "end_time": ["type": "string", "description": "24-hour HH:MM. If the user didn't say, estimate a sensible end from the event type."],
+                    "venue": ["type": "string", "description": "Place name or address exactly as the user said it; omit if none."],
+                    "leaving_from": ["type": "string", "enum": ["Home", "Work", "Gym"], "description": "Where they head out from. Default Home."],
+                    "date": ["type": "string", "description": "'today', 'tomorrow', or YYYY-MM-DD. Default 'today'."],
+                ],
+                "required": ["title", "start_time"],
+            ],
+        ],
+        [
+            "name": "set_gym",
+            "description": "Record whether the user is going to the gym on a day and when weightlifting starts. The gym routine (mobility → weightlifting → cardio) and its commute get scheduled around it.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "gym_today": ["type": "boolean", "description": "true if going to the gym that day; false to clear it."],
+                    "gym_time": ["type": "string", "description": "24-hour HH:MM the weightlifting starts. Required when gym_today is true."],
+                    "date": ["type": "string", "description": "'today', 'tomorrow', or YYYY-MM-DD. Default 'today'."],
+                ],
+                "required": ["gym_today"],
+            ],
+        ],
+        [
+            "name": "plan_day",
+            "description": "Build the full structured schedule for a day — with real commute times — around whatever events and gym are set. Call this after the anchors are in place and the user wants the actual plan. Returns a summary; the app renders the timeline card.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "date": ["type": "string", "description": "'today', 'tomorrow', or YYYY-MM-DD. Default 'today'."],
+                    "note": ["type": "string", "description": "Any extra guidance for the planner from the conversation, e.g. 'keep the afternoon light'."],
+                ],
+            ],
+        ],
+    ]
+
+    /// Runs a full agentic turn: the model may call tools any number of times
+    /// (each executed by `execute`) before producing its final reply. Loops
+    /// until the model stops asking for tools, capped so a misbehaving model
+    /// can't spin forever.
+    static func sendAgentic(
+        history: [ChatMessage],
+        newMessage: String,
+        stateNote: String,
+        execute: (ToolCall) async -> ToolResult
+    ) async throws -> AgenticReply {
+        guard let apiKey = KeychainService.loadAPIKey(), !apiKey.isEmpty else {
+            throw JeevesChatError.missingAPIKey
+        }
+
+        // Prior turns are plain strings; the running turn appends structured
+        // content blocks (tool_use / tool_result), which is why `content` is
+        // typed loosely here.
+        var messages: [[String: Any]] = history.map {
+            ["role": $0.role.rawValue, "content": $0.content]
+        }
+        messages.append(["role": "user", "content": newMessage])
+
+        var plans: [(plan: GeneratedPlan, isOffline: Bool)] = []
+        var finalText = ""
+
+        for _ in 0..<6 {
+            let body: [String: Any] = [
+                "model": model,
+                "max_tokens": 1536,
+                // The orchestration layer is lightweight routing (record an
+                // event, decide whether to plan) — the real scheduling
+                // intelligence lives inside plan_day. Disabling thinking here
+                // keeps chat snappy and the tool-use echo simple.
+                "thinking": ["type": "disabled"],
+                "system": agenticSystemPrompt + "\n\n" + dateContext() + "\n\n" + stateNote,
+                "tools": toolSchemas,
+                "messages": messages,
+            ]
+            let response = try await post(body: body, apiKey: apiKey)
+
+            // Echo the assistant turn back VERBATIM so the tool_use ids line up
+            // with the tool_result blocks we send next.
+            messages.append(["role": "assistant", "content": response.rawContent])
+
+            let text = response.blocks.compactMap { $0.type == "text" ? $0.text : nil }
+                .joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty { finalText = text }
+
+            guard response.stopReason == "tool_use" else { break }
+
+            // Execute each tool call, then send ALL results back in one user turn
+            // (splitting them trains the model to stop making parallel calls).
+            var toolResults: [[String: Any]] = []
+            for block in response.blocks where block.type == "tool_use" {
+                let call = ToolCall(id: block.id ?? "", name: block.name ?? "", input: block.input ?? [:])
+                let result = await execute(call)
+                if let plan = result.plan { plans.append((plan, result.isOfflinePlan)) }
+                toolResults.append([
+                    "type": "tool_result",
+                    "tool_use_id": call.id,
+                    "content": result.text,
+                ])
+            }
+            messages.append(["role": "user", "content": toolResults])
+        }
+
+        return AgenticReply(text: finalText, plans: plans)
+    }
+
+    // MARK: - Date argument parsing (pure, testable)
+
+    /// Resolves a tool's `date` argument against a reference "today".
+    /// Accepts "today", "tomorrow", "day after tomorrow", or "YYYY-MM-DD";
+    /// anything unrecognised (or nil) falls back to the reference day. Kept here
+    /// so the parsing that governs which day a tool touches is unit-tested.
+    static func resolveDate(_ raw: String?, relativeTo today: Date) -> Date {
+        let cal = Calendar.current
+        let base = cal.startOfDay(for: today)
+        guard let s = raw?.lowercased().trimmingCharacters(in: .whitespaces), !s.isEmpty else { return base }
+        // "day after tomorrow" must be checked before "tomorrow" (it contains it).
+        if s.contains("day after tomorrow") { return cal.date(byAdding: .day, value: 2, to: base) ?? base }
+        if s.contains("tomorrow") { return cal.date(byAdding: .day, value: 1, to: base) ?? base }
+        if s.contains("today") || s.contains("tonight") { return base }
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = .current
+        f.locale = Locale(identifier: "en_US_POSIX")
+        if let d = f.date(from: s) { return cal.startOfDay(for: d) }
+        return base
+    }
+
+    // MARK: - Transport
+
+    private struct Response {
+        let stopReason: String
+        let rawContent: [[String: Any]]   // echo back verbatim on the next turn
+        struct Block { let type: String; let text: String?; let id: String?; let name: String?; let input: [String: Any]? }
+        let blocks: [Block]
+        /// First text block, for the plain-chat path.
+        var text: String? { blocks.first { $0.type == "text" }?.text }
+    }
+
+    private static func post(body: [String: Any], apiKey: String) async throws -> Response {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
+        request.timeoutInterval = 120
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
-
         guard let http = response as? HTTPURLResponse else {
             throw JeevesChatError.requestFailed("No response from server.")
         }
@@ -97,16 +305,20 @@ enum JeevesChatService {
                 .flatMap { ($0["error"] as? [String: Any])?["message"] as? String }
             throw JeevesChatError.requestFailed(message ?? "Request failed (\(http.statusCode)).")
         }
-
-        struct MessageResponse: Decodable {
-            struct ContentBlock: Decodable { let type: String; let text: String? }
-            let content: [ContentBlock]
-        }
-
-        let decoded = try JSONDecoder().decode(MessageResponse.self, from: data)
-        guard let text = decoded.content.first(where: { $0.type == "text" })?.text, !text.isEmpty else {
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let content = obj["content"] as? [[String: Any]] else {
             throw JeevesChatError.emptyResponse
         }
-        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let blocks = content.map { c in
+            Response.Block(
+                type: c["type"] as? String ?? "",
+                text: c["text"] as? String,
+                id: c["id"] as? String,
+                name: c["name"] as? String,
+                input: c["input"] as? [String: Any]
+            )
+        }
+        return Response(stopReason: obj["stop_reason"] as? String ?? "end_turn",
+                        rawContent: content, blocks: blocks)
     }
 }
