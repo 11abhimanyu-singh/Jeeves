@@ -122,9 +122,10 @@ struct ContentView: View {
             // Any plan generation still "pending" from a prior run never
             // returned (crash/kill/hang) — record that truthfully.
             PlanDiagnostics.sweepAbandoned(context: modelContext)
-            // Refresh the iCloud Drive diagnostics mirror on launch.
+            // Refresh the iCloud Drive diagnostics mirror + full DB snapshot on launch.
             let logs = (try? modelContext.fetch(FetchDescriptor<PlanGenerationLog>())) ?? []
             DiagnosticsSync.write(DiagnosticsSync.entries(from: logs))
+            DataBackup.writeToICloud()
         }
         .onChange(of: selectedDate) { _, newDate in loadFields(for: newDate) }
         .onChange(of: scenePhase) { _, phase in

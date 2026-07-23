@@ -59,7 +59,9 @@ enum DiagnosticsSync {
         }
     }
 
-    private static func documentsURL() -> URL? {
+    /// The app's iCloud Drive Documents folder (shared with DataBackup). Nil if
+    /// iCloud Documents isn't available. May block — call off the main thread.
+    static func documentsURL() -> URL? {
         guard let container = FileManager.default.url(forUbiquityContainerIdentifier: containerID) else { return nil }
         let docs = container.appendingPathComponent("Documents", isDirectory: true)
         try? FileManager.default.createDirectory(at: docs, withIntermediateDirectories: true)
