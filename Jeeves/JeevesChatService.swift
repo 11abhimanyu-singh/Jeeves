@@ -131,6 +131,11 @@ enum JeevesChatService {
     you're genuinely unsure about (an ambiguous time, a missing place) in one \
     short question — then record it with add_event / set_gym. Don't ask \
     permission to use a tool; once the details are clear, just do it.
+    - When the user asks what's on their calendar, or to plan around it, call \
+    fetch_calendar. Then read the events back to them and ASK before recording \
+    anything ("I see Dentist at 3pm and Dinner at 8pm — want me to plan around \
+    these?"). Only after they confirm, call add_event for each one they want. \
+    Never silently import calendar events.
     - When the user wants their day planned ("plan my day", "sort out tomorrow"), \
     make sure the events and gym for that day are recorded first, then call \
     plan_day. plan_day does the real scheduling with live commute times and all \
@@ -170,6 +175,16 @@ enum JeevesChatService {
                     "date": ["type": "string", "description": "'today', 'tomorrow', or YYYY-MM-DD. Default 'today'."],
                 ],
                 "required": ["gym_today"],
+            ],
+        ],
+        [
+            "name": "fetch_calendar",
+            "description": "Read the user's Google Calendar events for a day. Use this to answer 'what's on my calendar' or to plan around real appointments. Returns the events as text (it does NOT add them — read them back and confirm with the user first, then call add_event for each one they want).",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "date": ["type": "string", "description": "'today', 'tomorrow', or YYYY-MM-DD. Default 'today'."],
+                ],
             ],
         ],
         [

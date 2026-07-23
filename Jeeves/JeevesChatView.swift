@@ -325,10 +325,31 @@ struct JeevesChatView: View {
     @MainActor
     private func runTool(_ call: JeevesChatService.ToolCall) async -> JeevesChatService.ToolResult {
         switch call.name {
-        case "add_event": return toolAddEvent(call.input)
-        case "set_gym":   return toolSetGym(call.input)
-        case "plan_day":  return await toolPlanDay(call.input)
-        default:          return .init(text: "Unknown tool \(call.name).")
+        case "add_event":      return toolAddEvent(call.input)
+        case "set_gym":        return toolSetGym(call.input)
+        case "fetch_calendar": return await toolFetchCalendar(call.input)
+        case "plan_day":       return await toolPlanDay(call.input)
+        default:               return .init(text: "Unknown tool \(call.name).")
+        }
+    }
+
+    @MainActor
+    private func toolFetchCalendar(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
+        let date = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
+        guard KeychainService.isGoogleCalendarConnected else {
+            return .init(text: "Google Calendar isn't connected. Tell the user to connect it in Plan setup (the calendar button), then try again.")
+        }
+        do {
+            let events = try await GoogleCalendarService.events(on: date)
+            guard !events.isEmpty else {
+                return .init(text: "No timed events on the user's calendar for \(dayLabel(date)).")
+            }
+            let lines = events.map { e in
+                "• \(e.title) \(hhmm(e.startMinute))–\(hhmm(e.endMinute))" + (e.location.isEmpty ? "" : " at \(e.location)")
+            }.joined(separator: "\n")
+            return .init(text: "Calendar events for \(dayLabel(date)):\n\(lines)\n\nRead these back to the user and confirm before adding any with add_event.")
+        } catch {
+            return .init(text: "Couldn't read the calendar: \(error.localizedDescription)")
         }
     }
 
