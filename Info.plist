@@ -13,5 +13,22 @@
 		<string>processing</string>
 		<string>remote-notification</string>
 	</array>
+	<!-- Expose the app's iCloud container as a browsable folder in iCloud Drive
+	     (shows as "Jeeves" in the iPhone Files app AND syncs to iCloud-for-Windows
+	     on the PC). This surfaces the diagnostics + DB backup the daily health
+	     task reads, so that task can run on an always-on machine instead of only
+	     the Mac that mirrors the private container. -->
+	<key>NSUbiquitousContainers</key>
+	<dict>
+		<key>iCloud.abhimanyusingh.me.Jeeves</key>
+		<dict>
+			<key>NSUbiquitousContainerIsDocumentScopePublic</key>
+			<true/>
+			<key>NSUbiquitousContainerName</key>
+			<string>Jeeves</string>
+			<key>NSUbiquitousContainerSupportedFolderLevels</key>
+			<string>Any</string>
+		</dict>
+	</dict>
 </dict>
 </plist>
