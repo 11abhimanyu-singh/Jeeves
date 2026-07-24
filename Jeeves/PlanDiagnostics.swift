@@ -13,7 +13,7 @@
 import Foundation
 import SwiftData
 
-enum PlanGenTrigger: String, Codable { case planner, chat }
+enum PlanGenTrigger: String, Codable { case planner, chat, autoPlan }
 
 enum PlanGenOutcome: String, Codable {
     case pending          // in flight (or never returned, if it stays this way)

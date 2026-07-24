@@ -87,7 +87,11 @@ enum AutoPlanService {
             }()
             let dayEvents = allEvents.filter { $0.date.startOfDay == day }.sorted { $0.startMinute < $1.startMinute }
 
-            let result = await PlanCoordinator.generate(.init(
+            // generateLogged (not generate) so every auto-plan attempt — overnight
+            // or foreground backstop — leaves a diagnostics trace (trigger
+            // .autoPlan), mirrored to iCloud Drive. Without this we can't tell
+            // whether the background task ever fired.
+            let result = await PlanCoordinator.generateLogged(.init(
                 userMessage: "",
                 hasGym: state.hasGymToday,
                 gymMinute: state.gymMinute,
@@ -97,7 +101,7 @@ enum AutoPlanService {
                 routine: routine,
                 adherenceNote: AdherenceHistory.planningNote(context: context, for: day),
                 planDate: day
-            ))
+            ), context: context, trigger: .autoPlan)
             // An offline (deterministic) plan is a poor thing to silently pin
             // for a FUTURE day — leave the gap so the foreground path (or the
             // user) can build a real one once the network is back.
