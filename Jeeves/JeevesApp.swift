@@ -18,6 +18,10 @@ struct JeevesApp: App {
         // auto-planner that has the coming days ready before the user wakes.
         CommuteBackgroundRefresh.register(container: sharedModelContainer)
         AutoPlanService.register(container: sharedModelContainer)
+        // The Watch workout inbox needs the store to file finished workouts,
+        // and old lift/run logs get wrapped into Workouts once.
+        WatchLink.shared.configure(container: sharedModelContainer)
+        Workout.migrateIfNeeded(context: sharedModelContainer.mainContext)
     }
 
     var sharedModelContainer: ModelContainer = {
@@ -40,6 +44,7 @@ struct JeevesApp: App {
             StretchLog.self,
             Reminder.self,
             Todo.self,
+            Workout.self,
         ])
         // Sync to the user's private iCloud database so their data backs up and
         // follows them across devices. The iCloud/CloudKit capability is present

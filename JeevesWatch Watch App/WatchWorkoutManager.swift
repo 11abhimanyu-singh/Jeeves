@@ -23,6 +23,13 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
 
+    // Session summary the phone needs: what ran, since when, and the running
+    // heart-rate average (sum/count of every published sample).
+    private var activity = "run"
+    private var startDate: Date?
+    private var hrSum = 0
+    private var hrCount = 0
+
     nonisolated static func bpmUnit() -> HKUnit { HKUnit.count().unitDivided(by: .minute()) }
 
     override init() {
@@ -74,6 +81,10 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
             self.session = session
             self.builder = builder
             let startDate = Date()
+            self.activity = activity
+            self.startDate = startDate
+            self.hrSum = 0
+            self.hrCount = 0
             session.startActivity(with: startDate)
             isRunning = true   // optimistic so the UI responds; reverted if collection can't begin
             builder.beginCollection(withStart: startDate) { [weak self] began, _ in
@@ -82,6 +93,12 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
                     self?.session = nil; self?.builder = nil; self?.isRunning = false
                 }
             }
+            // Best-effort heads-up so the phone can show an in-progress card.
+            let s = WCSession.default
+            if s.activationState == .activated, s.isReachable {
+                s.sendMessage(["event": "workoutStarted", "activity": activity],
+                              replyHandler: nil, errorHandler: nil)
+            }
         } catch {
             session = nil; builder = nil
         }
@@ -89,6 +106,7 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
 
     func stop() {
         guard let session, let builder else { return }
+        sendSummary()
         session.end()
         builder.endCollection(withEnd: Date()) { [weak self] _, _ in
             // Reset only AFTER the workout is finalized (and saved), not before,
@@ -99,14 +117,35 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
                     self?.builder = nil
                     self?.isRunning = false
                     self?.currentBPM = nil
+                    self?.startDate = nil
                 }
             }
         }
     }
 
+    /// Hands the finished session to the phone via the guaranteed-delivery
+    /// queue, so the workout lands on the Today feed even if the phone is in a
+    /// bag right now. Sub-minute sessions are dropped — they're almost always
+    /// an accidental start.
+    private func sendSummary() {
+        guard let startDate else { return }
+        let elapsed = Date().timeIntervalSince(startDate)
+        guard elapsed >= 60 else { return }
+        let avg = hrCount > 0 ? hrSum / hrCount : 0
+        WCSession.default.transferUserInfo([
+            "event": "workoutEnded",
+            "activity": activity,
+            "startEpoch": startDate.timeIntervalSince1970,
+            "durationMin": Int((elapsed / 60).rounded()),
+            "avgBPM": avg,
+        ])
+    }
+
     /// Publish a new reading and forward it to the phone.
     private func publish(_ bpm: Int) {
         currentBPM = bpm
+        hrSum += bpm
+        hrCount += 1
         let s = WCSession.default
         if s.activationState == .activated, s.isReachable {
             s.sendMessage(["bpm": bpm], replyHandler: nil, errorHandler: nil)

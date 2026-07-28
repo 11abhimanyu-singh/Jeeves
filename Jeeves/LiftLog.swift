@@ -41,12 +41,15 @@ final class LiftSession {
     var date: Date = Date.distantPast
     var exerciseName: String = ""
     var avgBPM: Int = 0   // average heart rate over the session; 0 = none captured
+    var workoutID: UUID? = nil   // owning Workout (one workout = the day's exercises)
 
-    init(id: UUID = UUID(), date: Date, exerciseName: String, avgBPM: Int = 0) {
+    init(id: UUID = UUID(), date: Date, exerciseName: String, avgBPM: Int = 0,
+         workoutID: UUID? = nil) {
         self.id = id
         self.date = date
         self.exerciseName = exerciseName
         self.avgBPM = avgBPM
+        self.workoutID = workoutID
     }
 }
 

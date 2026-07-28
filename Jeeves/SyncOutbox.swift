@@ -127,6 +127,17 @@ enum SyncOutbox {
         var dueDate: Date?
         var done: Bool
     }
+    nonisolated struct WorkoutRow: Codable, Sendable {
+        var date: Date
+        var type: String
+        var state: String
+        var source: String
+        var title: String
+        var durationMin: Int
+        var avgBPM: Int
+        var distanceKm: Double
+        var inclinePercent: Double
+    }
 
     nonisolated struct StateSnapshot: Codable, Sendable {
         var schemaVersion: Int
@@ -144,6 +155,7 @@ enum SyncOutbox {
         var stretchSessions: [StretchRow]
         var reminders: [ReminderRow]
         var todos: [TodoRow]
+        var workouts: [WorkoutRow]
     }
 
     nonisolated struct Heartbeat: Codable, Sendable {
@@ -196,6 +208,7 @@ enum SyncOutbox {
         let stretches    = (try? context.fetch(FetchDescriptor<StretchLog>()))  ?? []
         let reminders    = (try? context.fetch(FetchDescriptor<Reminder>()))    ?? []
         let todos        = (try? context.fetch(FetchDescriptor<Todo>()))        ?? []
+        let allWorkouts  = (try? context.fetch(FetchDescriptor<Workout>()))     ?? []
 
         let snapshot = StateSnapshot(
             schemaVersion: schemaVersion, exportedAt: now,
@@ -249,6 +262,12 @@ enum SyncOutbox {
             },
             todos: todos.map {
                 TodoRow(title: $0.title, priority: $0.priorityRaw, dueDate: $0.dueDate, done: $0.doneAt != nil)
+            },
+            workouts: allWorkouts.map {
+                WorkoutRow(date: $0.date, type: $0.typeRaw, state: $0.stateRaw,
+                           source: $0.sourceRaw, title: $0.title, durationMin: $0.durationMin,
+                           avgBPM: $0.avgBPM, distanceKm: $0.distanceKm,
+                           inclinePercent: $0.inclinePercent)
             }
         )
 
@@ -260,7 +279,8 @@ enum SyncOutbox {
             counts: ["plans": plans.count, "events": events.count, "checkIns": checkIns.count,
                      "leisure": leisure.count, "routine": routine.count, "genLogs": logs.count,
                      "lifts": liftSessions.count, "runs": runSessions.count, "stretches": stretches.count,
-                     "reminders": reminders.count, "todos": todos.count],
+                     "reminders": reminders.count, "todos": todos.count,
+                     "workouts": allWorkouts.count],
             lastPlanAt: last?.startedAt, lastPlanTrigger: last?.trigger.rawValue,
             lastPlanOutcome: last?.outcome.rawValue
         )

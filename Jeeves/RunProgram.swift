@@ -211,9 +211,11 @@ final class RunSession {
     var distanceKm: Double = 0
     var avgHeartRate: Int? = nil    // HealthKit integration point — stubbed nil until wired
     var rpe: Int = 0
+    var workoutID: UUID? = nil      // owning Workout (the Today/History container)
 
     init(id: UUID = UUID(), date: Date, weekIndex: Int, dayIndex: Int,
-         durationSec: Int, distanceKm: Double, avgHeartRate: Int? = nil, rpe: Int) {
+         durationSec: Int, distanceKm: Double, avgHeartRate: Int? = nil, rpe: Int,
+         workoutID: UUID? = nil) {
         self.id = id
         self.date = date
         self.weekIndex = weekIndex
@@ -222,6 +224,7 @@ final class RunSession {
         self.distanceKm = distanceKm
         self.avgHeartRate = avgHeartRate
         self.rpe = rpe
+        self.workoutID = workoutID
     }
 
     /// Pure helper: distance covered by a list of segments at their target paces,

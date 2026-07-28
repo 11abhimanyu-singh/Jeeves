@@ -206,7 +206,8 @@ struct ContentView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     checkinView            // the original daily check-in, kept as the core
-                    fitnessActivityLinks   // Run / Lift / Stretch loggers
+                    WorkoutTodaySection { fitnessSheet = .run }   // Today feed + History
+                    stretchLink
                 }
                 .padding(20)
             }
@@ -220,18 +221,10 @@ struct ContentView: View {
         }
     }
 
-    /// The three activity loggers that now live under Fitness. Check-in stays the
-    /// top-of-tab core; these are the "log a workout" shortcuts (matches the
-    /// prototype), each presented as a sheet.
-    private var fitnessActivityLinks: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text("Log an activity")
-                .font(.system(size: 11, weight: .bold)).textCase(.uppercase)
-                .kerning(0.9).foregroundStyle(Color.accentDeep)
-            fitnessRow("Go for a run", "Couch to 5K · run or walk by feel", "figure.run") { fitnessSheet = .run }
-            fitnessRow("Log a lift", "Reps × weight → live tonnage", "dumbbell.fill") { fitnessSheet = .lift }
-            fitnessRow("Stretch & mobility", "Guided, timed holds", "figure.flexibility") { fitnessSheet = .stretch }
-        }
+    /// Stretch stays its own guided flow outside the Workout feed (runs, lifts
+    /// and walks all live on the Today cards now).
+    private var stretchLink: some View {
+        fitnessRow("Stretch & mobility", "Guided, timed holds", "figure.flexibility") { fitnessSheet = .stretch }
     }
 
     private func fitnessRow(_ title: String, _ subtitle: String, _ icon: String,

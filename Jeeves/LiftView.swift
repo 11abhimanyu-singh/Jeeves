@@ -32,7 +32,7 @@ struct LiftView: View {
     // HealthKit is the fallback source. sessionStart marks when the logger opened
     // so we can average HR over the session on save.
     @StateObject private var hr = HeartRateMonitor()
-    @StateObject private var watchLink = WatchLink()
+    @ObservedObject private var watchLink = WatchLink.shared
     @State private var sessionStart: Date?
 
     private var liveBPM: Int? { watchLink.currentBPM ?? hr.currentBPM }

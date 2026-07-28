@@ -51,7 +51,7 @@ struct RunView: View {
     @State private var cued = false         // has onCue fired for the current block yet
     @State private var timer: Timer?
     @StateObject private var hr = HeartRateMonitor()
-    @StateObject private var watchLink = WatchLink()
+    @ObservedObject private var watchLink = WatchLink.shared
     @State private var runStartedAt = Date()
 
     // Captured at finish so the summary is stable after the timer state resets.
@@ -737,6 +737,20 @@ struct RunView: View {
             rpe: rpe
         )
         modelContext.insert(session)
+        // File the run on the Today feed too: finalize the in-progress card the
+        // Watch may have created, or create the day's run Workout outright.
+        let cal = Calendar.current
+        let live = ((try? modelContext.fetch(FetchDescriptor<Workout>())) ?? [])
+            .first { $0.type == .run && $0.state == .live && cal.isDate($0.date, inSameDayAs: runStartedAt) }
+        let workout = live ?? Workout(date: runStartedAt, type: .run, state: .done, source: .phone,
+                                      title: "Run \u{00B7} Week \(runWeekIndex + 1)")
+        workout.date = runStartedAt
+        workout.state = .done
+        workout.durationMin = finishedDurationSec / 60
+        if let hr = finishedAvgHR { workout.avgBPM = hr }
+        workout.distanceKm = finishedDistanceKm
+        if live == nil { modelContext.insert(workout) }
+        session.workoutID = workout.id
         // Only mark the run logged if it actually persisted; otherwise leave
         // logged == false so the guard above lets the user retry the save.
         logged = modelContext.saveOrLog()
