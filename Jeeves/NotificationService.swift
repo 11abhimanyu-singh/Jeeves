@@ -142,7 +142,7 @@ enum NotificationService {
     /// Clears any existing reminders for `date` and, if enabled and authorized,
     /// schedules fresh ones from the plan. Past times are skipped.
     static func reschedule(plan: GeneratedPlan, on date: Date) async {
-        clear(for: date)
+        await clear(for: date)
         guard remindersEnabled, await ensureAuthorized() else { return }
 
         let cal = Calendar.current
@@ -174,13 +174,15 @@ enum NotificationService {
         }
     }
 
-    static func clear(for date: Date) {
+    /// Async so callers can await removal BEFORE scheduling fresh reminders.
+    /// The old callback-based version returned immediately, so reschedule() could
+    /// add new same-prefixed requests that the late-firing callback then deleted.
+    static func clear(for date: Date) async {
         let prefix = idPrefix(for: date)
         let center = UNUserNotificationCenter.current()
-        center.getPendingNotificationRequests { requests in
-            let ids = requests.map(\.identifier).filter { $0.hasPrefix(prefix) }
-            if !ids.isEmpty { center.removePendingNotificationRequests(withIdentifiers: ids) }
-        }
+        let pending = await center.pendingNotificationRequests()
+        let ids = pending.map(\.identifier).filter { $0.hasPrefix(prefix) }
+        if !ids.isEmpty { center.removePendingNotificationRequests(withIdentifiers: ids) }
     }
 
     static func clearAll() {

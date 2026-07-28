@@ -151,6 +151,18 @@ final class DayPlannerTests: XCTestCase {
         assertNoOverlaps(DayPlanner.generate(gymMinute: 16 * 60, prepSessions: [], leisureLogs: []))
     }
 
+    /// A gym entered impossibly early — before the fixed morning blocks can
+    /// finish — must NOT emit a commute that starts before chores end. The gym
+    /// slides to the first slot that fits instead of overlapping the morning.
+    func testVeryEarlyGymProducesNoOverlaps() {
+        for gym in [8 * 60, 8 * 60 + 30, 9 * 60, 10 * 60] {
+            let blocks = DayPlanner.generate(gymMinute: gym, prepSessions: [], leisureLogs: [])
+            assertNoOverlaps(blocks)
+            let commute = block("Commute to gym", in: blocks)
+            XCTAssertNotNil(commute, "gym \(gym): a gym day still has a commute")
+        }
+    }
+
     // MARK: Practice-split weighting
 
     /// The category with the most sessions logged this week must get the

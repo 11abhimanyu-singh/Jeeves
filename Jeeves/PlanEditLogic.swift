@@ -53,14 +53,26 @@ enum PlanEditLogic {
         // Anchor the cascade to the day's earliest start, not the first block's
         // — after a reorder the first block's own time is meaningless.
         guard let origin = blocks.compactMap(\.startMinute).min() else { return blocks }
+        // Fixed anchor intervals — movable blocks must flow around, never over, these.
+        let anchors: [(start: Int, end: Int)] = blocks.compactMap { b in
+            guard b.isAnchor, let s = b.startMinute, let e = b.endMinute else { return nil }
+            return (s, e)
+        }
         var cursor = origin
         return blocks.map { block in
             if block.isAnchor, let end = block.endMinute {
                 cursor = max(cursor, end)
                 return block                       // pinned — unchanged
             }
-            let placed = block.placed(at: cursor, durationMinutes: block.durationMinutes)
-            cursor += block.durationMinutes
+            let duration = block.durationMinutes
+            // If placing here would run into a pinned anchor, jump past that
+            // anchor's end first (looping for a block long enough to span
+            // several), so a lengthened movable never overlaps a commitment.
+            while let clash = anchors.first(where: { $0.end > cursor && cursor + duration > $0.start }) {
+                cursor = max(cursor, clash.end)
+            }
+            let placed = block.placed(at: cursor, durationMinutes: duration)
+            cursor += duration
             return placed
         }
     }

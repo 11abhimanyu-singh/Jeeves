@@ -98,11 +98,16 @@ struct ContentView: View {
     @State private var justSaved = false
     @State private var isEditingCheckin = true
 
-    private var realYesterday: Date { Date().addingTimeInterval(-86400).startOfDay }
+    private var realYesterday: Date {
+        // Calendar day arithmetic, not −86400s: a DST-change day isn't 24h.
+        Calendar.current.date(byAdding: .day, value: -1, to: Date())?.startOfDay ?? Date().startOfDay
+    }
     private var realToday: Date { Date().startOfDay }
 
     private func entry(for date: Date) -> CheckIn? {
-        checkins.first { $0.date == date.startOfDay }
+        // Match by calendar day, not exact Date equality (robust across DST / TZ).
+        let cal = Calendar.current
+        return checkins.first { cal.isDate($0.date, inSameDayAs: date) }
     }
 
     private var yesterdayDone: Bool { entry(for: realYesterday) != nil }

@@ -39,6 +39,20 @@ final class PlanEditLogicTests: XCTestCase {
         XCTAssertEqual(out[2].endTime, "15:40")
     }
 
+    func testLongMovableBeforeAnchorDoesNotOverlapIt() {
+        // A movable block long enough to run past a later anchor's start must be
+        // pushed to after the anchor's end, never placed overlapping it.
+        let out = PlanEditLogic.retime([
+            b("Deep work", "09:00", "12:00"),                        // 180-min movable
+            b("Standup", "10:00", "10:30", anchor: true, kind: "event"),
+        ])
+        let anchor = out.first { $0.title == "Standup" }!
+        let movable = out.first { $0.title == "Deep work" }!
+        XCTAssertEqual(anchor.startTime, "10:00", "anchor stays pinned")
+        let overlaps = (movable.startMinute! < anchor.endMinute!) && (movable.endMinute! > anchor.startMinute!)
+        XCTAssertFalse(overlaps, "movable (\(movable.startTime)–\(movable.endTime)) overlaps the pinned anchor")
+    }
+
     func testReorderThenRetimeReflectsNewOrder() {
         var blocks = [b("A", "08:00", "08:30"), b("B", "08:30", "09:30")]  // 30, 60
         blocks.swapAt(0, 1)                                                 // B then A

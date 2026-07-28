@@ -18,6 +18,7 @@
 import Foundation
 import BackgroundTasks
 import SwiftData
+import os
 
 enum CommuteBackgroundRefresh {
     static let taskIdentifier = "abhimanyusingh.me.Jeeves.commute-refresh"
@@ -32,12 +33,19 @@ enum CommuteBackgroundRefresh {
         // it stays non-isolated and hops to the main actor for the actual work.
         BGTaskScheduler.shared.register(forTaskWithIdentifier: taskIdentifier, using: nil) { task in
             guard let refresh = task as? BGAppRefreshTask else { task.setTaskCompleted(success: false); return }
+            // Complete exactly once — success or expiration — or iOS throttles
+            // future launches. The lock keeps the two paths mutually exclusive.
+            let completed = OSAllocatedUnfairLock(initialState: false)
+            func complete(_ success: Bool) {
+                let already = completed.withLock { done -> Bool in defer { done = true }; return done }
+                if !already { refresh.setTaskCompleted(success: success) }
+            }
             let work = Task { @MainActor in
                 await CommuteRefresh.run(context: container.mainContext)
                 scheduleNext(context: container.mainContext)   // re-arm for the next leg
-                refresh.setTaskCompleted(success: true)
+                complete(true)
             }
-            refresh.expirationHandler = { work.cancel() }
+            refresh.expirationHandler = { work.cancel(); complete(false) }
         }
     }
 

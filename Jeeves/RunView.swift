@@ -728,7 +728,7 @@ struct RunView: View {
         // Average heart rate from HealthKit (Apple Watch / AirPods Pro 3),
         // computed on finish over the run's interval; nil if none was recorded.
         let session = RunSession(
-            date: Date(),
+            date: runStartedAt,   // the run's actual start, not the save moment
             weekIndex: runWeekIndex,
             dayIndex: runDayIndex,
             durationSec: finishedDurationSec,

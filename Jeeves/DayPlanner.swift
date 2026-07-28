@@ -127,8 +127,11 @@ enum DayPlanner {
             preGymCursor = leaveTime
         }
 
-        // Gym block — the pivot.
-        var gymCursor = leaveTime
+        // Gym block — the pivot. Floor the departure at where the morning blocks
+        // actually ended: for an unrealistically early gym (leaveTime before the
+        // fixed morning finishes) starting at leaveTime would overlap them, so the
+        // gym slides to the earliest slot that keeps the day in chronological order.
+        var gymCursor = max(leaveTime, preGymCursor)
         blocks.append(PlanBlock(title: "Commute to gym", startMinute: gymCursor, durationMinutes: 30, note: nil, isAnchor: false))
         gymCursor += 30
         blocks.append(PlanBlock(title: "Mobility", startMinute: gymCursor, durationMinutes: 20, note: nil, isAnchor: false))
@@ -144,10 +147,13 @@ enum DayPlanner {
         gymCursor += 20
 
         for item in overflow {
+            // Lunch is never seated before 12:30, even when the gym ended early.
+            var placeAt = gymCursor
+            if item.title == "Lunch", placeAt < lunchEarliestMinute { placeAt = lunchEarliestMinute }
             // Don't pack past the 20:30 boundary — drop what won't fit.
-            guard gymCursor + item.minutes <= dayEndMinute else { continue }
-            blocks.append(PlanBlock(title: item.title, startMinute: gymCursor, durationMinutes: item.minutes, note: item.note, isAnchor: false, prepCategory: item.category))
-            gymCursor += item.minutes
+            guard placeAt + item.minutes <= dayEndMinute else { continue }
+            blocks.append(PlanBlock(title: item.title, startMinute: placeAt, durationMinutes: item.minutes, note: item.note, isAnchor: false, prepCategory: item.category))
+            gymCursor = placeAt + item.minutes
         }
 
         let postGymSlack = dayEndMinute - gymCursor

@@ -23,6 +23,7 @@
 import Foundation
 import BackgroundTasks
 import SwiftData
+import os
 
 enum AutoPlanService {
     static let taskIdentifier = "abhimanyusingh.me.Jeeves.auto-plan"
@@ -131,12 +132,20 @@ enum AutoPlanService {
     static func register(container: ModelContainer) {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: taskIdentifier, using: nil) { task in
             guard let processing = task as? BGProcessingTask else { task.setTaskCompleted(success: false); return }
+            // setTaskCompleted must be called exactly once — on success OR on
+            // expiration. Without the expiration call, iOS throttles future
+            // background launches; the lock makes the two paths mutually exclusive.
+            let completed = OSAllocatedUnfairLock(initialState: false)
+            func complete(_ success: Bool) {
+                let already = completed.withLock { done -> Bool in defer { done = true }; return done }
+                if !already { processing.setTaskCompleted(success: success) }
+            }
             let work = Task { @MainActor in
                 await ensureUpcomingPlans(context: container.mainContext)
                 scheduleNext(context: container.mainContext)   // re-arm for the next morning
-                processing.setTaskCompleted(success: true)
+                complete(true)
             }
-            processing.expirationHandler = { work.cancel() }
+            processing.expirationHandler = { work.cancel(); complete(false) }
         }
     }
 
