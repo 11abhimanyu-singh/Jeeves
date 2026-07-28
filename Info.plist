@@ -32,5 +32,9 @@
 	</dict>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Jeeves reads your heart rate during a run so it can show your live BPM and log the run's average.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Jeeves records your voice notes so you can speak instead of typing in chat.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Jeeves transcribes your voice notes into text for the chat.</string>
 </dict>
 </plist>

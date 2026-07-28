@@ -138,6 +138,19 @@ enum SyncOutbox {
         var distanceKm: Double
         var inclinePercent: Double
     }
+    nonisolated struct ChatTurnRow: Codable, Sendable {
+        var timestamp: Date
+        var role: String
+        var content: String
+        var isPlan: Bool          // true when the turn rendered a plan card
+    }
+    nonisolated struct VoiceNoteRow: Codable, Sendable {
+        var date: Date
+        var durationSec: Double
+        var locale: String
+        var transcript: String
+        var audioFile: String     // "" once the audio aged out of retention
+    }
 
     nonisolated struct StateSnapshot: Codable, Sendable {
         var schemaVersion: Int
@@ -156,6 +169,8 @@ enum SyncOutbox {
         var reminders: [ReminderRow]
         var todos: [TodoRow]
         var workouts: [WorkoutRow]
+        var chatTurns: [ChatTurnRow]
+        var voiceNotes: [VoiceNoteRow]
     }
 
     nonisolated struct Heartbeat: Codable, Sendable {
@@ -209,6 +224,8 @@ enum SyncOutbox {
         let reminders    = (try? context.fetch(FetchDescriptor<Reminder>()))    ?? []
         let todos        = (try? context.fetch(FetchDescriptor<Todo>()))        ?? []
         let allWorkouts  = (try? context.fetch(FetchDescriptor<Workout>()))     ?? []
+        let chatTurns    = (try? context.fetch(FetchDescriptor<ChatTurn>()))    ?? []
+        let voiceNotes   = (try? context.fetch(FetchDescriptor<VoiceNote>()))   ?? []
 
         let snapshot = StateSnapshot(
             schemaVersion: schemaVersion, exportedAt: now,
@@ -268,6 +285,15 @@ enum SyncOutbox {
                            source: $0.sourceRaw, title: $0.title, durationMin: $0.durationMin,
                            avgBPM: $0.avgBPM, distanceKm: $0.distanceKm,
                            inclinePercent: $0.inclinePercent)
+            },
+            chatTurns: chatTurns.sorted { $0.timestamp < $1.timestamp }.map {
+                ChatTurnRow(timestamp: $0.timestamp, role: $0.roleRaw,
+                            content: $0.content, isPlan: $0.planJSON != nil)
+            },
+            voiceNotes: voiceNotes.sorted { $0.date < $1.date }.map {
+                VoiceNoteRow(date: $0.date, durationSec: $0.durationSec,
+                             locale: $0.localeID, transcript: $0.transcript,
+                             audioFile: $0.audioFileName)
             }
         )
 
@@ -280,7 +306,8 @@ enum SyncOutbox {
                      "leisure": leisure.count, "routine": routine.count, "genLogs": logs.count,
                      "lifts": liftSessions.count, "runs": runSessions.count, "stretches": stretches.count,
                      "reminders": reminders.count, "todos": todos.count,
-                     "workouts": allWorkouts.count],
+                     "workouts": allWorkouts.count, "chatTurns": chatTurns.count,
+                     "voiceNotes": voiceNotes.count],
             lastPlanAt: last?.startedAt, lastPlanTrigger: last?.trigger.rawValue,
             lastPlanOutcome: last?.outcome.rawValue
         )
@@ -298,6 +325,9 @@ enum SyncOutbox {
             if let heartbeatData { writeData(heartbeatData, fileName: "heartbeat.json") }
         }
         DiagnosticsSync.write(logEntries, now: now)
+        // Mirror voice-note audio to iCloud (VoiceNotes/) and prune past the
+        // 30-day retention window — the Whisper eval reads these.
+        VoiceNoteSync.export(context: context, now: now)
         if includeRawBackup { DataBackup.writeToICloud(now: now) }
     }
 

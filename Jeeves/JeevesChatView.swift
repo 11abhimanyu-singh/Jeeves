@@ -36,6 +36,7 @@ struct JeevesChatView: View {
 
     // In-chat ticket upload → event ingestion.
     @State private var photoItem: PhotosPickerItem?
+    @StateObject private var voice = VoiceRecorder()
     @State private var isReadingTicket = false
     @State private var detectedDraft: EventDraft?
 
@@ -46,8 +47,13 @@ struct JeevesChatView: View {
     // Session = a rolling 45-minute window. Turns older than this are pruned on
     // open, so returning after a break shows a clean window, not a long history.
     private static let sessionWindow: TimeInterval = 45 * 60
+    // "New chat" moves this marker instead of deleting anything — history is
+    // retained in the store (and exported for the chat eval); the screen and
+    // the LLM only see the current session.
+    @AppStorage("chatSessionStart") private var chatSessionStart: Double = 0
     private var turns: [ChatTurn] {
-        let cutoff = Date().addingTimeInterval(-Self.sessionWindow)
+        let cutoff = max(Date().addingTimeInterval(-Self.sessionWindow),
+                         Date(timeIntervalSince1970: chatSessionStart))
         return allTurns.filter { $0.timestamp >= cutoff }
     }
 
@@ -96,7 +102,6 @@ struct JeevesChatView: View {
                     withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
                 .onAppear {
-                    pruneOldTurns()
                     if let last = turns.last { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
@@ -130,9 +135,10 @@ struct JeevesChatView: View {
                 .overlay(Image(systemName: "sparkles").foregroundStyle(.white).font(.system(size: 13)))
             Text("Jeeves").font(.heading(18)).foregroundStyle(Color.textPrimary)
             Spacer()
-            // New chat = clear today's thread and start fresh.
+            // New chat = start a fresh session. Older turns stay in the store
+            // (they feed the chat eval) — they just leave the screen.
             if !turns.isEmpty {
-                Button { clearToday() } label: {
+                Button { startNewSession() } label: {
                     Image(systemName: "square.and.pencil").font(.system(size: 16)).foregroundStyle(Color.textSoft)
                 }
             }
@@ -211,7 +217,32 @@ struct JeevesChatView: View {
                     .padding(.bottom, 4)
             }
 
-            TextField("Message Jeeves…", text: $inputText, axis: .vertical)
+            // Voice note: tap to record (en-IN transcription), tap again to
+            // stop — the transcript lands in the field for a glance-and-send.
+            Button { voiceTapped() } label: {
+                Group {
+                    switch voice.phase {
+                    case .idle:
+                        Image(systemName: "mic")
+                            .font(.system(size: 22))
+                            .foregroundStyle(Color.textSoft)
+                    case .recording:
+                        Image(systemName: "stop.circle.fill")
+                            .font(.system(size: 24))
+                            .foregroundStyle(Color(red: 0.70, green: 0.23, blue: 0.18))
+                            .symbolEffect(.pulse, options: .repeating)
+                    case .transcribing:
+                        ProgressView().controlSize(.small)
+                    }
+                }
+                .padding(.bottom, 4)
+                .frame(width: 26)
+            }
+            .buttonStyle(.plain)
+            .disabled(voice.phase == .transcribing)
+
+            TextField(voice.phase == .recording ? "Listening… tap ⏹ to finish" : "Message Jeeves…",
+                      text: $inputText, axis: .vertical)
                 .lineLimit(1...4)
                 .foregroundStyle(Color.textPrimary)
                 .padding(10)
@@ -227,6 +258,39 @@ struct JeevesChatView: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
         .background(Color.bg)
+    }
+
+    /// One button, three states: start recording → stop & transcribe → (spinner).
+    private func voiceTapped() {
+        switch voice.phase {
+        case .idle:
+            Task { await voice.start() }
+        case .recording:
+            Task {
+                if let r = await voice.stopAndTranscribe(contextualStrings: voiceVocabulary) {
+                    inputText = r.transcript
+                    // Persist the note — audio + transcript are the eval corpus.
+                    modelContext.insert(VoiceNote(date: Date(), durationSec: r.duration,
+                                                  transcript: r.transcript,
+                                                  audioFileName: r.fileName))
+                    modelContext.saveOrLog()
+                } else if let e = voice.errorText {
+                    errorText = e
+                }
+            }
+        case .transcribing:
+            break
+        }
+    }
+
+    /// Bias the recognizer toward this user's world — exercise names, app
+    /// vocabulary, and the titles of their actual events (Indian names and
+    /// places are exactly what generic models fumble).
+    private var voiceVocabulary: [String] {
+        var words = ["Jeeves", "tonnage", "Couch to 5K", "incline", "front squat", "check-in"]
+        words += LiftExercise.library.map(\.name)
+        words += events.map(\.title)
+        return words
     }
 
     private var canSend: Bool {
@@ -246,21 +310,10 @@ struct JeevesChatView: View {
         return turn
     }
 
-    private func clearToday() {
-        for turn in turns { modelContext.delete(turn) }
-        modelContext.saveOrLog()
-    }
-
-    /// Deletes turns older than the 45-minute session window so the chat opens
-    /// clean after a break.
-    private func pruneOldTurns() {
-        let cutoff = Date().addingTimeInterval(-Self.sessionWindow)
-        var changed = false
-        for turn in allTurns where turn.timestamp < cutoff {
-            modelContext.delete(turn)
-            changed = true
-        }
-        if changed { modelContext.saveOrLog() }
+    /// "New chat": move the session marker forward. Nothing is deleted — the
+    /// full history stays in the store for the eval pipeline.
+    private func startNewSession() {
+        chatSessionStart = Date().timeIntervalSince1970
     }
 
     private func dismissKeyboard() {
@@ -335,8 +388,165 @@ struct JeevesChatView: View {
         case "fetch_calendar": return await toolFetchCalendar(call.input)
         case "plan_day":       return await toolPlanDay(call.input)
         case "replan_today":   return await toolReplanToday(call.input)
+        case "fetch_app_data": return toolFetchAppData(call.input)
+        case "add_todo":       return toolAddTodo(call.input)
+        case "add_reminder":   return toolAddReminder(call.input)
         default:               return .init(text: "Unknown tool \(call.name).")
         }
+    }
+
+    // MARK: fetch_app_data — the read side of the chat
+
+    /// Serves a compact JSON snapshot of one collection so the model can answer
+    /// data questions (PRs, missing venues, programme structure) by filtering
+    /// the rows itself. Fresh fetches, not @Query snapshots.
+    @MainActor
+    private func toolFetchAppData(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let collection = input["collection"] as? String ?? ""
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        let dtf = DateFormatter()
+        dtf.dateFormat = "yyyy-MM-dd HH:mm"
+
+        func json(_ rows: [[String: Any]]) -> JeevesChatService.ToolResult {
+            let obj: [String: Any] = ["count": rows.count, "rows": rows]
+            let data = (try? JSONSerialization.data(withJSONObject: obj)) ?? Data()
+            return .init(text: String(data: data, encoding: .utf8) ?? "{}")
+        }
+
+        switch collection {
+        case "run_program":
+            return .init(text: JeevesChatService.runProgramSummary())
+
+        case "events":
+            let all = (try? modelContext.fetch(FetchDescriptor<DailyEvent>())) ?? []
+            return json(all.sorted { $0.date < $1.date }.map { e in
+                [
+                    "date": df.string(from: e.date),
+                    "title": e.title,
+                    "start": e.isAllDay ? "all-day" : hhmm(e.startMinute),
+                    "end": e.isAllDay ? "all-day" : hhmm(e.endMinute),
+                    "venue": e.destinationAddress,
+                    "hasLocation": !e.destinationAddress.isEmpty || e.destinationLat != nil,
+                ]
+            })
+
+        case "workouts":
+            let all = (try? modelContext.fetch(FetchDescriptor<Workout>())) ?? []
+            return json(all.sorted { $0.date > $1.date }.map { w in
+                [
+                    "date": df.string(from: w.date),
+                    "type": w.typeRaw, "state": w.stateRaw, "source": w.sourceRaw,
+                    "title": w.title, "durationMin": w.durationMin, "avgBPM": w.avgBPM,
+                    "distanceKm": w.distanceKm, "inclinePercent": w.inclinePercent,
+                ]
+            })
+
+        case "lifts":
+            let sessions = (try? modelContext.fetch(FetchDescriptor<LiftSession>())) ?? []
+            let sets = (try? modelContext.fetch(FetchDescriptor<LiftSet>())) ?? []
+            return json(sessions.sorted { $0.date > $1.date }.map { s in
+                let ss = sets.filter { $0.sessionID == s.id }.sorted { $0.order < $1.order }
+                return [
+                    "date": df.string(from: s.date),
+                    "exercise": s.exerciseName,
+                    "tonnageKg": Int(LiftMath.sessionTonnage(ss).rounded()),
+                    "sets": ss.map { set in
+                        ["reps": set.reps, "kg": set.weightKg, "type": set.inputTypeRaw,
+                         "addedKg": set.addedKg, "holdSec": set.holdSeconds]
+                    },
+                ]
+            })
+
+        case "runs":
+            let all = (try? modelContext.fetch(FetchDescriptor<RunSession>())) ?? []
+            return json(all.sorted { $0.date > $1.date }.map { r in
+                ["date": df.string(from: r.date), "week": r.weekIndex + 1,
+                 "durationMin": r.durationSec / 60, "distanceKm": r.distanceKm,
+                 "avgHR": r.avgHeartRate ?? 0, "rpe": r.rpe]
+            })
+
+        case "todos":
+            let all = (try? modelContext.fetch(FetchDescriptor<Todo>())) ?? []
+            return json(all.map { t in
+                ["title": t.title, "priority": t.priorityRaw,
+                 "due": t.dueDate.map(df.string(from:)) ?? "",
+                 "done": t.doneAt != nil]
+            })
+
+        case "reminders":
+            let all = (try? modelContext.fetch(FetchDescriptor<Reminder>())) ?? []
+            return json(all.sorted { $0.fireAt < $1.fireAt }.map { r in
+                ["title": r.title, "fireAt": dtf.string(from: r.fireAt),
+                 "recurrence": r.recurrenceRaw, "enabled": r.enabled,
+                 "completed": r.completedAt != nil]
+            })
+
+        case "checkins":
+            let all = (try? modelContext.fetch(FetchDescriptor<CheckIn>())) ?? []
+            return json(all.sorted { $0.date > $1.date }.map { c in
+                ["date": df.string(from: c.date), "workedOut": c.workedOut,
+                 "weight": c.weightTraining, "stretch": c.stretching,
+                 "mobility": c.mobility, "cardio": c.cardio,
+                 "cardioType": c.cardioType ?? "",
+                 "cardioMin": c.cardioDuration ?? 0, "incline": c.cardioIncline ?? 0]
+            })
+
+        case "books":
+            let all = (try? modelContext.fetch(FetchDescriptor<Book>())) ?? []
+            return json(all.map { b in
+                ["title": b.title, "author": b.author,
+                 "status": String(describing: b.status),
+                 "page": b.currentPage, "totalPages": b.totalPages ?? 0]
+            })
+
+        default:
+            return .init(text: "Unknown collection '\(collection)'. Valid: events, workouts, lifts, runs, run_program, todos, reminders, checkins, books.")
+        }
+    }
+
+    // MARK: Task capture (todo + reminder)
+
+    @MainActor
+    private func toolAddTodo(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let title = (input["title"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return .init(text: "Todo needs a title.") }
+        let priority = TodoPriority(rawValue: input["priority"] as? String ?? "") ?? .medium
+        let due = (input["due_date"] as? String).map {
+            JeevesChatService.resolveDate($0, relativeTo: Date())
+        }
+        let openCount = ((try? modelContext.fetch(FetchDescriptor<Todo>())) ?? [])
+            .filter { $0.doneAt == nil }.count
+        let todo = Todo(title: title, priority: priority, sortOrder: -openCount - 1)
+        todo.dueDate = due
+        modelContext.insert(todo)
+        modelContext.saveOrLog()
+        return .init(text: "Added todo '\(title)' (\(priority.rawValue))\(due.map { d in ", due \(JeevesChatView.dayString(d))" } ?? "").")
+    }
+
+    @MainActor
+    private func toolAddReminder(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let title = (input["title"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let time = input["time"] as? String ?? ""
+        guard !title.isEmpty, !time.isEmpty else { return .init(text: "Reminder needs a title and a time.") }
+        let fire = JeevesChatService.resolveFireDate(dateRaw: input["date"] as? String,
+                                                    timeRaw: time, relativeTo: Date())
+        let recurrence = ReminderRecurrence(rawValue: input["recurrence"] as? String ?? "") ?? .once
+        let reminder = Reminder(title: title, fireAt: fire, recurrence: recurrence)
+        modelContext.insert(reminder)
+        modelContext.saveOrLog()
+        let active = ((try? modelContext.fetch(FetchDescriptor<Reminder>())) ?? [])
+            .filter(\.isActive)
+        ReminderScheduler.reschedule(active)
+        let dtf = DateFormatter()
+        dtf.dateFormat = "EEE d MMM, HH:mm"
+        return .init(text: "Reminder set: '\(title)' at \(dtf.string(from: fire)) (\(recurrence.rawValue)).")
+    }
+
+    private static func dayString(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "EEE d MMM"
+        return f.string(from: d)
     }
 
     /// Re-plan only the rest of today from now, preserving what's already done —

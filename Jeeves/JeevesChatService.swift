@@ -155,6 +155,18 @@ enum JeevesChatService {
     renders the timeline itself, so don't re-list every block.
     - You don't need to reason about commute times, lunch windows, or gym \
     durations — plan_day owns all of that.
+    - When the user asks ANY question about their own data — their events, \
+    workouts, lifts (PRs, tonnage), runs, the Couch-to-5K programme, to-dos, \
+    reminders, check-ins, books — call fetch_app_data with the right collection \
+    and answer from what it returns. Do the filtering/counting yourself (e.g. \
+    "future events with no venue" = filter the events rows). Never guess or say \
+    you can't see the data.
+    - When the user asks to remember a task or be reminded of something, use \
+    add_todo (untimed task) or add_reminder (timed nudge). One utterance may \
+    carry several — add each in the same turn, then confirm all of them briefly.
+    - If the user declined an offer this conversation, don't offer it again. \
+    When re-checking something (like the calendar) repeatedly, keep repeat \
+    reports to one short line — vary the wording, never re-explain.
     """
 
     private static let toolSchemas: [[String: Any]] = [
@@ -206,6 +218,49 @@ enum JeevesChatService {
                     "date": ["type": "string", "description": "'today', 'tomorrow', or YYYY-MM-DD. Default 'today'."],
                     "note": ["type": "string", "description": "Any extra guidance for the planner from the conversation, e.g. 'keep the afternoon light'."],
                 ],
+            ],
+        ],
+        [
+            "name": "fetch_app_data",
+            "description": "Read the user's own app data to answer questions: calendar/planner events, workouts, lift sessions with sets (PRs, tonnage), runs, the Couch-to-5K programme structure, to-dos, reminders, daily check-ins, or the book library. Returns compact JSON rows plus a count. Filter/aggregate the rows yourself to answer.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "collection": [
+                        "type": "string",
+                        "enum": ["events", "workouts", "lifts", "runs", "run_program",
+                                 "todos", "reminders", "checkins", "books"],
+                        "description": "Which data to read. 'lifts' includes every set (reps × weight) for PR/tonnage questions; 'run_program' is the Couch-to-5K week structure.",
+                    ],
+                ],
+                "required": ["collection"],
+            ],
+        ],
+        [
+            "name": "add_todo",
+            "description": "Add an untimed task to the user's to-do list. Use when they ask to remember/do something with no specific alarm time.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "title": ["type": "string", "description": "The task, short and imperative — e.g. 'Buy protein powder'"],
+                    "priority": ["type": "string", "enum": ["high", "medium", "low"], "description": "Default medium."],
+                    "due_date": ["type": "string", "description": "'today', 'tomorrow', or YYYY-MM-DD. Omit if no due date."],
+                ],
+                "required": ["title"],
+            ],
+        ],
+        [
+            "name": "add_reminder",
+            "description": "Set a timed reminder that fires a notification. Use when the user wants to be nudged at a specific time.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "title": ["type": "string", "description": "What to remind, e.g. 'Call Mom'"],
+                    "time": ["type": "string", "description": "24-hour HH:MM the reminder should fire, e.g. '18:00'"],
+                    "date": ["type": "string", "description": "'today', 'tomorrow', or YYYY-MM-DD. Default 'today' (rolls to tomorrow if the time already passed)."],
+                    "recurrence": ["type": "string", "enum": ["once", "daily", "weekdays", "weekly"], "description": "Default once."],
+                ],
+                "required": ["title", "time"],
             ],
         ],
         [
@@ -310,6 +365,41 @@ enum JeevesChatService {
         f.locale = Locale(identifier: "en_US_POSIX")
         if let d = f.date(from: s) { return cal.startOfDay(for: d) }
         return base
+    }
+
+    /// Resolves add_reminder's date+time arguments into the fire Date. A time
+    /// already in the past on the target day rolls forward to the next day (a
+    /// "remind me at 9am" typed at 11pm means tomorrow 9am). Pure and testable.
+    static func resolveFireDate(dateRaw: String?, timeRaw: String, relativeTo now: Date) -> Date {
+        let cal = Calendar.current
+        let day = resolveDate(dateRaw, relativeTo: now)
+        let parts = timeRaw.split(separator: ":").compactMap { Int($0) }
+        let hour = parts.count > 0 ? min(23, max(0, parts[0])) : 9
+        let minute = parts.count > 1 ? min(59, max(0, parts[1])) : 0
+        var fire = cal.date(bySettingHour: hour, minute: minute, second: 0, of: day) ?? day
+        if fire <= now {
+            fire = cal.date(byAdding: .day, value: 1, to: fire) ?? fire
+        }
+        return fire
+    }
+
+    /// The Couch-to-5K programme, serialized for fetch_app_data("run_program").
+    /// Pure over the static programme so it's unit-testable.
+    static func runProgramSummary() -> String {
+        let weeks = RunProgram.weeks.map { w -> [String: Any] in
+            [
+                "week": w.number,
+                "focus": w.focus,
+                "sessionMinutes": w.totalSeconds / 60,
+                "runMinutesTotal": w.runSeconds / 60,
+                "longestUnbrokenRunMinutes": w.longestRunSeconds / 60,
+                "distanceKm": (w.distanceKm * 10).rounded() / 10,
+            ]
+        }
+        let obj: [String: Any] = ["count": weeks.count, "weeks": weeks,
+                                  "note": "longestUnbrokenRunMinutes is the continuous-run length that week"]
+        let data = (try? JSONSerialization.data(withJSONObject: obj)) ?? Data()
+        return String(data: data, encoding: .utf8) ?? "{}"
     }
 
     // MARK: - Transport

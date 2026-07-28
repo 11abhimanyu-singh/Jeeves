@@ -19,6 +19,7 @@ struct SettingsView: View {
     @Query(sort: \PlanGenerationLog.startedAt, order: .reverse) private var genLogs: [PlanGenerationLog]
 
     @AppStorage(NotificationService.enabledKey) private var remindersEnabled = true
+    @AppStorage(VoiceNoteSync.syncEnabledKey) private var syncVoiceNotes = true
 
     @State private var claudeInput = ""
     @State private var hasClaude = KeychainService.hasAPIKey
@@ -101,6 +102,9 @@ struct SettingsView: View {
             remindersSection
                 .listRowBackground(Color.surface)
 
+            voiceSection
+                .listRowBackground(Color.surface)
+
             diagnosticsSection
                 .listRowBackground(Color.surface)
 
@@ -171,6 +175,19 @@ struct SettingsView: View {
             Text("Reminders")
         } footer: {
             Text("On-device reminders at each commute, gym, and event in your day plan — no account or server needed. You'll be asked to allow notifications the first time a plan is made. Tap the button and background the app to see one fire in ~5 seconds.")
+        }
+    }
+
+    // MARK: Voice notes
+
+    private var voiceSection: some View {
+        Section {
+            Toggle("Sync voice recordings to iCloud", isOn: $syncVoiceNotes)
+                .tint(Color.accent)
+        } header: {
+            Text("Voice notes")
+        } footer: {
+            Text("Chat voice notes are transcribed on-device (Indian English). With sync on, recordings mirror to your private iCloud Drive (Jeeves \u{203A} VoiceNotes) so the transcription-quality eval can read them; audio older than 30 days is deleted automatically. Transcripts are always kept. Turn off to keep audio on this phone only.")
         }
     }
 
