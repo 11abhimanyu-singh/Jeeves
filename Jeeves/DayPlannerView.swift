@@ -34,6 +34,7 @@ struct DayPlannerView: View {
     // Plan generation (the same PlanCoordinator call the chat uses).
     @State private var isPlanning = false
     @State private var planError: String?
+    @State private var replanNote: String? = nil
 
     // Google Calendar import (reviewed, not silent).
     @State private var calendarReview: CalendarReview?
@@ -120,6 +121,14 @@ struct DayPlannerView: View {
             }
             if let planError {
                 Text(planError).font(.system(size: 12)).foregroundStyle(Color.accentDeep)
+            }
+            if let replanNote {
+                HStack(spacing: 7) {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 12)).foregroundStyle(Color.sageDeep)
+                    Text(replanNote).font(.system(size: 11.5, weight: .medium)).foregroundStyle(Color.textSoft)
+                }
+                .padding(.horizontal, 11).padding(.vertical, 7)
+                .background(Capsule().fill(Color.sage.opacity(0.16)))
             }
         }
     }
@@ -238,6 +247,23 @@ struct DayPlannerView: View {
         isPlanning = true
         let date = selectedDate
         let dayEvents = selectedEvents
+        // Mid-day re-plan: when re-planning TODAY and the committed plan already has
+        // blocks that have elapsed, lock those and rebuild only from now — so moving
+        // an anchor at 3pm doesn't wipe the reading/shower already done this morning.
+        let nowMinute = DayPlannerView.minuteOfDay(Date())
+        var replanFrom: Int? = nil
+        var lockedNow: [GeneratedBlock] = []
+        var doneNote: String? = nil
+        replanNote = nil
+        if date == today, let current = savedPlan {
+            let elapsed = PlanCoordinator.lockedBlocks(current, endedBy: nowMinute)
+            if !elapsed.isEmpty {
+                replanFrom = nowMinute
+                lockedNow = elapsed
+                doneNote = "Already done earlier today: " + elapsed.map(\.title).joined(separator: ", ")
+                replanNote = "Re-planned from \(DayPlannerView.clockLabel(nowMinute)) · kept \(elapsed.count) earlier block\(elapsed.count == 1 ? "" : "s")"
+            }
+        }
         Task {
             // Hold a background assertion so planning survives the user
             // switching away mid-request (otherwise iOS tears the call down and
@@ -251,6 +277,9 @@ struct DayPlannerView: View {
                     prepSessions: prepSessions,
                     routine: Baseline.routine(from: routineActivities),
                     adherenceNote: AdherenceHistory.planningNote(context: modelContext, for: date),
+                    replanFromMinute: replanFrom,
+                    alreadyDoneNote: doneNote,
+                    lockedBlocks: lockedNow,
                     planDate: date
                 ), context: modelContext, trigger: .planner)
             }
@@ -269,6 +298,20 @@ struct DayPlannerView: View {
             if result.isOffline { planError = "Couldn't reach the planning service — showing an offline plan.\(result.error.map { " (\($0))" } ?? "")" }
             isPlanning = false
         }
+    }
+
+    /// Minutes since midnight for a wall-clock time.
+    static func minuteOfDay(_ date: Date) -> Int {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return (c.hour ?? 0) * 60 + (c.minute ?? 0)
+    }
+
+    /// A minutes-since-midnight value as a 12-hour clock label ("3:00 PM").
+    static func clockLabel(_ minute: Int) -> String {
+        let h = minute / 60, m = minute % 60
+        let ampm = h < 12 ? "AM" : "PM"
+        var h12 = h % 12; if h12 == 0 { h12 = 12 }
+        return String(format: "%d:%02d %@", h12, m, ampm)
     }
 
     // MARK: Date dial
@@ -424,7 +467,8 @@ struct DayPlannerView: View {
             modelContext.insert(DailyEvent(
                 date: day, title: c.title,
                 startMinute: c.startMinute, endMinute: c.endMinute,
-                destinationAddress: c.location, outboundStart: .home, source: .calendar
+                destinationAddress: c.location, outboundStart: .home, source: .calendar,
+                isAllDay: c.isAllDay
             ))
         }
         try? modelContext.save()
@@ -434,7 +478,7 @@ struct DayPlannerView: View {
     private func eventRow(_ event: DailyEvent) -> some View {
         Button { editEvent(event) } label: {
             HStack(alignment: .top, spacing: 12) {
-                Text(hhmm(event.startMinute))
+                Text(event.isAllDay ? "All day" : hhmm(event.startMinute))
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(Color.accentDeep)
                     .frame(width: 52, alignment: .trailing)
@@ -443,7 +487,9 @@ struct DayPlannerView: View {
                     Text(event.title)
                         .font(.serif(16))
                         .foregroundStyle(Color.textPrimary)
-                    Text("\(hhmm(event.startMinute))–\(hhmm(event.endMinute)) · from \(event.outboundStart.rawValue)")
+                    Text(event.isAllDay
+                         ? "All day · from \(event.outboundStart.rawValue)"
+                         : "\(hhmm(event.startMinute))–\(hhmm(event.endMinute)) · from \(event.outboundStart.rawValue)")
                         .font(.system(size: 11.5))
                         .foregroundStyle(Color.textSoft)
                     if !event.destinationAddress.isEmpty {
@@ -616,7 +662,7 @@ private struct CalendarImportSheet: View {
                                     .foregroundStyle(selected.contains(event.id) ? Color.accent : Color.textMuted.opacity(0.5))
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(event.title).font(.serif(15)).foregroundStyle(Color.textPrimary)
-                                    Text("\(hhmm(event.startMinute))–\(hhmm(event.endMinute))\(event.location.isEmpty ? "" : " · \(event.location)")")
+                                    Text((event.isAllDay ? "All day" : "\(hhmm(event.startMinute))–\(hhmm(event.endMinute))") + (event.location.isEmpty ? "" : " · \(event.location)"))
                                         .font(.system(size: 12)).foregroundStyle(Color.textSoft).lineLimit(1)
                                 }
                                 Spacer()

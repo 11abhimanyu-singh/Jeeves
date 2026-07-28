@@ -18,6 +18,7 @@ struct CalendarEvent: Identifiable {
     let startMinute: Int
     let endMinute: Int
     let location: String
+    let isAllDay: Bool
 }
 
 enum GoogleCalendarService {
@@ -41,12 +42,23 @@ enum GoogleCalendarService {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
         let (data, response) = try await URLSession.shared.data(for: request)
+        // Diagnostics: capture exactly what Google returned (to iCloud), so an
+        // empty day can be traced off-device without another round of guessing.
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        CalendarDebug.log(day: day, url: comps.url?.absoluteString ?? "", status: statusCode, body: data)
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])
                 .flatMap { ($0["error"] as? [String: Any])?["message"] as? String }
             throw GoogleOAuthError.authFailed(msg ?? "Calendar request failed (\(http.statusCode)).")
         }
 
+        return parse(data, calendar: cal)
+    }
+
+    /// Pure decode + map of the Calendar API's `items` JSON into CalendarEvents.
+    /// Extracted from the network call so it can be unit-tested against real
+    /// payloads — INCLUDING all-day events — with no token and no round-trip.
+    static func parse(_ data: Data, calendar cal: Calendar = .current) -> [CalendarEvent] {
         struct Response: Decodable {
             struct Item: Decodable {
                 struct When: Decodable { let dateTime: String?; let date: String? }
@@ -57,24 +69,30 @@ enum GoogleCalendarService {
             }
             let items: [Item]
         }
-
-        let decoded = try JSONDecoder().decode(Response.self, from: data)
+        guard let decoded = try? JSONDecoder().decode(Response.self, from: data) else { return [] }
         let parser = ISO8601DateFormatter()
         parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let parserNoFrac = ISO8601DateFormatter()
 
         return decoded.items.compactMap { item -> CalendarEvent? in
-            // Timed events only — all-day events use `date`, not `dateTime`.
-            guard let startStr = item.start.dateTime, let endStr = item.end.dateTime else { return nil }
-            let start = parser.date(from: startStr) ?? parserNoFrac.date(from: startStr)
-            let end = parser.date(from: endStr) ?? parserNoFrac.date(from: endStr)
-            guard let start, let end else { return nil }
-            return CalendarEvent(
-                title: item.summary ?? "Untitled event",
-                startMinute: minuteOfDay(start, cal: cal),
-                endMinute: minuteOfDay(end, cal: cal),
-                location: item.location ?? ""
-            )
+            let title = item.summary ?? "Untitled event"
+            // Timed event — has an explicit start/end dateTime.
+            if let startStr = item.start.dateTime, let endStr = item.end.dateTime {
+                let start = parser.date(from: startStr) ?? parserNoFrac.date(from: startStr)
+                let end = parser.date(from: endStr) ?? parserNoFrac.date(from: endStr)
+                guard let start, let end else { return nil }
+                return CalendarEvent(title: title, startMinute: minuteOfDay(start, cal: cal),
+                                     endMinute: minuteOfDay(end, cal: cal),
+                                     location: item.location ?? "", isAllDay: false)
+            }
+            // All-day event — uses `date`, not `dateTime`. It has no time to anchor
+            // a block, so it's carried as an all-day context item (the planner is
+            // told about it but never places a timed block for it).
+            if item.start.date != nil {
+                return CalendarEvent(title: title, startMinute: 0, endMinute: 0,
+                                     location: item.location ?? "", isAllDay: true)
+            }
+            return nil
         }
     }
 

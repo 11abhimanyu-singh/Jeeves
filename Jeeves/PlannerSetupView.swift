@@ -177,7 +177,8 @@ struct PlannerSetupView: View {
                     modelContext.insert(DailyEvent(
                         date: today, title: c.title,
                         startMinute: c.startMinute, endMinute: c.endMinute,
-                        destinationAddress: c.location, outboundStart: .home, source: .calendar
+                        destinationAddress: c.location, outboundStart: .home, source: .calendar,
+                        isAllDay: c.isAllDay
                     ))
                 }
                 try? modelContext.save()
@@ -196,6 +197,7 @@ struct PlannerSetupView: View {
         )
         modelContext.insert(event)
         try? modelContext.save()
+        resolveDestinationIfLink(for: event)
     }
 
     private func apply(_ draft: EventDraft, to event: DailyEvent) {
@@ -206,6 +208,23 @@ struct PlannerSetupView: View {
         event.destinationAddress = draft.address
         event.outboundStart = draft.outboundStart
         try? modelContext.save()
+        resolveDestinationIfLink(for: event)
+    }
+
+    /// If the venue was pasted as a Google Maps link, identify the place in the
+    /// background and replace the opaque URL with its name (e.g. "BlueStone
+    /// Jewellery Koramangala"). Falls back to the raw link if it can't resolve,
+    /// so there's no regression, and routing then geocodes the clean name.
+    private func resolveDestinationIfLink(for event: DailyEvent) {
+        let raw = event.destinationAddress
+        guard GoogleMapsService.isMapsLink(raw) else { return }
+        Task {
+            guard let place = await GoogleMapsService.resolvePlace(raw) else { return }
+            event.destinationAddress = place.displayAddress
+            event.destinationLat = place.lat
+            event.destinationLng = place.lng
+            try? modelContext.save()
+        }
     }
 
     private func hhmm(_ minutes: Int) -> String { String(format: "%02d:%02d", minutes / 60, minutes % 60) }

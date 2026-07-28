@@ -25,8 +25,16 @@ final class DailyEvent {
     var startMinute: Int = 0        // minutes since midnight
     var endMinute: Int = 0
     var destinationAddress: String = ""
+    // Exact pin from a resolved Google Maps link (nil until/unless one is pasted).
+    // destinationAddress carries the human-readable place; these carry the precise
+    // coordinates for pin-accurate routing and a future map view.
+    var destinationLat: Double? = nil
+    var destinationLng: Double? = nil
     var outboundStartRaw: String = LocationKind.home.rawValue   // LocationKind.rawValue — where the user leaves from, asked per day
     var sourceRaw: String = EventSource.manual.rawValue
+    // An all-day calendar event has no start/end time — it's day-long context the
+    // planner works AROUND, never a timed block (startMinute/endMinute are unused).
+    var isAllDay: Bool = false
 
     var outboundStart: LocationKind {
         get { LocationKind(rawValue: outboundStartRaw) ?? .home }
@@ -45,7 +53,8 @@ final class DailyEvent {
         endMinute: Int,
         destinationAddress: String = "",
         outboundStart: LocationKind = .home,
-        source: EventSource = .manual
+        source: EventSource = .manual,
+        isAllDay: Bool = false
     ) {
         self.date = date
         self.title = title
@@ -54,5 +63,6 @@ final class DailyEvent {
         self.destinationAddress = destinationAddress
         self.outboundStartRaw = outboundStart.rawValue
         self.sourceRaw = source.rawValue
+        self.isAllDay = isAllDay
     }
 }
