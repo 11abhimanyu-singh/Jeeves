@@ -30,5 +30,7 @@
 			<string>Any</string>
 		</dict>
 	</dict>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Jeeves reads your heart rate during a run so it can show your live BPM and log the run's average.</string>
 </dict>
 </plist>
