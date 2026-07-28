@@ -42,10 +42,6 @@ enum GoogleCalendarService {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        // Diagnostics: capture exactly what Google returned (to iCloud), so an
-        // empty day can be traced off-device without another round of guessing.
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-        CalendarDebug.log(day: day, url: comps.url?.absoluteString ?? "", status: statusCode, body: data)
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])
                 .flatMap { ($0["error"] as? [String: Any])?["message"] as? String }
