@@ -27,6 +27,7 @@ enum WatchRoute: Hashable {
 struct ContentView: View {
     @StateObject private var workout = WatchWorkoutManager()
     @State private var path: [WatchRoute] = []
+    @State private var pendingStart: String?   // activity awaiting a start confirmation
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -46,10 +47,10 @@ struct ContentView: View {
                     .padding(.bottom, 4)
 
                     activityButton("Run", icon: "figure.run", tint: .jRun) {
-                        path.append(.active("run"))
+                        pendingStart = "run"
                     }
                     activityButton("Weightlifting", icon: "dumbbell.fill", tint: .jLift) {
-                        path.append(.active("strength"))
+                        pendingStart = "strength"
                     }
                     activityButton("Walk", icon: "figure.walk", tint: .jWalk) {
                         path.append(.walkChoice)
@@ -65,6 +66,20 @@ struct ContentView: View {
                 case .active(let activity):
                     ActiveWorkoutView(activity: activity, workout: workout) { path = [] }
                 }
+            }
+            // Confirm before starting Run / Weightlifting so a stray tap on the
+            // picker doesn't kick off a workout. (Walk already asks indoor/outdoor,
+            // which is itself a deliberate second step.)
+            .confirmationDialog(
+                pendingStart == "strength" ? "Start weightlifting?" : "Start run?",
+                isPresented: Binding(get: { pendingStart != nil },
+                                     set: { if !$0 { pendingStart = nil } }),
+                titleVisibility: .visible
+            ) {
+                Button(pendingStart == "strength" ? "Start Lifting" : "Start Run") {
+                    if let a = pendingStart { pendingStart = nil; path.append(.active(a)) }
+                }
+                Button("Cancel", role: .cancel) { pendingStart = nil }
             }
         }
     }
@@ -118,6 +133,7 @@ struct ActiveWorkoutView: View {
     @ObservedObject var workout: WatchWorkoutManager
     var onEnd: () -> Void
     @State private var startDate = Date()
+    @State private var confirmingEnd = false
 
     private var title: String {
         switch activity {
@@ -160,12 +176,19 @@ struct ActiveWorkoutView: View {
             .frame(maxHeight: .infinity)
 
             Button(role: .destructive) {
-                workout.stop()
-                onEnd()
+                confirmingEnd = true
             } label: {
                 Text("End").frame(maxWidth: .infinity)
             }
             .tint(.red)
+            .confirmationDialog("End workout?", isPresented: $confirmingEnd,
+                                titleVisibility: .visible) {
+                Button("End Workout", role: .destructive) {
+                    workout.stop()
+                    onEnd()
+                }
+                Button("Cancel", role: .cancel) {}
+            }
         }
         .padding(.horizontal, 6)
         .navigationTitle("")

@@ -291,7 +291,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "JeevesWatch-Watch-App-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = JeevesWatch;
+				INFOPLIST_KEY_CFBundleDisplayName = "Jeeves On The Go";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Jeeves reads your heart rate during a run to show your live BPM";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = abhimanyusingh.me.Jeeves;
@@ -327,7 +327,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "JeevesWatch-Watch-App-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = JeevesWatch;
+				INFOPLIST_KEY_CFBundleDisplayName = "Jeeves On The Go";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Jeeves reads your heart rate during a run to show your live BPM";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = abhimanyusingh.me.Jeeves;

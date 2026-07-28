@@ -37,6 +37,23 @@ struct LiftView: View {
 
     private var liveBPM: Int? { watchLink.currentBPM ?? hr.currentBPM }
 
+    // Tap-to-type numeric entry (reps / weight / hold), shared by every field.
+    @State private var showEdit = false
+    @State private var editTitle = ""
+    @State private var editText = ""
+    @State private var editIsInt = false
+    @State private var editApply: ((Double) -> Void)?
+
+    private func promptEdit(_ title: String, current: Double, isInt: Bool,
+                            apply: @escaping (Double) -> Void) {
+        editTitle = title
+        editIsInt = isInt
+        editText = isInt ? String(Int(current))
+                         : (current == current.rounded() ? String(Int(current)) : String(current))
+        editApply = apply
+        showEdit = true
+    }
+
     /// One editable set before it's persisted. Value type so @State drives the
     /// live total; mirrors LiftSet's fields.
     private struct DraftSet: Identifiable {
@@ -86,6 +103,18 @@ struct LiftView: View {
                 // Stop streaming + end the Watch workout when the logger closes.
                 hr.stop()
                 watchLink.stopWorkout()
+            }
+            .alert(editTitle, isPresented: $showEdit) {
+                TextField("Value", text: $editText)
+                    .keyboardType(editIsInt ? .numberPad : .decimalPad)
+                Button("Set") {
+                    if let v = Double(editText.replacingOccurrences(of: ",", with: ".")) {
+                        editApply?(max(0, v))
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(editIsInt ? "Type a whole number." : "Type the value in kg.")
             }
         }
     }
@@ -186,12 +215,25 @@ struct LiftView: View {
                     ForEach($draftSets) { $set in
                         setCard($set)
                     }
-                    addSetButton
-                    saveButton
                 }
                 .padding(20)
             }
             .background(Color.bg)
+            // Keep Add set + Save pinned so they're always reachable no matter
+            // how many sets are logged.
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 10) {
+                    addSetButton
+                    saveButton
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                .padding(.bottom, 8)
+                .background(Color.bg)
+                .overlay(alignment: .top) {
+                    Divider().overlay(Color.textPrimary.opacity(0.08))
+                }
+            }
         }
     }
 
@@ -305,24 +347,30 @@ struct LiftView: View {
             case .weighted:
                 stepControl("Reps", value: "\(d.reps)",
                             dec: { set.wrappedValue.reps = max(0, set.wrappedValue.reps - 1) },
-                            inc: { set.wrappedValue.reps += 1 })
+                            inc: { set.wrappedValue.reps += 1 },
+                            edit: { promptEdit("Reps", current: Double(d.reps), isInt: true) { set.wrappedValue.reps = Int($0) } })
                 stepControl("Weight", value: "\(kg(d.weightKg)) kg",
                             dec: { set.wrappedValue.weightKg = max(0, set.wrappedValue.weightKg - 2.5) },
-                            inc: { set.wrappedValue.weightKg += 2.5 })
+                            inc: { set.wrappedValue.weightKg += 2.5 },
+                            edit: { promptEdit("Weight (kg)", current: d.weightKg, isInt: false) { set.wrappedValue.weightKg = $0 } })
             case .bodyweight:
                 stepControl("Reps", value: "\(d.reps)",
                             dec: { set.wrappedValue.reps = max(0, set.wrappedValue.reps - 1) },
-                            inc: { set.wrappedValue.reps += 1 })
+                            inc: { set.wrappedValue.reps += 1 },
+                            edit: { promptEdit("Reps", current: Double(d.reps), isInt: true) { set.wrappedValue.reps = Int($0) } })
                 stepControl("Bodyweight", value: "\(kg(d.bodyweightKg)) kg",
                             dec: { set.wrappedValue.bodyweightKg = max(0, set.wrappedValue.bodyweightKg - 0.5) },
-                            inc: { set.wrappedValue.bodyweightKg += 0.5 })
+                            inc: { set.wrappedValue.bodyweightKg += 0.5 },
+                            edit: { promptEdit("Bodyweight (kg)", current: d.bodyweightKg, isInt: false) { set.wrappedValue.bodyweightKg = $0 } })
                 stepControl("Added load", value: "\(kg(d.addedKg)) kg",
                             dec: { set.wrappedValue.addedKg = max(0, set.wrappedValue.addedKg - 2.5) },
-                            inc: { set.wrappedValue.addedKg += 2.5 })
+                            inc: { set.wrappedValue.addedKg += 2.5 },
+                            edit: { promptEdit("Added load (kg)", current: d.addedKg, isInt: false) { set.wrappedValue.addedKg = $0 } })
             case .isometric:
                 stepControl("Hold", value: "\(d.holdSeconds)s",
                             dec: { set.wrappedValue.holdSeconds = max(0, set.wrappedValue.holdSeconds - 5) },
-                            inc: { set.wrappedValue.holdSeconds += 5 })
+                            inc: { set.wrappedValue.holdSeconds += 5 },
+                            edit: { promptEdit("Hold (seconds)", current: Double(d.holdSeconds), isInt: true) { set.wrappedValue.holdSeconds = Int($0) } })
             }
 
             Divider().overlay(Color.textPrimary.opacity(0.08))
@@ -336,20 +384,29 @@ struct LiftView: View {
     }
 
     private func stepControl(_ title: String, value: String,
-                             dec: @escaping () -> Void, inc: @escaping () -> Void) -> some View {
-        HStack {
+                             dec: @escaping () -> Void, inc: @escaping () -> Void,
+                             edit: (() -> Void)? = nil) -> some View {
+        HStack(spacing: 8) {
             Text(title)
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Color.textSoft)
-            Spacer()
-            HStack(spacing: 12) {
+            Spacer(minLength: 4)
+            HStack(spacing: 10) {
                 stepButton("minus", action: dec)
-                Text(value)
-                    .font(.serif(18))
-                    .foregroundStyle(Color.textPrimary)
-                    .monospacedDigit()
-                    .frame(minWidth: 74)
-                    .multilineTextAlignment(.center)
+                // Tap the value to type it (fast for big jumps, e.g. 20 → 150 kg).
+                // Single line + scaling so 5-digit weights like 100.5 kg don't wrap.
+                Button { edit?() } label: {
+                    Text(value)
+                        .font(.serif(18))
+                        .foregroundStyle(Color.textPrimary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .frame(minWidth: 92)
+                        .multilineTextAlignment(.center)
+                }
+                .buttonStyle(.plain)
+                .disabled(edit == nil)
                 stepButton("plus", action: inc)
             }
         }
