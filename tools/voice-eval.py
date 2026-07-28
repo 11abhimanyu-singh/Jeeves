@@ -10,7 +10,9 @@ words = candidates for the recognizer's contextual-vocabulary list; high WER
 overall = consider promoting Whisper to primary transcription.
 
 Usage:
-    OPENAI_API_KEY=sk-... python3 tools/voice-eval.py
+    OPENAI_API_KEY=sk-... python3 tools/voice-eval.py [data-dir]
+data-dir defaults to the iCloud container; pass a folder holding
+state-latest.json + VoiceNotes/ to eval data pulled over the cable.
 Writes voice-eval.json next to the notes and prints a summary table.
 No key is stored anywhere; it is read from the environment only.
 """
@@ -21,7 +23,8 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-CONTAINER = Path.home() / "Library/Mobile Documents/iCloud~abhimanyusingh~me~Jeeves/Documents"
+CONTAINER = Path(sys.argv[1]) if len(sys.argv) > 1 else (
+    Path.home() / "Library/Mobile Documents/iCloud~abhimanyusingh~me~Jeeves/Documents")
 STATE = CONTAINER / "state-latest.json"
 AUDIO_DIR = CONTAINER / "VoiceNotes"
 OUT = CONTAINER / "voice-eval.json"
