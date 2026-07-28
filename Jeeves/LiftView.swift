@@ -28,6 +28,15 @@ struct LiftView: View {
     @State private var draftSets: [DraftSet] = []
     @State private var justSaved = false
 
+    // Live heart rate while lifting: the Watch runs the workout and streams BPM;
+    // HealthKit is the fallback source. sessionStart marks when the logger opened
+    // so we can average HR over the session on save.
+    @StateObject private var hr = HeartRateMonitor()
+    @StateObject private var watchLink = WatchLink()
+    @State private var sessionStart: Date?
+
+    private var liveBPM: Int? { watchLink.currentBPM ?? hr.currentBPM }
+
     /// One editable set before it's persisted. Value type so @State drives the
     /// live total; mirrors LiftSet's fields.
     private struct DraftSet: Identifiable {
@@ -72,6 +81,11 @@ struct LiftView: View {
                     Button("Done") { dismiss() }
                         .tint(Color.accentDeep)
                 }
+            }
+            .onDisappear {
+                // Stop streaming + end the Watch workout when the logger closes.
+                hr.stop()
+                watchLink.stopWorkout()
             }
         }
     }
@@ -167,6 +181,7 @@ struct LiftView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     exerciseHeader(ex)
+                    heartRatePill
                     tonnageCard
                     ForEach($draftSets) { $set in
                         setCard($set)
@@ -227,6 +242,36 @@ struct LiftView: View {
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 16).fill(Color.surface))
+    }
+
+    /// Live heart rate streamed from the Apple Watch during the session.
+    private var heartRatePill: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "heart.fill")
+                .font(.system(size: 14))
+                .foregroundStyle(Color(red: 0.70, green: 0.23, blue: 0.18))
+            if let bpm = liveBPM {
+                Text("\(bpm)")
+                    .font(.serif(20))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.textPrimary)
+                Text("BPM")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.textMuted)
+            } else {
+                Text("Waiting for Apple Watch\u{2026}")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.textMuted)
+            }
+            Spacer()
+            Text("Strength \u{00B7} live HR")
+                .font(.system(size: 11))
+                .foregroundStyle(Color.textMuted)
+        }
+        .padding(.horizontal, 15)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.surface))
     }
 
     private func setCard(_ set: Binding<DraftSet>) -> some View {
@@ -397,14 +442,19 @@ struct LiftView: View {
         let setLabel = "\(n) set\(n == 1 ? "" : "s")"
         let day = dayLabel(s.date)
         let ton = LiftMath.sessionTonnage(sets)
-        if ton > 0 {
-            return "\(day) \u{00B7} \(tonnageText(ton)) kg \u{00B7} \(setLabel)"
-        }
         let hold = LiftMath.totalHoldSeconds(sets)
-        if hold > 0 {
-            return "\(day) \u{00B7} \(hold)s hold \u{00B7} \(setLabel)"
+        var base: String
+        if ton > 0 {
+            base = "\(day) \u{00B7} \(tonnageText(ton)) kg \u{00B7} \(setLabel)"
+        } else if hold > 0 {
+            base = "\(day) \u{00B7} \(hold)s hold \u{00B7} \(setLabel)"
+        } else {
+            base = "\(day) \u{00B7} \(setLabel)"
         }
-        return "\(day) \u{00B7} \(setLabel)"
+        if s.avgBPM > 0 {
+            base += " \u{00B7} \u{2665} \(s.avgBPM)"
+        }
+        return base
     }
 
     private func setSummary(_ d: DraftSet) -> String {
@@ -424,6 +474,14 @@ struct LiftView: View {
         if draftSets.isEmpty {
             draftSets = [DraftSet()]
         }
+        // Begin the session's heart-rate capture the first time the logger opens:
+        // ask the Watch to run a strength workout (the HR source) and start the
+        // phone's HealthKit reader. Safe if a session is already running.
+        if sessionStart == nil {
+            sessionStart = Date()
+            watchLink.startWorkout(activity: "strength")
+            Task { await hr.requestAuthorization(); hr.start() }
+        }
     }
 
     private func addSet() {
@@ -439,21 +497,33 @@ struct LiftView: View {
 
     private func saveSession() {
         guard let ex = selectedExercise, !draftSets.isEmpty else { return }
-        let session = LiftSession(date: Date(), exerciseName: ex.name)
-        modelContext.insert(session)
-        for (i, d) in draftSets.enumerated() {
-            let s = LiftSet(sessionID: session.id, order: i, reps: d.reps, weightKg: d.weightKg,
-                            inputType: d.inputType, holdSeconds: d.holdSeconds,
-                            addedKg: d.addedKg, bodyweightKg: d.bodyweightKg)
-            modelContext.insert(s)
-        }
-        modelContext.saveOrLog()
+        let start = sessionStart ?? Date()
+        let drafts = draftSets
+        let name = ex.name
+        // Average the session's heart rate, then persist. The Task inherits the
+        // main actor (SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor), so the store
+        // work stays on the main actor.
+        Task {
+            let avg = await hr.averageBPM(from: start, to: Date()) ?? 0
+            let session = LiftSession(date: start, exerciseName: name, avgBPM: avg)
+            modelContext.insert(session)
+            for (i, d) in drafts.enumerated() {
+                let s = LiftSet(sessionID: session.id, order: i, reps: d.reps, weightKg: d.weightKg,
+                                inputType: d.inputType, holdSeconds: d.holdSeconds,
+                                addedKg: d.addedKg, bodyweightKg: d.bodyweightKg)
+                modelContext.insert(s)
+            }
+            modelContext.saveOrLog()
+            hr.stop()
+            watchLink.stopWorkout()
 
-        // Back to the picker; the new session appears under "Recent sessions".
-        draftSets = []
-        selectedExercise = nil
-        searchText = ""
-        justSaved = true
+            // Back to the picker; the new session appears under "Recent sessions".
+            draftSets = []
+            selectedExercise = nil
+            searchText = ""
+            justSaved = true
+            sessionStart = nil
+        }
     }
 
     // MARK: - Formatting

@@ -29,8 +29,11 @@ final class WatchLink: NSObject, ObservableObject {
         }
     }
 
-    /// Ask the Watch to begin a run workout (starts its HR streaming).
-    func startWorkout() { send(["cmd": "start"]) }
+    /// Ask the Watch to begin a workout of the given kind (starts its HR
+    /// streaming). Activity codes: "run", "strength", "walkIndoor", "walkOutdoor"
+    /// — the Watch maps these to the right HKWorkoutActivityType so the session
+    /// records correctly in HealthKit.
+    func startWorkout(activity: String = "run") { send(["cmd": "start", "activity": activity]) }
 
     /// Ask the Watch to end the workout, and clear the reading.
     func stopWorkout() {

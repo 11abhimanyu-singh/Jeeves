@@ -41,11 +41,30 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
         try? await store.requestAuthorization(toShare: share, read: read)
     }
 
-    func start() {
-        guard session == nil, HKHealthStore.isHealthDataAvailable() else { return }
+    /// Maps our activity codes to a HealthKit workout configuration so each
+    /// session is categorised correctly in Health (and the rings).
+    private func configuration(for activity: String) -> HKWorkoutConfiguration {
         let config = HKWorkoutConfiguration()
-        config.activityType = .running
-        config.locationType = .indoor   // treadmill-friendly; fine outdoors too
+        switch activity {
+        case "strength":
+            config.activityType = .traditionalStrengthTraining
+            config.locationType = .indoor
+        case "walkIndoor":
+            config.activityType = .walking
+            config.locationType = .indoor
+        case "walkOutdoor":
+            config.activityType = .walking
+            config.locationType = .outdoor
+        default:                                   // "run" — unchanged
+            config.activityType = .running
+            config.locationType = .indoor
+        }
+        return config
+    }
+
+    func start(activity: String = "run") {
+        guard session == nil, HKHealthStore.isHealthDataAvailable() else { return }
+        let config = configuration(for: activity)
         do {
             let session = try HKWorkoutSession(healthStore: store, configuration: config)
             let builder = session.associatedWorkoutBuilder()
@@ -56,8 +75,13 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
             self.builder = builder
             let startDate = Date()
             session.startActivity(with: startDate)
-            builder.beginCollection(withStart: startDate) { _, _ in }
-            isRunning = true
+            isRunning = true   // optimistic so the UI responds; reverted if collection can't begin
+            builder.beginCollection(withStart: startDate) { [weak self] began, _ in
+                guard !began else { return }
+                Task { @MainActor in
+                    self?.session = nil; self?.builder = nil; self?.isRunning = false
+                }
+            }
         } catch {
             session = nil; builder = nil
         }
@@ -67,13 +91,15 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
         guard let session, let builder else { return }
         session.end()
         builder.endCollection(withEnd: Date()) { [weak self] _, _ in
-            builder.finishWorkout { _, _ in }
-            guard let self else { return }
-            Task { @MainActor in
-                self.session = nil
-                self.builder = nil
-                self.isRunning = false
-                self.currentBPM = nil
+            // Reset only AFTER the workout is finalized (and saved), not before,
+            // so the UI doesn't show "stopped" while HealthKit is still writing.
+            builder.finishWorkout { _, _ in
+                Task { @MainActor in
+                    self?.session = nil
+                    self?.builder = nil
+                    self?.isRunning = false
+                    self?.currentBPM = nil
+                }
             }
         }
     }
@@ -123,10 +149,11 @@ extension WatchWorkoutManager: WCSessionDelegate {
                              error: Error?) {}
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
         guard let cmd = message["cmd"] as? String else { return }
+        let activity = message["activity"] as? String ?? "run"
         Task { @MainActor in
             if cmd == "start" {
                 await self.requestAuthorization()
-                self.start()
+                self.start(activity: activity)
             } else if cmd == "stop" {
                 self.stop()
             }

@@ -40,11 +40,13 @@ final class LiftSession {
     var id: UUID = UUID()
     var date: Date = Date.distantPast
     var exerciseName: String = ""
+    var avgBPM: Int = 0   // average heart rate over the session; 0 = none captured
 
-    init(id: UUID = UUID(), date: Date, exerciseName: String) {
+    init(id: UUID = UUID(), date: Date, exerciseName: String, avgBPM: Int = 0) {
         self.id = id
         self.date = date
         self.exerciseName = exerciseName
+        self.avgBPM = avgBPM
     }
 }
 
