@@ -425,7 +425,27 @@ struct JeevesChatView: View {
         )
         modelContext.insert(event)
         try? modelContext.save()
-        return .init(text: "Added \"\(title)\" \(hhmm(start))–\(hhmm(end)) on \(dayLabel(date))\(venue.isEmpty ? "" : " at \(venue)").")
+        resolveEventDestinationIfLink(event)
+        let venueSuffix: String
+        if venue.isEmpty { venueSuffix = "" }
+        else if GoogleMapsService.isMapsLink(venue) { venueSuffix = " — identifying the location…" }
+        else { venueSuffix = " at \(venue)" }
+        return .init(text: "Added \"\(title)\" \(hhmm(start))–\(hhmm(end)) on \(dayLabel(date))\(venueSuffix).")
+    }
+
+    /// If an event's venue was pasted as a Google Maps link, identify the place
+    /// in the background and replace the opaque URL with its full address + pin.
+    @MainActor
+    private func resolveEventDestinationIfLink(_ event: DailyEvent) {
+        let raw = event.destinationAddress
+        guard GoogleMapsService.isMapsLink(raw) else { return }
+        Task {
+            guard let place = await GoogleMapsService.resolvePlace(raw) else { return }
+            event.destinationAddress = place.displayAddress
+            event.destinationLat = place.lat
+            event.destinationLng = place.lng
+            try? modelContext.save()
+        }
     }
 
     @MainActor
@@ -606,6 +626,7 @@ struct JeevesChatView: View {
                 destinationAddress: e.venue ?? "", outboundStart: from, source: .manual
             )
             modelContext.insert(event)
+            resolveEventDestinationIfLink(event)
             created.append(event)
         }
 
@@ -659,6 +680,7 @@ struct JeevesChatView: View {
         )
         modelContext.insert(event)
         try? modelContext.save()
+        resolveEventDestinationIfLink(event)
         addTurn(role: .assistant, "Added to today: \(draft.title) at \(hhmm(draft.startMinute)). Tap Plan my day and I'll fit everything around it.")
     }
 

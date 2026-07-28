@@ -34,6 +34,12 @@ struct JeevesApp: App {
             ChatTurn.self,
             RoutineActivity.self,
             PlanGenerationLog.self,
+            LiftSession.self,
+            LiftSet.self,
+            RunSession.self,
+            StretchLog.self,
+            Reminder.self,
+            Todo.self,
         ])
         // Sync to the user's private iCloud database so their data backs up and
         // follows them across devices. The iCloud/CloudKit capability is present

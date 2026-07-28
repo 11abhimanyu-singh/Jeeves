@@ -26,7 +26,12 @@ extension Color {
     static let surfaceDeep = Color(hex: "DCD3C4")
     static let textPrimary = Color(hex: "201E1D")
     static let textSoft = Color(hex: "645C50")
-    static let textMuted = Color(hex: "A19786")
+    // Darkened from #A19786 (WCAG 2.42:1 on bg — failed AA) to clear 4.5:1 on bg
+    // (now 4.71) while staying a warm-taupe tier lighter than textSoft. On cards
+    // (surface) it reaches 4.18 — AA for large/semibold captions; use textSoft for
+    // small regular text on cards. For strict AA everywhere use #675E4E (converges
+    // toward textSoft).
+    static let textMuted = Color(hex: "6E6759")
     static let accent = Color(hex: "C67139")
     static let accentDeep = Color(hex: "8C491A")
     static let sage = Color(hex: "7A8A5E")
@@ -71,9 +76,13 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \CheckIn.date, order: .reverse) private var checkins: [CheckIn]
 
-    enum Tab { case jeeves, planner, checkin, library, progress, history }
+    enum Tab { case jeeves, planner, tasks, fitness, library, stats }
+    enum FitnessSheet: String, Identifiable { case run, lift, stretch; var id: String { rawValue } }
+    enum StatsSub: CaseIterable { case progress, history; var label: String { self == .progress ? "Progress" : "History" } }
 
     @State private var tab: Tab = .planner
+    @State private var fitnessSheet: FitnessSheet?
+    @State private var statsSub: StatsSub = .progress
     @State private var selectedDate: Date = Calendar.current.date(byAdding: .day, value: -1, to: Date())!.startOfDay
     @State private var showDatePicker = false
 
@@ -105,10 +114,10 @@ struct ContentView: View {
                 switch tab {
                 case .jeeves: JeevesChatView()
                 case .planner: DayPlannerView()
-                case .checkin: checkinTab
+                case .fitness: fitnessTab
                 case .library: LibraryView()
-                case .progress: progressTab
-                case .history: historyTab
+                case .tasks: tasksTab
+                case .stats: statsTab
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -122,10 +131,9 @@ struct ContentView: View {
             // Any plan generation still "pending" from a prior run never
             // returned (crash/kill/hang) — record that truthfully.
             PlanDiagnostics.sweepAbandoned(context: modelContext)
-            // Refresh the iCloud Drive diagnostics mirror + full DB snapshot on launch.
-            let logs = (try? modelContext.fetch(FetchDescriptor<PlanGenerationLog>())) ?? []
-            DiagnosticsSync.write(DiagnosticsSync.entries(from: logs))
-            DataBackup.writeToICloud()
+            // Refresh the full iCloud Drive mirror on launch: JSON state +
+            // heartbeat + logs, plus the raw-SQLite fallback (launch has time).
+            SyncOutbox.exportAll(context: modelContext, includeRawBackup: true)
         }
         .onChange(of: selectedDate) { _, newDate in loadFields(for: newDate) }
         .onChange(of: scenePhase) { _, phase in
@@ -143,6 +151,12 @@ struct ContentView: View {
                     await AutoPlanService.ensureUpcomingPlans(context: modelContext)
                     AutoPlanService.scheduleNext(context: modelContext)
                 }
+            }
+            if phase == .background {
+                // Snapshot the just-finished session to iCloud (fast JSON path;
+                // the raw-SQLite fallback is left to the next launch to avoid a
+                // partial copy if the OS suspends us mid-write).
+                SyncOutbox.exportAll(context: modelContext, includeRawBackup: false)
             }
         }
     }
@@ -176,35 +190,101 @@ struct ContentView: View {
         .background(Capsule().fill(Color.sageLight))
     }
 
-    private var checkinTab: some View {
+    private var fitnessTab: some View {
         VStack(spacing: 0) {
-            moduleHeader("Check-in", "flame.fill") {
+            moduleHeader("Fitness", "figure.strengthtraining.traditional") {
                 if streak > 0 { streakChip }
             }
             Divider().overlay(Color.textPrimary.opacity(0.14))
             ScrollView {
-                checkinView.padding(20)
+                VStack(alignment: .leading, spacing: 18) {
+                    checkinView            // the original daily check-in, kept as the core
+                    fitnessActivityLinks   // Run / Lift / Stretch loggers
+                }
+                .padding(20)
+            }
+        }
+        .sheet(item: $fitnessSheet) { sheet in
+            switch sheet {
+            case .run:     RunView()
+            case .lift:    LiftView()
+            case .stretch: StretchView()
             }
         }
     }
 
-    private var progressTab: some View {
+    /// The three activity loggers that now live under Fitness. Check-in stays the
+    /// top-of-tab core; these are the "log a workout" shortcuts (matches the
+    /// prototype), each presented as a sheet.
+    private var fitnessActivityLinks: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("Log an activity")
+                .font(.system(size: 11, weight: .bold)).textCase(.uppercase)
+                .kerning(0.9).foregroundStyle(Color.accentDeep)
+            fitnessRow("Go for a run", "Couch to 5K · run or walk by feel", "figure.run") { fitnessSheet = .run }
+            fitnessRow("Log a lift", "Reps × weight → live tonnage", "dumbbell.fill") { fitnessSheet = .lift }
+            fitnessRow("Stretch & mobility", "Guided, timed holds", "figure.flexibility") { fitnessSheet = .stretch }
+        }
+    }
+
+    private func fitnessRow(_ title: String, _ subtitle: String, _ icon: String,
+                            _ tapped: @escaping () -> Void) -> some View {
+        Button(action: tapped) {
+            HStack(spacing: 12) {
+                Image(systemName: icon).font(.system(size: 18))
+                    .foregroundStyle(Color.accent).frame(width: 26)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(Font.serif(15, weight: .semibold)).foregroundStyle(Color.textPrimary)
+                    Text(subtitle).font(.system(size: 11.5)).foregroundStyle(Color.textMuted)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.textMuted)
+            }
+            .padding(13)
+            .background(RoundedRectangle(cornerRadius: 15).fill(Color.surface))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var tasksTab: some View {
         VStack(spacing: 0) {
-            moduleHeader("Progress", "chart.bar.fill") {
+            moduleHeader("Tasks", "checklist") { EmptyView() }
+            Divider().overlay(Color.textPrimary.opacity(0.14))
+            TasksView()
+        }
+    }
+
+    /// Progress + History merged under one tab (frees the slot for Tasks), split
+    /// by a lightweight sub-toggle so both keep their full screen.
+    private var statsTab: some View {
+        VStack(spacing: 0) {
+            moduleHeader("Stats", "chart.bar.fill") {
                 if streak > 0 { streakChip }
             }
             Divider().overlay(Color.textPrimary.opacity(0.14))
-            ScrollView {
-                progressView.padding(20)
+            HStack(spacing: 4) {
+                ForEach(StatsSub.allCases, id: \.self) { s in
+                    Button { statsSub = s } label: {
+                        Text(s.label)
+                            .font(.system(size: 12.5, weight: .bold))
+                            .foregroundStyle(statsSub == s ? Color.accentDeep : Color.textSoft)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(RoundedRectangle(cornerRadius: 9).fill(statsSub == s ? Color.surface : Color.clear))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-        }
-    }
+            .padding(4)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color.textPrimary.opacity(0.05)))
+            .padding(.horizontal, 16).padding(.vertical, 8)
 
-    private var historyTab: some View {
-        VStack(spacing: 0) {
-            moduleHeader("History", "clock.fill") { EmptyView() }
-            Divider().overlay(Color.textPrimary.opacity(0.14))
-            historyView
+            if statsSub == .progress {
+                ScrollView { progressView.padding(20) }
+            } else {
+                historyView
+            }
         }
     }
 
@@ -621,10 +701,10 @@ struct ContentView: View {
         HStack(spacing: 0) {
             tabButton(.jeeves, "sparkles", "Jeeves")
             tabButton(.planner, "calendar", "Planner")
-            tabButton(.checkin, "flame.fill", "Check-in")
+            tabButton(.tasks, "checklist", "Tasks")
+            tabButton(.fitness, "figure.strengthtraining.traditional", "Fitness")
             tabButton(.library, "books.vertical.fill", "Library")
-            tabButton(.progress, "chart.bar.fill", "Progress")
-            tabButton(.history, "clock.fill", "History")
+            tabButton(.stats, "chart.bar.fill", "Stats")
         }
         .padding(.horizontal, 8).padding(.vertical, 10)
     }

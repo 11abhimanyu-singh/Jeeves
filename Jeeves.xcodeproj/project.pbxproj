@@ -6,7 +6,18 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		E54D8350301478C400EE9393 /* JeevesWatch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = E54D8346301478C400EE9393 /* JeevesWatch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
+		E54D834E301478C400EE9393 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E5604629300A2D6300BFD88F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E54D8345301478C400EE9393;
+			remoteInfo = "JeevesWatch Watch App";
+		};
 		E5604700300A2D6300BFD008 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = E5604629300A2D6300BFD88F /* Project object */;
@@ -16,12 +27,32 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		E54D8351301478C400EE9393 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				E54D8350301478C400EE9393 /* JeevesWatch Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		E54D8346301478C400EE9393 /* JeevesWatch Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "JeevesWatch Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		E5604631300A2D6300BFD88F /* Jeeves.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Jeeves.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E5604700300A2D6300BFD002 /* JeevesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = JeevesTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		E54D8347301478C400EE9393 /* JeevesWatch Watch App */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "JeevesWatch Watch App";
+			sourceTree = "<group>";
+		};
 		E5604633300A2D6300BFD88F /* Jeeves */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Jeeves;
@@ -35,6 +66,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		E54D8343301478C400EE9393 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E560462E300A2D6300BFD88F /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -59,12 +97,36 @@
 				E5604700300A2D6300BFD006 /* JeevesTests */,
 				E5604631300A2D6300BFD88F /* Jeeves.app */,
 				E5604700300A2D6300BFD002 /* JeevesTests.xctest */,
+				E54D8346301478C400EE9393 /* JeevesWatch Watch App.app */,
+				E54D8347301478C400EE9393 /* JeevesWatch Watch App */,
 			);
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		E54D8345301478C400EE9393 /* JeevesWatch Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E54D8354301478C400EE9393 /* Build configuration list for PBXNativeTarget "JeevesWatch Watch App" */;
+			buildPhases = (
+				E54D8342301478C400EE9393 /* Sources */,
+				E54D8343301478C400EE9393 /* Frameworks */,
+				E54D8344301478C400EE9393 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				E54D8347301478C400EE9393 /* JeevesWatch Watch App */,
+			);
+			name = "JeevesWatch Watch App";
+			packageProductDependencies = (
+			);
+			productName = "JeevesWatch Watch App";
+			productReference = E54D8346301478C400EE9393 /* JeevesWatch Watch App.app */;
+			productType = "com.apple.product-type.application";
+		};
 		E5604630300A2D6300BFD88F /* Jeeves */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = E560463E300A2D6400BFD88F /* Build configuration list for PBXNativeTarget "Jeeves" */;
@@ -72,10 +134,12 @@
 				E560462D300A2D6300BFD88F /* Sources */,
 				E560462E300A2D6300BFD88F /* Frameworks */,
 				E560462F300A2D6300BFD88F /* Resources */,
+				E54D8351301478C400EE9393 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				E54D834F301478C400EE9393 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				E5604633300A2D6300BFD88F /* Jeeves */,
@@ -120,6 +184,9 @@
 				LastSwiftUpdateCheck = 2660;
 				LastUpgradeCheck = 2660;
 				TargetAttributes = {
+					E54D8345301478C400EE9393 = {
+						CreatedOnToolsVersion = 26.6;
+					};
 					E5604630300A2D6300BFD88F = {
 						CreatedOnToolsVersion = 26.6;
 					};
@@ -145,11 +212,19 @@
 			targets = (
 				E5604630300A2D6300BFD88F /* Jeeves */,
 				E5604700300A2D6300BFD001 /* JeevesTests */,
+				E54D8345301478C400EE9393 /* JeevesWatch Watch App */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		E54D8344301478C400EE9393 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E560462F300A2D6300BFD88F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -167,6 +242,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		E54D8342301478C400EE9393 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E560462D300A2D6300BFD88F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -184,6 +266,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		E54D834F301478C400EE9393 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E54D8345301478C400EE9393 /* JeevesWatch Watch App */;
+			targetProxy = E54D834E301478C400EE9393 /* PBXContainerItemProxy */;
+		};
 		E5604700300A2D6300BFD007 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = E5604630300A2D6300BFD88F /* Jeeves */;
@@ -192,6 +279,78 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		E54D8352301478C400EE9393 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "JeevesWatch Watch App/JeevesWatch Watch App.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = MUXW6TU4WN;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "JeevesWatch-Watch-App-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = JeevesWatch;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Jeeves reads your heart rate during a run to show your live BPM";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = abhimanyusingh.me.Jeeves;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = abhimanyusingh.me.Jeeves.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.5;
+			};
+			name = Debug;
+		};
+		E54D8353301478C400EE9393 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "JeevesWatch Watch App/JeevesWatch Watch App.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = MUXW6TU4WN;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "JeevesWatch-Watch-App-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = JeevesWatch;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Jeeves reads your heart rate during a run to show your live BPM";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = abhimanyusingh.me.Jeeves;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = abhimanyusingh.me.Jeeves.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.5;
+			};
+			name = Release;
+		};
 		E560463C300A2D6400BFD88F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -424,6 +583,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		E54D8354301478C400EE9393 /* Build configuration list for PBXNativeTarget "JeevesWatch Watch App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E54D8352301478C400EE9393 /* Debug */,
+				E54D8353301478C400EE9393 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		E560462C300A2D6300BFD88F /* Build configuration list for PBXProject "Jeeves" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
