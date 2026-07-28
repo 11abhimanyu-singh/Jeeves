@@ -85,6 +85,24 @@ final class ChatDataToolTests: XCTestCase {
                        "blank queries match nothing")
     }
 
+    // MARK: standing-preference expiry ("for the next 45 days")
+
+    func testUnboundedPreferenceIsAlwaysActive() {
+        XCTAssertTrue(StandingPrefs.isActive("Gym is always at 7 PM", now: at(2030, 1, 1, 0)))
+    }
+
+    func testBoundedPreferenceActiveThroughExpiryDay() {
+        let note = "Gym is always at 7 PM (until 2026-09-12)"
+        XCTAssertTrue(StandingPrefs.isActive(note, now: at(2026, 9, 12, 23)),
+                      "active through the whole expiry day")
+        XCTAssertFalse(StandingPrefs.isActive(note, now: at(2026, 9, 13, 0)),
+                       "lapses the day after")
+    }
+
+    func testMalformedExpiryTreatedAsPermanent() {
+        XCTAssertTrue(StandingPrefs.isActive("No calls (until someday)", now: at(2030, 1, 1, 0)))
+    }
+
     // MARK: voice-note retention
 
     func testPruneCutoffIs30DaysBack() {

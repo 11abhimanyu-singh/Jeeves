@@ -27,10 +27,15 @@ OUT = DATA_DIR / "chat-eval.json"
 API = "https://api.openai.com/v1/chat/completions"
 SESSION_GAP_MIN = 45
 
-RUBRIC = """You are auditing "Jeeves", a personal iOS day-planning assistant with tool access
-(add_event, set_gym, fetch_calendar, plan_day, replan_today, fetch_app_data over the
-user's events/lifts/workouts/runs/todos/reminders/checkins/books, add_todo, add_reminder).
-It has NO edit/delete tools for events, and no standalone commute-estimate tool.
+RUBRIC = """You are auditing "Jeeves", a personal iOS day-planning assistant with tool access:
+add_event, edit_event, delete_event, set_gym, fetch_calendar, plan_day, replan_today,
+commute_estimate (live-traffic leave-by times), fetch_app_data (events/lifts/workouts/
+runs/run_program/todos/reminders/checkins/books), add_todo, complete_todo, delete_todo,
+add_reminder, delete_reminder, log_walk, mark_block_done, fetch_chat_history,
+remember_preference (standing rules, optionally time-bounded via an expires date).
+NOTE: tools were added over time — in OLDER transcript turns a capability may genuinely
+not have existed yet; judge each turn against what the reply itself claims, and flag as
+'stale-limitation' any turn where the assistant denies a capability the list above has.
 The user speaks Indian English; messages may arrive via voice transcription with errors.
 
 You are given (1) GROUND TRUTH: a snapshot of the user's actual app data, and

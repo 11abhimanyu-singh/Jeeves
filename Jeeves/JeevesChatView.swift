@@ -608,8 +608,8 @@ struct JeevesChatView: View {
             return .init(text: removed > 0 ? "Forgot \(removed) preference(s) matching '\(note)'."
                                            : "No stored preference matches '\(note)'.")
         }
-        StandingPrefs.add(note)
-        return .init(text: "Remembered: '\(note)'. Current standing preferences: \(StandingPrefs.all().joined(separator: " | ")).")
+        StandingPrefs.add(note, expires: input["expires"] as? String)
+        return .init(text: "Remembered: '\(note)'\((input["expires"] as? String).map { " (until \($0))" } ?? ""). Current standing preferences: \(StandingPrefs.all().joined(separator: " | ")).")
     }
 
     // MARK: fetch_app_data — the read side of the chat

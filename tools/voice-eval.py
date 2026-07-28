@@ -52,8 +52,11 @@ def whisper(path: Path, key: str) -> str:
 
 
 def norm(text: str) -> list[str]:
-    """Lowercase, strip punctuation — compare words, not formatting."""
+    """Lowercase, strip punctuation, split digit-letter joins ("7pm" → "7 pm")
+    — compare words, not formatting quirks between the two engines."""
+    import re
     cleaned = "".join(c.lower() if c.isalnum() or c.isspace() else " " for c in text)
+    cleaned = re.sub(r"(\d)([a-z])", r"\1 \2", cleaned)
     return cleaned.split()
 
 

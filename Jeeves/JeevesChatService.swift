@@ -49,23 +49,43 @@ enum JeevesChatError: LocalizedError {
 enum StandingPrefs {
     static let key = "jeevesStandingPrefs"
 
-    static func all() -> [String] {
-        UserDefaults.standard.stringArray(forKey: key) ?? []
+    /// Active (non-lapsed) preferences — what gets injected into the prompt.
+    static func all(now: Date = Date()) -> [String] {
+        (UserDefaults.standard.stringArray(forKey: key) ?? [])
+            .filter { isActive($0, now: now) }
     }
 
-    static func add(_ note: String) {
-        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Time-bounded notes carry "(until YYYY-MM-DD)"; they lapse after that
+    /// day. Pure and unit-tested.
+    nonisolated static func isActive(_ note: String, now: Date) -> Bool {
+        guard let range = note.range(of: #"\(until (\d{4}-\d{2}-\d{2})\)"#,
+                                     options: .regularExpression) else { return true }
+        let dateStr = String(note[range]).dropFirst("(until ".count).dropLast()
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        guard let expiry = f.date(from: String(dateStr)) else { return true }
+        // Active through the whole expiry day.
+        return Calendar.current.startOfDay(for: now) <= Calendar.current.startOfDay(for: expiry)
+    }
+
+    static func add(_ note: String, expires: String? = nil) {
+        var trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        var prefs = all()
+        if let expires, !expires.isEmpty, !trimmed.contains("(until") {
+            trimmed += " (until \(expires))"
+        }
+        var prefs = UserDefaults.standard.stringArray(forKey: key) ?? []
         guard !prefs.contains(where: { JeevesChatService.fuzzyMatch($0, query: trimmed) }) else { return }
         prefs.append(trimmed)
         UserDefaults.standard.set(prefs, forKey: key)
     }
 
-    /// Removes stored preferences matching the note; returns how many went.
+    /// Removes stored preferences matching the note (lapsed ones included);
+    /// returns how many went.
     @discardableResult
     static func forget(matching note: String) -> Int {
-        var prefs = all()
+        var prefs = UserDefaults.standard.stringArray(forKey: key) ?? []
         let before = prefs.count
         prefs.removeAll { JeevesChatService.fuzzyMatch($0, query: note) }
         UserDefaults.standard.set(prefs, forKey: key)
@@ -212,7 +232,12 @@ enum JeevesChatService {
     about something said before.
     - When the user states a STANDING preference ("gym is always 7pm", "never \
     schedule calls before 10"), call remember_preference — it persists across \
-    days and appears in your context. Honor listed preferences without re-asking.
+    days and appears in your context. If they time-bound it ("for the next 45 \
+    days"), pass the expires date. Honor listed preferences without re-asking.
+    - Your CURRENT tool list is the ONLY authority on what you can do. The app \
+    gains tools between sessions — if earlier conversation (including your own \
+    messages) claimed a capability was missing, that claim is outdated. Check \
+    the tool list and use the tool; never repeat a remembered limitation.
     """
 
     private static let toolSchemas: [[String: Any]] = [
@@ -427,6 +452,7 @@ enum JeevesChatService {
                 "type": "object",
                 "properties": [
                     "note": ["type": "string", "description": "The preference, short and self-contained."],
+                    "expires": ["type": "string", "description": "YYYY-MM-DD after which the preference lapses ('for the next 45 days' → today+45). Omit for permanent."],
                     "forget": ["type": "boolean", "description": "true = remove stored preferences matching this text instead of adding."],
                 ],
                 "required": ["note"],
