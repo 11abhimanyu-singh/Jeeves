@@ -48,9 +48,12 @@ enum PlanCoordinator {
         PlanDiagnostics.finish(log, isOffline: result.isOffline, retryCount: result.retryCount,
                                commuteMs: result.commuteMs, claudeMs: result.claudeMs,
                                errorClass: result.error, startedAt: started, context: context)
-        // Mirror the updated diagnostics to iCloud Drive for hands-free reading.
-        let allLogs = (try? context.fetch(FetchDescriptor<PlanGenerationLog>())) ?? []
-        DiagnosticsSync.write(DiagnosticsSync.entries(from: allLogs))
+        // Mirror state + diagnostics to iCloud Drive for hands-free reading.
+        // Skip the heavy raw-SQLite copy on this per-generation path (which fires
+        // on every planner tap / chat plan / overnight auto-plan) — launch and
+        // background refresh that. This covers the auto-plan BGTask for free,
+        // since it also routes through generateLogged.
+        SyncOutbox.exportAll(context: context, includeRawBackup: false)
         return result
     }
 
@@ -66,7 +69,20 @@ enum PlanCoordinator {
 
         let tClaude = Date()
         guard let first = try? await PlanGenerationService.generate(request) else {
-            return Result(plan: deterministic(inputs), isOffline: true, error: "planning service unreachable",
+            // Offline: even a mid-day re-plan must keep the locked (already-elapsed)
+            // morning — merge it with the deterministic remainder from `from`, not
+            // rebuild the whole day (which would discard what's already done).
+            let offlinePlan: GeneratedPlan
+            if let from = inputs.replanFromMinute {
+                let full = deterministic(inputs)
+                let remainder = full.blocks.filter { ($0.startMinute ?? 0) >= from }
+                offlinePlan = GeneratedPlan(blocks: inputs.lockedBlocks + remainder,
+                                            dropped: full.dropped, shrunk: full.shrunk,
+                                            summary: full.summary, boundaryTime: full.boundaryTime)
+            } else {
+                offlinePlan = deterministic(inputs)
+            }
+            return Result(plan: offlinePlan, isOffline: true, error: "planning service unreachable",
                           commuteMs: commuteMs, claudeMs: Int(Date().timeIntervalSince(tClaude) * 1000))
         }
         // A mid-day re-plan produces only the REMAINDER; stitch the preserved
@@ -135,7 +151,7 @@ enum PlanCoordinator {
     /// calendar entry) is priced by ITS times, not mistaken for the gym-anchor
     /// commute.
     static func legDepartureMinute(label: String, gymMinute: Int?, events: [DailyEvent]) -> Int? {
-        for e in events {
+        for e in events where !e.isAllDay {   // all-day events have no commute
             if label == "\(e.title)→Home" { return e.endMinute }
             for kind in LocationKind.allCases where label == "\(kind.rawValue)→\(e.title)" {
                 return e.startMinute - 45   // leave ~45 min before the event

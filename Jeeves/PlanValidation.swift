@@ -145,11 +145,14 @@ enum PlanValidation {
             out.append(Violation(severity: .severe, message: "Lunch (a Must-do) is missing from the plan"))
         }
 
-        // 4. Every event is an anchor and must appear — none may be dropped.
+        // 4. Every TIMED event is an anchor and must appear — none may be dropped.
+        //    All-day events have no block (they're day-long context), so they're
+        //    excluded from the count.
         let eventBlocks = plan.blocks.filter { $0.kind.lowercased() == "event" }.count
-        if eventBlocks < request.events.count {
+        let timedEventCount = request.events.filter { !$0.isAllDay }.count
+        if eventBlocks < timedEventCount {
             out.append(Violation(severity: .severe,
-                message: "Plan has \(eventBlocks) event block(s) but \(request.events.count) were given — an event was dropped"))
+                message: "Plan has \(eventBlocks) event block(s) but \(timedEventCount) were given — an event was dropped"))
         }
 
         // 5. A midday event must not discard the rest of the day: if the last
