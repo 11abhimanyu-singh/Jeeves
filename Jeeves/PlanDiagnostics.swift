@@ -57,7 +57,7 @@ enum PlanDiagnostics {
     static func begin(trigger: PlanGenTrigger, context: ModelContext) -> PlanGenerationLog {
         let log = PlanGenerationLog(startedAt: Date(), trigger: trigger)
         context.insert(log)
-        try? context.save()
+        context.saveOrLog()
         return log
     }
 
@@ -69,7 +69,7 @@ enum PlanDiagnostics {
         log.outcome = outcome(isOffline: isOffline, retryCount: retryCount)
         log.retryCount = retryCount
         log.errorClass = errorClass
-        try? context.save()
+        context.saveOrLog()
     }
 
     /// A generation still `pending` well after it started never returned — mark
@@ -81,7 +81,7 @@ enum PlanDiagnostics {
             predicate: #Predicate { $0.outcomeRaw == pendingRaw && $0.startedAt < cutoff })
         let stale = (try? context.fetch(descriptor)) ?? []
         for log in stale { log.outcomeRaw = PlanGenOutcome.abandoned.rawValue }
-        if !stale.isEmpty { try? context.save() }
+        if !stale.isEmpty { context.saveOrLog() }
     }
 
     struct Summary {

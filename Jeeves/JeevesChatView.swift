@@ -242,13 +242,13 @@ struct JeevesChatView: View {
             planJSON: plan.flatMap(ChatTurn.encodePlan), isOfflinePlan: isOfflinePlan, imageData: imageData
         )
         modelContext.insert(turn)
-        try? modelContext.save()
+        modelContext.saveOrLog()
         return turn
     }
 
     private func clearToday() {
         for turn in turns { modelContext.delete(turn) }
-        try? modelContext.save()
+        modelContext.saveOrLog()
     }
 
     /// Deletes turns older than the 45-minute session window so the chat opens
@@ -260,7 +260,7 @@ struct JeevesChatView: View {
             modelContext.delete(turn)
             changed = true
         }
-        if changed { try? modelContext.save() }
+        if changed { modelContext.saveOrLog() }
     }
 
     private func dismissKeyboard() {
@@ -424,7 +424,7 @@ struct JeevesChatView: View {
             destinationAddress: venue, outboundStart: from, source: .manual
         )
         modelContext.insert(event)
-        try? modelContext.save()
+        modelContext.saveOrLog()
         resolveEventDestinationIfLink(event)
         let venueSuffix: String
         if venue.isEmpty { venueSuffix = "" }
@@ -444,7 +444,7 @@ struct JeevesChatView: View {
             event.destinationAddress = place.displayAddress
             event.destinationLat = place.lat
             event.destinationLng = place.lng
-            try? modelContext.save()
+            modelContext.saveOrLog()
         }
     }
 
@@ -456,12 +456,12 @@ struct JeevesChatView: View {
         state.hasGymToday = gymToday
         if gymToday {
             if let gt = (input["gym_time"] as? String).flatMap(GeneratedBlock.minutes(from:)) { state.gymMinute = gt }
-            try? modelContext.save()
+            modelContext.saveOrLog()
             let at = state.gymMinute.map { " at \(hhmm($0))" } ?? " (no time set — ask when weightlifting starts)"
             return .init(text: "Gym set for \(dayLabel(date))\(at).")
         } else {
             state.gymMinute = nil
-            try? modelContext.save()
+            modelContext.saveOrLog()
             return .init(text: "Cleared the gym for \(dayLabel(date)).")
         }
     }
@@ -502,12 +502,7 @@ struct JeevesChatView: View {
 
     /// The DailyPlanState for a day, creating one if needed.
     private func planState(on date: Date) -> DailyPlanState {
-        let day = date.startOfDay
-        let all = (try? modelContext.fetch(FetchDescriptor<DailyPlanState>())) ?? dailyPlans
-        if let s = all.first(where: { $0.date == day }) { return s }
-        let s = DailyPlanState(date: day, hasGymToday: false, gymMinute: nil)
-        modelContext.insert(s)
-        return s
+        DailyPlanState.fetchOrCreate(for: date, in: modelContext)
     }
 
     /// A one-line summary of today's anchors, given to the model so it knows
@@ -596,7 +591,7 @@ struct JeevesChatView: View {
         // records.
         let state = planState(on: day)
         state.storePlan(plan, isOffline: isOffline)
-        try? modelContext.save()
+        modelContext.saveOrLog()
         // Schedule on-device reminders for this plan's key blocks.
         Task { await NotificationService.reschedule(plan: plan, on: day) }
         // Arm a background traffic re-check ~90 min before the next commute.
@@ -632,15 +627,12 @@ struct JeevesChatView: View {
 
         // Gym, only if the message actually mentioned it.
         if let gymToday = anchors.gymToday {
-            let state = todayPlanState ?? {
-                let s = DailyPlanState(date: today, hasGymToday: false, gymMinute: nil)
-                modelContext.insert(s); return s
-            }()
+            let state = DailyPlanState.fetchOrCreate(for: today, in: modelContext)
             state.hasGymToday = gymToday
             if let gt = anchors.gymTime.flatMap(GeneratedBlock.minutes(from:)) { state.gymMinute = gt }
         }
 
-        try? modelContext.save()
+        modelContext.saveOrLog()
         return todayEvents + created
     }
 
@@ -679,7 +671,7 @@ struct JeevesChatView: View {
             destinationAddress: draft.address, outboundStart: draft.outboundStart, source: draft.source
         )
         modelContext.insert(event)
-        try? modelContext.save()
+        modelContext.saveOrLog()
         resolveEventDestinationIfLink(event)
         addTurn(role: .assistant, "Added to today: \(draft.title) at \(hhmm(draft.startMinute)). Tap Plan my day and I'll fit everything around it.")
     }

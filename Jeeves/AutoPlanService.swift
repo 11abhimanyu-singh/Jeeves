@@ -108,7 +108,7 @@ enum AutoPlanService {
             guard !result.isOffline else { continue }
 
             state.storePlan(result.plan, isOffline: false)
-            try? context.save()
+            context.saveOrLog()
             await NotificationService.reschedule(plan: result.plan, on: day)
             filled += 1
         }

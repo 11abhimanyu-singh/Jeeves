@@ -75,7 +75,7 @@ struct RoutineCatalogView: View {
             Spacer()
             Toggle("", isOn: Binding(
                 get: { a.enabled },
-                set: { a.enabled = $0; try? context.save() }
+                set: { a.enabled = $0; context.saveOrLog() }
             ))
             .labelsHidden().tint(Color.accent)
         }
@@ -84,14 +84,14 @@ struct RoutineCatalogView: View {
 
     private func delete(_ offsets: IndexSet) {
         for i in offsets { context.delete(activities[i]) }
-        try? context.save()
+        context.saveOrLog()
     }
 
     private func move(_ offsets: IndexSet, _ destination: Int) {
         var reordered = activities
         reordered.move(fromOffsets: offsets, toOffset: destination)
         for (i, a) in reordered.enumerated() { a.sortOrder = i }
-        try? context.save()
+        context.saveOrLog()
     }
 }
 
@@ -156,7 +156,7 @@ struct RoutineActivityEditor: View {
         } else {
             context.insert(RoutineActivity(name: trimmed, durationMinutes: Int(minutes), tier: tier, sortOrder: nextSort))
         }
-        try? context.save()
+        context.saveOrLog()
         dismiss()
     }
 }

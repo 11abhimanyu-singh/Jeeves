@@ -447,7 +447,7 @@ struct LiftView: View {
                             addedKg: d.addedKg, bodyweightKg: d.bodyweightKg)
             modelContext.insert(s)
         }
-        try? modelContext.save()
+        modelContext.saveOrLog()
 
         // Back to the picker; the new session appears under "Recent sessions".
         draftSets = []

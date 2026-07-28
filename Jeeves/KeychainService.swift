@@ -24,6 +24,10 @@ enum KeychainService {
 
         var attributes = query
         attributes[kSecValueData as String] = data
+        // Keep secrets on this device only and out of encrypted backups /
+        // iCloud Keychain, matching the "never leave the device" intent.
+        // AfterFirstUnlock so background tasks can still read them post-reboot.
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(attributes as CFDictionary, nil)
     }
 

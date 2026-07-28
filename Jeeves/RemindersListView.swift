@@ -189,14 +189,14 @@ struct RemindersListView: View {
             fire = Calendar.current.date(byAdding: .day, value: 1, to: fire) ?? fire
         }
         modelContext.insert(Reminder(title: title.isEmpty ? "Reminder" : title, fireAt: fire, recurrence: draftRecurrence))
-        try? modelContext.save()
+        modelContext.saveOrLog()
         showAdd = false
         rescheduleAll()
     }
 
     private func complete(_ r: Reminder) {
         r.completedAt = Date()
-        try? modelContext.save()
+        modelContext.saveOrLog()
         rescheduleAll()
     }
 
@@ -208,7 +208,7 @@ struct RemindersListView: View {
             // schedule) — add a separate one-off 10-minute nudge alongside it.
             modelContext.insert(Reminder(title: r.title, fireAt: Date().addingTimeInterval(10 * 60), recurrence: .once))
         }
-        try? modelContext.save()
+        modelContext.saveOrLog()
         rescheduleAll()
     }
 

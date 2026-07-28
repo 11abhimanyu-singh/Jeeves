@@ -45,7 +45,7 @@ struct PlannerSetupView: View {
         }
         .sheet(item: $editingEvent) { event in
             EventEditSheet(draft: EventDraft(event: event), onSave: { draft in apply(draft, to: event) }, onDelete: {
-                modelContext.delete(event); try? modelContext.save()
+                modelContext.delete(event); modelContext.saveOrLog()
             })
         }
         .sheet(item: $detectedDraft) { draft in
@@ -75,7 +75,7 @@ struct PlannerSetupView: View {
                 let state = todayPlanState(createIfNeeded: true)!
                 state.hasGymToday = on
                 if on && state.gymMinute == nil { state.gymMinute = 11 * 60 }
-                try? modelContext.save()
+                modelContext.saveOrLog()
             }
         )
     }
@@ -90,7 +90,7 @@ struct PlannerSetupView: View {
                 let comps = Calendar.current.dateComponents([.hour, .minute], from: date)
                 let state = todayPlanState(createIfNeeded: true)!
                 state.gymMinute = (comps.hour ?? 11) * 60 + (comps.minute ?? 0)
-                try? modelContext.save()
+                modelContext.saveOrLog()
             }
         )
     }
@@ -98,9 +98,7 @@ struct PlannerSetupView: View {
     private func todayPlanState(createIfNeeded: Bool = false) -> DailyPlanState? {
         if let existing = dailyPlans.first(where: { $0.date == today }) { return existing }
         guard createIfNeeded else { return nil }
-        let state = DailyPlanState(date: today, hasGymToday: false, gymMinute: nil)
-        modelContext.insert(state)
-        return state
+        return DailyPlanState.fetchOrCreate(for: today, in: modelContext)
     }
 
     // MARK: Events
@@ -181,7 +179,7 @@ struct PlannerSetupView: View {
                         isAllDay: c.isAllDay
                     ))
                 }
-                try? modelContext.save()
+                modelContext.saveOrLog()
             } catch {
                 ticketError = error.localizedDescription
             }
@@ -196,7 +194,7 @@ struct PlannerSetupView: View {
             source: draft.source
         )
         modelContext.insert(event)
-        try? modelContext.save()
+        modelContext.saveOrLog()
         resolveDestinationIfLink(for: event)
     }
 
@@ -207,7 +205,7 @@ struct PlannerSetupView: View {
         event.endMinute = draft.endMinute
         event.destinationAddress = draft.address
         event.outboundStart = draft.outboundStart
-        try? modelContext.save()
+        modelContext.saveOrLog()
         resolveDestinationIfLink(for: event)
     }
 
@@ -223,7 +221,7 @@ struct PlannerSetupView: View {
             event.destinationAddress = place.displayAddress
             event.destinationLat = place.lat
             event.destinationLng = place.lng
-            try? modelContext.save()
+            modelContext.saveOrLog()
         }
     }
 

@@ -276,7 +276,7 @@ struct LibraryView: View {
             BookEditSheet(
                 book: book,
                 onSave: { updated in apply(updated, to: book) },
-                onDelete: { modelContext.delete(book); try? modelContext.save() },
+                onDelete: { modelContext.delete(book); modelContext.saveOrLog() },
                 isDuplicate: { t, a in isDuplicate(title: t, author: a, excluding: book.id) }
             )
         }
@@ -289,20 +289,20 @@ struct LibraryView: View {
                     modelContext.insert(book)
                     enrichMetadata(for: book)
                 }
-                try? modelContext.save()
+                modelContext.saveOrLog()
             }
         }
         .sheet(item: $pendingRatingBook) { book in
             RatingPromptSheet(book: book) { rating in
                 book.rating = rating
-                try? modelContext.save()
+                modelContext.saveOrLog()
                 pendingRatingBook = nil
             }
         }
         .sheet(item: $summaryBook) { book in
             BookSummarySheet(book: book) { text in
                 book.summary = text
-                try? modelContext.save()
+                modelContext.saveOrLog()
             }
         }
         .onChange(of: photoPickerItem) { _, newItem in
@@ -455,7 +455,7 @@ struct LibraryView: View {
             book.dateFinished = .now
             pendingRatingBook = book
         }
-        try? modelContext.save()
+        modelContext.saveOrLog()
     }
 
     private func todaysPages(for book: Book) -> Int {
@@ -469,7 +469,7 @@ struct LibraryView: View {
             modelContext.insert(ReadingLog(date: today, bookID: book.id, pagesRead: pages))
         }
         book.currentPage += pages
-        try? modelContext.save()
+        modelContext.saveOrLog()
         if let total = book.totalPages, book.currentPage >= total {
             setStatus(.finished, on: book)
         }
@@ -483,8 +483,8 @@ struct LibraryView: View {
             isbn: draft.isbn.isEmpty ? nil : draft.isbn
         )
         modelContext.insert(book)
-        try? modelContext.save()
-        if draft.status == .finished { book.dateFinished = .now; try? modelContext.save() }
+        modelContext.saveOrLog()
+        if draft.status == .finished { book.dateFinished = .now; modelContext.saveOrLog() }
         enrichMetadata(for: book)
     }
 
@@ -506,7 +506,7 @@ struct LibraryView: View {
         if draft.status != book.status {
             setStatus(draft.status, on: book)
         }
-        try? modelContext.save()
+        modelContext.saveOrLog()
         if book.thumbnailURLString == nil { enrichMetadata(for: book) }
     }
 
@@ -522,7 +522,7 @@ struct LibraryView: View {
             isbn: result.isbn, thumbnailURLString: result.thumbnailURLString
         )
         modelContext.insert(book)
-        try? modelContext.save()
+        modelContext.saveOrLog()
         Task { await downloadThumbnailData(for: book) }
     }
 
@@ -535,7 +535,7 @@ struct LibraryView: View {
                 // Don't clobber an ISBN the user typed in by hand.
                 if (book.isbn ?? "").isEmpty, let isbn = result.isbn { book.isbn = isbn }
                 if let thumb = result.thumbnailURLString { book.thumbnailURLString = thumb }
-                try? modelContext.save()
+                modelContext.saveOrLog()
             }
             await downloadThumbnailData(for: book)
         }
@@ -552,7 +552,7 @@ struct LibraryView: View {
               let (data, _) = try? await URLSession.shared.data(from: url) else { return }
         await MainActor.run {
             book.thumbnailData = data
-            try? modelContext.save()
+            modelContext.saveOrLog()
         }
     }
 

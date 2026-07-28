@@ -139,7 +139,7 @@ enum CommuteRefresh {
         }
         guard changed else { return }
         state.storePlan(working, isOffline: state.generatedPlanIsOffline)
-        try? context.save()
+        context.saveOrLog()
         await NotificationService.reschedule(plan: working, on: today)
     }
 }

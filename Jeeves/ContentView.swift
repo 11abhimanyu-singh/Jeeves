@@ -131,6 +131,8 @@ struct ContentView: View {
             // Any plan generation still "pending" from a prior run never
             // returned (crash/kill/hang) — record that truthfully.
             PlanDiagnostics.sweepAbandoned(context: modelContext)
+            // Collapse any duplicate per-day plan rows (pre-fix races / CloudKit merges).
+            DailyPlanState.dedupe(in: modelContext)
             // Refresh the full iCloud Drive mirror on launch: JSON state +
             // heartbeat + logs, plus the raw-SQLite fallback (launch has time).
             SyncOutbox.exportAll(context: modelContext, includeRawBackup: true)
@@ -787,7 +789,7 @@ struct ContentView: View {
             )
             modelContext.insert(newEntry)
         }
-        try? modelContext.save()
+        modelContext.saveOrLog()
     }
 
     private func prettyDate(_ date: Date) -> String {

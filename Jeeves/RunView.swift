@@ -737,8 +737,9 @@ struct RunView: View {
             rpe: rpe
         )
         modelContext.insert(session)
-        try? modelContext.save()
-        logged = true
+        // Only mark the run logged if it actually persisted; otherwise leave
+        // logged == false so the guard above lets the user retry the save.
+        logged = modelContext.saveOrLog()
     }
 
     // MARK: - Timer

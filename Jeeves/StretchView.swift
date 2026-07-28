@@ -604,7 +604,7 @@ struct StretchView: View {
         if elapsedTotal >= 10 {
             let log = StretchLog(date: Date(), routineName: selectedRoutine.name, durationSec: elapsedTotal)
             modelContext.insert(log)
-            try? modelContext.save()
+            modelContext.saveOrLog()
         }
     }
 

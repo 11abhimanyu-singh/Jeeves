@@ -49,6 +49,11 @@ nonisolated struct GoogleTokenResponse: Equatable, Sendable {
 final class GoogleOAuthService: NSObject {
     static let shared = GoogleOAuthService()
 
+    /// Held strongly for the duration of sign-in. ASWebAuthenticationSession is
+    /// documented as requiring a strong reference — a local var can deallocate
+    /// after start(), cancelling the flow and hanging the continuation.
+    private var webAuthSession: ASWebAuthenticationSession?
+
     private let scope = "https://www.googleapis.com/auth/calendar.readonly"
     private let authEndpoint = "https://accounts.google.com/o/oauth2/v2/auth"
     private let tokenEndpoint = "https://oauth2.googleapis.com/token"
@@ -190,6 +195,7 @@ final class GoogleOAuthService: NSObject {
             }
             session.presentationContextProvider = self
             session.prefersEphemeralWebBrowserSession = false
+            self.webAuthSession = session   // hold a strong ref for the flow's lifetime
             session.start()
         }
     }
@@ -198,7 +204,12 @@ final class GoogleOAuthService: NSObject {
 
     private static func codeVerifier() -> String {
         var bytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        if status != errSecSuccess {
+            // Never ship an all-zero (predictable) PKCE verifier — fall back to
+            // CryptoKit's CSPRNG if the Security RNG somehow fails.
+            bytes = SymmetricKey(size: .bits256).withUnsafeBytes { Array($0) }
+        }
         return Data(bytes).base64URLEncodedString()
     }
 

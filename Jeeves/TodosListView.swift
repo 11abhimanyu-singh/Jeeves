@@ -225,18 +225,18 @@ struct TodosListView: View {
         // "drops a new task on top" behavior the list advertises).
         let nextSort = (todos.map(\.sortOrder).min() ?? 1) - 1
         modelContext.insert(Todo(title: trimmed, priority: .medium, sortOrder: nextSort))
-        try? modelContext.save()
+        modelContext.saveOrLog()
         draftTitle = ""
     }
 
     private func complete(_ todo: Todo) {
         todo.doneAt = Date()
-        try? modelContext.save()
+        modelContext.saveOrLog()
     }
 
     private func uncomplete(_ todo: Todo) {
         todo.doneAt = nil
-        try? modelContext.save()
+        modelContext.saveOrLog()
     }
 }
 

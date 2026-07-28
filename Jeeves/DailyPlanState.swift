@@ -62,4 +62,43 @@ final class DailyPlanState {
         if let outcome { raw[key] = outcome.rawValue } else { raw[key] = nil }
         manualOutcomesJSON = raw.isEmpty ? nil : (try? JSONEncoder().encode(raw)).flatMap { String(data: $0, encoding: .utf8) }
     }
+
+    // MARK: One-record-per-day
+
+    /// The single record for `day`, fetched DIRECTLY from the store (not via an
+    /// @Query, which can lag a just-inserted row and let two callers each create
+    /// their own duplicate). Creates and inserts one if none exists. CloudKit
+    /// forbids `@Attribute(.unique)`, so uniqueness is enforced here in code,
+    /// backed by dedupe() at launch.
+    static func fetchOrCreate(for day: Date, in context: ModelContext,
+                              hasGymToday: Bool = false, gymMinute: Int? = nil) -> DailyPlanState {
+        let start = day.startOfDay
+        var desc = FetchDescriptor<DailyPlanState>(predicate: #Predicate { $0.date == start })
+        desc.fetchLimit = 1
+        if let existing = try? context.fetch(desc).first { return existing }
+        let created = DailyPlanState(date: start, hasGymToday: hasGymToday, gymMinute: gymMinute)
+        context.insert(created)
+        return created
+    }
+
+    /// Collapse any duplicate per-day rows (from pre-fix races or CloudKit
+    /// merges), keeping the richest: a row with a stored plan wins, else a
+    /// confirmed one. Run once at launch. Returns how many rows were deleted.
+    @discardableResult
+    static func dedupe(in context: ModelContext) -> Int {
+        guard let all = try? context.fetch(FetchDescriptor<DailyPlanState>()) else { return 0 }
+        var keeper: [Date: DailyPlanState] = [:]
+        var removed = 0
+        for row in all {
+            let day = row.date.startOfDay
+            guard let current = keeper[day] else { keeper[day] = row; continue }
+            let rowIsBetter = (row.generatedPlanJSON != nil && current.generatedPlanJSON == nil)
+                || (row.planConfirmed && !current.planConfirmed)
+            if rowIsBetter { keeper[day] = row; context.delete(current) }
+            else { context.delete(row) }
+            removed += 1
+        }
+        if removed > 0 { context.saveOrLog() }
+        return removed
+    }
 }

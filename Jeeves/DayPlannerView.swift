@@ -166,14 +166,14 @@ struct DayPlannerView: View {
         guard let state = selectedPlanState else { return }
         let next: BlockOutcome? = current == .done ? .skipped : (current == .skipped ? nil : .done)
         state.setManualOutcome(next, forKey: AdherenceEngine.key(block))
-        try? modelContext.save()
+        modelContext.saveOrLog()
     }
 
     /// Persist a hand-edited plan and reschedule its reminders.
     private func commitEditedPlan(_ plan: GeneratedPlan) {
         guard let state = selectedPlanState else { return }
         state.storePlan(plan, isOffline: state.generatedPlanIsOffline)
-        try? modelContext.save()
+        modelContext.saveOrLog()
         let date = selectedDate
         Task { await NotificationService.reschedule(plan: plan, on: date) }
     }
@@ -224,7 +224,7 @@ struct DayPlannerView: View {
                 if let state = selectedPlanState {
                     state.adherenceScore = score
                     state.adherenceAssessed = assessed
-                    try? modelContext.save()
+                    modelContext.saveOrLog()
                 }
             }
         } else if reviewable {
@@ -284,12 +284,10 @@ struct DayPlannerView: View {
                 ), context: modelContext, trigger: .planner)
             }
             // Commit to this date's plan state so it persists and displays here.
-            let state = planState(for: date) ?? {
-                let s = DailyPlanState(date: date.startOfDay, hasGymToday: hasGymToday, gymMinute: gymMinute)
-                modelContext.insert(s); return s
-            }()
+            let state = DailyPlanState.fetchOrCreate(for: date, in: modelContext,
+                                                     hasGymToday: hasGymToday, gymMinute: gymMinute)
             state.storePlan(result.plan, isOffline: result.isOffline)
-            try? modelContext.save()
+            modelContext.saveOrLog()
             await NotificationService.reschedule(plan: result.plan, on: date)
             // If they backgrounded the app while it planned, tell them it's ready.
             await NotificationService.notifyPlanReady(isOffline: result.isOffline)
@@ -471,7 +469,7 @@ struct DayPlannerView: View {
                 isAllDay: c.isAllDay
             ))
         }
-        try? modelContext.save()
+        modelContext.saveOrLog()
         if let day = calendarReview?.date { selectedDate = day }
     }
 
@@ -535,7 +533,7 @@ struct DayPlannerView: View {
                 source: draft.source
             ))
         }
-        try? modelContext.save()
+        modelContext.saveOrLog()
         selectedDate = draft.date.startOfDay   // follow the event to its day
         editingEvent = nil
     }
@@ -548,7 +546,7 @@ struct DayPlannerView: View {
     private func deleteEditingEvent() {
         if let event = editingEvent {
             modelContext.delete(event)
-            try? modelContext.save()
+            modelContext.saveOrLog()
         }
         editingEvent = nil
     }
@@ -621,13 +619,11 @@ struct DayPlannerView: View {
     }
 
     private func saveGymState() {
-        if let state = selectedPlanState {
-            state.hasGymToday = hasGymToday
-            state.gymMinute = gymMinute
-        } else {
-            modelContext.insert(DailyPlanState(date: selectedDate.startOfDay, hasGymToday: hasGymToday, gymMinute: gymMinute))
-        }
-        try? modelContext.save()
+        let state = DailyPlanState.fetchOrCreate(for: selectedDate, in: modelContext,
+                                                 hasGymToday: hasGymToday, gymMinute: gymMinute)
+        state.hasGymToday = hasGymToday
+        state.gymMinute = gymMinute
+        modelContext.saveOrLog()
     }
 }
 

@@ -52,7 +52,7 @@ extension Baseline {
             context.insert(RoutineActivity(name: a.name, durationMinutes: a.durationMinutes,
                                            tier: a.tier, note: a.note, enabled: true, sortOrder: i))
         }
-        try? context.save()
+        context.saveOrLog()
     }
 
     /// The enabled routine in fill order, or the hardcoded default when the

@@ -217,7 +217,7 @@ struct SettingsView: View {
         for kind in LocationKind.allCases where !locations.contains(where: { $0.kind == kind }) {
             modelContext.insert(SavedLocation(kind: kind))
         }
-        try? modelContext.save()
+        modelContext.saveOrLog()
     }
 
     // MARK: Google Calendar (OAuth — client ID + connect)
@@ -342,7 +342,7 @@ struct LocationEditView: View {
                 .split(separator: ",")
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty }
-            try? modelContext.save()
+            modelContext.saveOrLog()
         }
     }
 }
