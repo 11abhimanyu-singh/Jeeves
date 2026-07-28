@@ -888,69 +888,149 @@ struct WalkDetailView: View {
     }
 }
 
-// MARK: - History
+// MARK: - History (the ONE history: check-in days + workout detail)
 
+/// Sheet wrapper used from the Fitness tab; the Stats tab embeds
+/// UnifiedHistoryList directly. Same list either way.
 struct WorkoutHistoryView: View {
     @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            UnifiedHistoryList()
+                .navigationTitle("History")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }.tint(Color.accentDeep)
+                    }
+                }
+        }
+    }
+}
+
+/// Day rows — the check-in's verdict (✓ trained / ✗ rest) plus the merged
+/// auto∪manual summary — expanding into the day's workout cards, each opening
+/// the full log.
+struct UnifiedHistoryList: View {
     @Query(sort: \Workout.date, order: .reverse) private var workouts: [Workout]
+    @Query private var checkins: [CheckIn]
+    @Query private var stretchLogs: [StretchLog]
     @Query private var liftSessions: [LiftSession]
     @Query private var liftSets: [LiftSet]
 
-    private struct DaySection: Identifiable {
+    @State private var expanded: Set<Date> = []
+    @State private var selected: Workout?
+
+    private struct DayRow: Identifiable {
         let id: Date
+        let status: CheckInAutoFill.DayStatus
         let workouts: [Workout]
     }
 
-    private var days: [DaySection] {
-        let finished = workouts.filter { $0.state != .live }
-        let grouped = Workout.groupedByDay(finished, date: { $0.date })
-        return grouped.keys.sorted(by: >).map { day in
-            DaySection(id: day, workouts: grouped[day]!.sorted { $0.date > $1.date })
+    private var days: [DayRow] {
+        let cal = Calendar.current
+        var keys = Set<Date>()
+        for c in checkins { keys.insert(cal.startOfDay(for: c.date)) }
+        for w in workouts where w.state != .live { keys.insert(cal.startOfDay(for: w.date)) }
+        for s in stretchLogs { keys.insert(cal.startOfDay(for: s.date)) }
+        return keys.sorted(by: >).compactMap { day in
+            guard let status = mergedStatus(for: day) else { return nil }
+            let dayWorkouts = workouts
+                .filter { $0.state != .live && cal.isDate($0.date, inSameDayAs: day) }
+                .sorted { $0.date > $1.date }
+            return DayRow(id: day, status: status, workouts: dayWorkouts)
         }
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    if days.isEmpty {
-                        Text("No workouts logged yet.")
-                            .font(.system(size: 13.5)).foregroundStyle(Color.textMuted)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 30)
-                    }
-                    ForEach(days) { day in
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text(dayLabel(day.id))
-                                    .font(Font.serif(16, weight: .semibold))
-                                    .foregroundStyle(Color.textPrimary)
-                                Spacer()
-                                Text("\(day.workouts.count) workout\(day.workouts.count == 1 ? "" : "s")")
-                                    .font(.system(size: 12)).foregroundStyle(Color.textMuted)
-                            }
-                            ForEach(day.workouts, id: \.id) { w in
-                                NavigationLink {
-                                    WorkoutHistoryDetail(workout: w)
-                                } label: {
-                                    WorkoutCard(workout: w, summary: liftSummary(w))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                if days.isEmpty {
+                    Text("Nothing logged yet.")
+                        .font(.system(size: 13.5)).foregroundStyle(Color.textMuted)
+                        .padding(.vertical, 32)
                 }
-                .padding(18)
+                ForEach(days) { day in
+                    dayCell(day)
+                }
             }
-            .background(Color.bg)
-            .navigationTitle("History")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }.tint(Color.accentDeep)
+            .padding(20)
+        }
+        .background(Color.bg)
+        .sheet(item: $selected) { w in
+            NavigationStack { WorkoutHistoryDetail(workout: w) }
+        }
+    }
+
+    @ViewBuilder
+    private func dayCell(_ day: DayRow) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                guard !day.workouts.isEmpty else { return }
+                if expanded.contains(day.id) { expanded.remove(day.id) }
+                else { expanded.insert(day.id) }
+            } label: {
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(day.status.isRest ? Color.bg : Color.sage)
+                        .frame(width: 36, height: 36)
+                        .overlay(Circle().stroke(day.status.isRest ? Color.textPrimary.opacity(0.14) : .clear, lineWidth: 1.5))
+                        .overlay(
+                            Image(systemName: day.status.isRest ? "xmark" : "checkmark")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(day.status.isRest ? Color.textMuted : .white)
+                        )
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(prettyDate(day.id)).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Color.textPrimary)
+                        Text(day.status.summary).font(.system(size: 12)).foregroundStyle(Color.textSoft).lineLimit(1)
+                    }
+                    Spacer()
+                    if !day.workouts.isEmpty {
+                        HStack(spacing: 4) {
+                            Text("\(day.workouts.count)")
+                                .font(.system(size: 11.5, weight: .bold)).foregroundStyle(Color.sageDeep)
+                            Image(systemName: expanded.contains(day.id) ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 10, weight: .semibold)).foregroundStyle(Color.textMuted)
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 5)
+                        .background(Capsule().fill(Color.sageLight))
+                    }
                 }
+                .padding(.horizontal, 12).padding(.vertical, 10)
+            }
+            .buttonStyle(.plain)
+
+            if expanded.contains(day.id) {
+                VStack(spacing: 8) {
+                    ForEach(day.workouts, id: \.id) { w in
+                        WorkoutCard(workout: w, summary: liftSummary(w)) { selected = w }
+                    }
+                }
+                .padding(.horizontal, 10).padding(.bottom, 10)
             }
         }
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color.surface))
+    }
+
+    // MARK: merged day status
+
+    private func mergedStatus(for day: Date) -> CheckInAutoFill.DayStatus? {
+        let cal = Calendar.current
+        let facts = workouts
+            .filter { cal.isDate($0.date, inSameDayAs: day) }
+            .map { CheckInAutoFill.WorkoutFact(type: $0.type, finished: $0.state != .live,
+                                               durationMin: $0.durationMin,
+                                               incline: $0.inclinePercent) }
+        let stretches = stretchLogs.filter { cal.isDate($0.date, inSameDayAs: day) }.count
+        let manual = checkins.first { cal.isDate($0.date, inSameDayAs: day) }.map {
+            CheckInAutoFill.manualFacts(workedOut: $0.workedOut, weightTraining: $0.weightTraining,
+                                        stretching: $0.stretching, mobility: $0.mobility,
+                                        cardio: $0.cardio, cardioType: $0.cardioType,
+                                        cardioDuration: $0.cardioDuration, cardioIncline: $0.cardioIncline)
+        }
+        return CheckInAutoFill.mergedDay(auto: CheckInAutoFill.derive(facts, stretchCount: stretches),
+                                         manual: manual)
     }
 
     private func liftSummary(_ w: Workout) -> String? {
@@ -962,12 +1042,12 @@ struct WorkoutHistoryView: View {
             .joined(separator: " \u{00B7} ")
     }
 
-    private func dayLabel(_ d: Date) -> String {
+    private func prettyDate(_ d: Date) -> String {
         let cal = Calendar.current
         if cal.isDateInToday(d) { return "Today" }
         if cal.isDateInYesterday(d) { return "Yesterday" }
         let f = DateFormatter()
-        f.dateFormat = "EEE d MMM"
+        f.dateFormat = "EEE, d MMM"
         return f.string(from: d)
     }
 }

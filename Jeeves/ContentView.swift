@@ -75,6 +75,10 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \CheckIn.date, order: .reverse) private var checkins: [CheckIn]
+    // The auto-derive layer: logged workouts + stretch sessions tick the
+    // check-in (and feed the streak) on their own.
+    @Query private var allWorkouts: [Workout]
+    @Query private var allStretchLogs: [StretchLog]
 
     enum Tab { case jeeves, planner, tasks, fitness, library, stats }
     enum FitnessSheet: String, Identifiable { case run, lift, stretch; var id: String { rawValue } }
@@ -112,6 +116,31 @@ struct ContentView: View {
 
     private var yesterdayDone: Bool { entry(for: realYesterday) != nil }
     private var todayDone: Bool { entry(for: realToday) != nil }
+
+    /// The auto-derived check-in layer for a date, from its logged workouts +
+    /// stretch sessions.
+    private func autoDerived(for date: Date) -> CheckInAutoFill.Derived {
+        let cal = Calendar.current
+        let facts = allWorkouts
+            .filter { cal.isDate($0.date, inSameDayAs: date) }
+            .map { CheckInAutoFill.WorkoutFact(type: $0.type, finished: $0.state != .live,
+                                               durationMin: $0.durationMin,
+                                               incline: $0.inclinePercent) }
+        let stretches = allStretchLogs.filter { cal.isDate($0.date, inSameDayAs: date) }.count
+        return CheckInAutoFill.derive(facts, stretchCount: stretches)
+    }
+
+    /// Merged (auto ∪ manual) status for a date — what the streak, history and
+    /// summaries read. Nil when the day has nothing at all.
+    private func mergedStatus(for date: Date) -> CheckInAutoFill.DayStatus? {
+        let manual = entry(for: date).map {
+            CheckInAutoFill.manualFacts(workedOut: $0.workedOut, weightTraining: $0.weightTraining,
+                                        stretching: $0.stretching, mobility: $0.mobility,
+                                        cardio: $0.cardio, cardioType: $0.cardioType,
+                                        cardioDuration: $0.cardioDuration, cardioIncline: $0.cardioIncline)
+        }
+        return CheckInAutoFill.mergedDay(auto: autoDerived(for: date), manual: manual)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -322,7 +351,22 @@ struct ContentView: View {
             }
 
             if isEditingCheckin {
+                let auto = autoDerived(for: selectedDate)
+
                 Text("Did you work out?").font(.heading(17)).foregroundStyle(Color.textPrimary).padding(.bottom, 14)
+
+                if auto.hasAnything {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 13)).foregroundStyle(Color.sageDeep)
+                        Text("Already logged from your workouts \u{2014} sealed ticks below came from them.")
+                            .font(.system(size: 12)).foregroundStyle(Color.textSoft)
+                    }
+                    .padding(.horizontal, 13).padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.sageLight))
+                    .padding(.bottom, 14)
+                }
 
                 HStack(spacing: 10) {
                     choiceButton("Yes", selected: workedOut == true, fillWhenSelected: Color.accent) {
@@ -341,14 +385,28 @@ struct ContentView: View {
                         .padding(.bottom, 10)
 
                     FlowChips {
-                        chip("Weight training", $weightTraining)
-                        chip("Stretching", $stretching)
+                        chip("Weight training", $weightTraining, locked: auto.weightTraining)
+                        chip("Stretching", $stretching, locked: auto.stretching)
                         chip("Mobility", $mobility)
-                        chip("Cardio", $cardio)
+                        chip("Cardio", $cardio, locked: auto.cardio)
                     }
-                    .padding(.bottom, cardio ? 16 : 4)
+                    .padding(.bottom, (cardio || auto.cardio) ? 16 : 4)
 
-                    if cardio {
+                    if auto.cardio {
+                        // Cardio came from a logged workout — its numbers live
+                        // there, not in manual fields.
+                        HStack(spacing: 8) {
+                            Image(systemName: auto.cardioIsRun ? "figure.run" : "figure.walk")
+                                .font(.system(size: 14)).foregroundStyle(Color.sageDeep)
+                            Text(autoCardioLine(auto))
+                                .font(.system(size: 13)).foregroundStyle(Color.textPrimary)
+                            Spacer()
+                            Text("edit the workout to change")
+                                .font(.system(size: 10.5)).foregroundStyle(Color.textMuted)
+                        }
+                        .padding(14)
+                        .background(RoundedRectangle(cornerRadius: 16).fill(Color.surface))
+                    } else if cardio {
                         VStack(alignment: .leading, spacing: 14) {
                             Text("CARDIO TYPE").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.textMuted)
                             HStack(spacing: 8) {
@@ -416,21 +474,21 @@ struct ContentView: View {
                 Text("Saved").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Color.sageDeep)
             }
 
-            if let e = entry(for: selectedDate) {
+            if let s = mergedStatus(for: selectedDate) {
                 HStack(spacing: 12) {
                     Circle()
-                        .fill(e.workedOut ? Color.sage : Color.bg)
+                        .fill(s.isRest ? Color.bg : Color.sage)
                         .frame(width: 40, height: 40)
-                        .overlay(Circle().stroke(e.workedOut ? .clear : Color.textPrimary.opacity(0.14), lineWidth: 1.5))
+                        .overlay(Circle().stroke(s.isRest ? Color.textPrimary.opacity(0.14) : .clear, lineWidth: 1.5))
                         .overlay(
-                            Image(systemName: e.workedOut ? "checkmark" : "xmark")
+                            Image(systemName: s.isRest ? "xmark" : "checkmark")
                                 .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(e.workedOut ? .white : Color.textMuted)
+                                .foregroundStyle(s.isRest ? Color.textMuted : .white)
                         )
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(e.workedOut ? "Logged" : "Rest day").font(.system(size: 14.5, weight: .bold)).foregroundStyle(Color.textPrimary)
-                        if e.workedOut {
-                            Text(summary(for: e)).font(.system(size: 12.5)).foregroundStyle(Color.textSoft)
+                        Text(s.isRest ? "Rest day" : "Logged").font(.system(size: 14.5, weight: .bold)).foregroundStyle(Color.textPrimary)
+                        if s.summary != (s.isRest ? "Rest day" : "Logged") {
+                            Text(s.summary).font(.system(size: 12.5)).foregroundStyle(Color.textSoft)
                         }
                     }
                     Spacer()
@@ -518,21 +576,26 @@ struct ContentView: View {
         .buttonStyle(.plain)
     }
 
-    private func chip(_ label: String, _ isOn: Binding<Bool>) -> some View {
-        Button {
+    /// A locked chip is auto-derived from a logged workout: shown ticked, not
+    /// un-tickable (delete the workout instead). Manual chips toggle freely.
+    private func chip(_ label: String, _ isOn: Binding<Bool>, locked: Bool = false) -> some View {
+        let on = locked || isOn.wrappedValue
+        return Button {
+            guard !locked else { return }
             isOn.wrappedValue.toggle()
         } label: {
             HStack(spacing: 6) {
-                if isOn.wrappedValue {
-                    Image(systemName: "checkmark").font(.system(size: 11, weight: .bold))
+                if on {
+                    Image(systemName: locked ? "checkmark.seal.fill" : "checkmark")
+                        .font(.system(size: 11, weight: .bold))
                 }
                 Text(label).font(.system(size: 13.5, weight: .semibold))
             }
-            .foregroundStyle(isOn.wrappedValue ? .white : Color.textPrimary)
+            .foregroundStyle(on ? .white : Color.textPrimary)
             .padding(.horizontal, 16).padding(.vertical, 9)
             .background(
-                Capsule().fill(isOn.wrappedValue ? Color.sage : .clear)
-                    .overlay(Capsule().stroke(isOn.wrappedValue ? .clear : Color.textPrimary.opacity(0.14), lineWidth: 1.5))
+                Capsule().fill(on ? Color.sage : .clear)
+                    .overlay(Capsule().stroke(on ? .clear : Color.textPrimary.opacity(0.14), lineWidth: 1.5))
             )
         }
         .buttonStyle(.plain)
@@ -570,23 +633,33 @@ struct ContentView: View {
 
     // MARK: Progress tab
 
+    /// Every distinct day this month with either a check-in or logged activity.
     private var monthDaysCount: Int {
         let cal = Calendar.current
-        return checkins.filter {
-            $0.workedOut &&
-            cal.isDate($0.date, equalTo: selectedDate, toGranularity: .month)
-        }.count
+        var days = Set<Date>()
+        for c in checkins where cal.isDate(c.date, equalTo: selectedDate, toGranularity: .month) {
+            days.insert(cal.startOfDay(for: c.date))
+        }
+        for w in allWorkouts where cal.isDate(w.date, equalTo: selectedDate, toGranularity: .month) {
+            days.insert(cal.startOfDay(for: w.date))
+        }
+        for s in allStretchLogs where cal.isDate(s.date, equalTo: selectedDate, toGranularity: .month) {
+            days.insert(cal.startOfDay(for: s.date))
+        }
+        return days.filter { mergedStatus(for: $0)?.qualifies == true }.count
     }
 
     private var progressPct: Double {
         min(1.0, Double(monthDaysCount) / Double(monthlyGoal))
     }
 
+    /// Consecutive qualifying days ending at the selected date. A logged
+    /// workout alone keeps the day alive — no check-in tap needed.
     private var streak: Int {
         var count = 0
         var cursor = selectedDate
         let cal = Calendar.current
-        while let e = entry(for: cursor), e.workedOut {
+        while let s = mergedStatus(for: cursor), s.qualifies {
             count += 1
             cursor = cal.date(byAdding: .day, value: -1, to: cursor)!
         }
@@ -637,62 +710,19 @@ struct ContentView: View {
 
     // MARK: History tab
 
+    /// The ONE history: day rows (check-in verdict + merged summary) that
+    /// expand into the day's workout cards. Fitness's History button opens the
+    /// same list as a sheet.
     private var historyView: some View {
-        ScrollView {
-            LazyVStack(spacing: 8) {
-                if checkins.isEmpty {
-                    Text("No check-ins yet").font(.system(size: 13.5)).foregroundStyle(Color.textMuted)
-                        .padding(.vertical, 32)
-                }
-                historyRows
-            }
-            .padding(20)
-        }
+        UnifiedHistoryList()
     }
 
-    @ViewBuilder
-    private var historyRows: some View {
-                ForEach(checkins) { e in
-                    HStack(spacing: 12) {
-                        Circle()
-                            .fill(e.workedOut ? Color.sage : Color.bg)
-                            .frame(width: 36, height: 36)
-                            .overlay(
-                                Circle().stroke(e.workedOut ? .clear : Color.textPrimary.opacity(0.14), lineWidth: 1.5)
-                            )
-                            .overlay(
-                                Image(systemName: e.workedOut ? "checkmark" : "xmark")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(e.workedOut ? .white : Color.textMuted)
-                            )
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(prettyDate(e.date)).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Color.textPrimary)
-                            Text(summary(for: e)).font(.system(size: 12)).foregroundStyle(Color.textSoft).lineLimit(1)
-                        }
-                        Spacer()
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 16).fill(Color.surface))
-        }
-    }
-
-    private func summary(for e: CheckIn) -> String {
-        guard e.workedOut else { return "Rest day" }
-        var parts: [String] = []
-        if e.weightTraining { parts.append("Weight") }
-        if e.stretching { parts.append("Stretch") }
-        if e.mobility { parts.append("Mobility") }
-        if e.cardio {
-            var c = "Cardio"
-            if let t = e.cardioType {
-                c += " (\(t == "Running" ? "Run" : "Walk")"
-                if let d = e.cardioDuration { c += ", \(Int(d))min" }
-                if let i = e.cardioIncline { c += ", \(formatNumber(i))%" }
-                c += ")"
-            }
-            parts.append(c)
-        }
-        return parts.isEmpty ? "No details" : parts.joined(separator: " · ")
+    /// One line for cardio that came from a logged workout.
+    private func autoCardioLine(_ auto: CheckInAutoFill.Derived) -> String {
+        var s = auto.cardioIsRun ? "Run" : "Walk"
+        if let d = auto.cardioDuration { s += " \u{00B7} \(Int(d)) min" }
+        if let i = auto.cardioIncline { s += " \u{00B7} \(formatNumber(i))%" }
+        return s
     }
 
     // MARK: Tab bar
