@@ -73,6 +73,18 @@ final class ChatDataToolTests: XCTestCase {
         XCTAssertGreaterThan(maxLongest, firstLongest)
     }
 
+    // MARK: fuzzy matching (edit/delete/complete tools)
+
+    func testFuzzyMatchPartialTitle() {
+        XCTAssertTrue(JeevesChatService.fuzzyMatch("Bhadra Tiger Reserve -Tour", query: "bhadra"))
+        XCTAssertTrue(JeevesChatService.fuzzyMatch("Buy protein powder", query: "protein"))
+        XCTAssertTrue(JeevesChatService.fuzzyMatch("gym", query: "Gym \u{00B7} weightlifting"),
+                      "short block names match longer user phrasing too")
+        XCTAssertFalse(JeevesChatService.fuzzyMatch("Front Squat", query: "deadlift"))
+        XCTAssertFalse(JeevesChatService.fuzzyMatch("anything", query: "   "),
+                       "blank queries match nothing")
+    }
+
     // MARK: voice-note retention
 
     func testPruneCutoffIs30DaysBack() {

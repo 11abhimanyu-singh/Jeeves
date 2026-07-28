@@ -290,6 +290,10 @@ struct JeevesChatView: View {
         var words = ["Jeeves", "tonnage", "Couch to 5K", "incline", "front squat", "check-in"]
         words += LiftExercise.library.map(\.name)
         words += events.map(\.title)
+        // Proper nouns are where the recognizer fails (eval: "JLR River term")
+        // — bias it with the user's actual venues and saved addresses.
+        words += events.map(\.destinationAddress).filter { !$0.isEmpty }
+        words += locations.map(\.address).filter { !$0.isEmpty }
         return words
     }
 
@@ -391,8 +395,221 @@ struct JeevesChatView: View {
         case "fetch_app_data": return toolFetchAppData(call.input)
         case "add_todo":       return toolAddTodo(call.input)
         case "add_reminder":   return toolAddReminder(call.input)
+        case "edit_event":     return toolEditEvent(call.input)
+        case "delete_event":   return toolDeleteEvent(call.input)
+        case "commute_estimate": return await toolCommuteEstimate(call.input)
+        case "log_walk":       return toolLogWalk(call.input)
+        case "mark_block_done": return toolMarkBlockDone(call.input)
+        case "complete_todo":  return toolCompleteTodo(call.input)
+        case "delete_todo":    return toolDeleteTodo(call.input)
+        case "delete_reminder": return toolDeleteReminder(call.input)
+        case "fetch_chat_history": return toolFetchChatHistory(call.input)
+        case "remember_preference": return toolRememberPreference(call.input)
         default:               return .init(text: "Unknown tool \(call.name).")
         }
+    }
+
+    // MARK: Event editing (eval finding: the Bhadra venue struggle)
+
+    /// Events matching a partial title — limited to one day when given, else
+    /// today onward (so past history is never edited by accident).
+    @MainActor
+    private func eventsMatching(_ title: String, dateRaw: String?) -> [DailyEvent] {
+        let all = (try? modelContext.fetch(FetchDescriptor<DailyEvent>())) ?? []
+        let matches = all.filter { JeevesChatService.fuzzyMatch($0.title, query: title) }
+        if let dateRaw, !dateRaw.isEmpty {
+            let day = JeevesChatService.resolveDate(dateRaw, relativeTo: Date())
+            return matches.filter { Calendar.current.isDate($0.date, inSameDayAs: day) }
+        }
+        return matches.filter { $0.date >= Date().startOfDay }
+    }
+
+    private func minutesFrom(_ hhmmRaw: String?) -> Int? {
+        guard let parts = hhmmRaw?.split(separator: ":").compactMap({ Int($0) }),
+              parts.count == 2, (0..<24).contains(parts[0]), (0..<60).contains(parts[1])
+        else { return nil }
+        return parts[0] * 60 + parts[1]
+    }
+
+    @MainActor
+    private func toolEditEvent(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let title = input["title"] as? String ?? ""
+        let matches = eventsMatching(title, dateRaw: input["date"] as? String)
+        guard !matches.isEmpty else {
+            return .init(text: "No future event matches '\(title)'. Use fetch_app_data(events) to see what exists.")
+        }
+        var changes: [String] = []
+        for e in matches {
+            if let venue = input["new_venue"] as? String, !venue.isEmpty {
+                e.destinationAddress = venue
+                // Old coordinates would contradict the new venue.
+                e.destinationLat = nil
+                e.destinationLng = nil
+                changes.append("venue → \(venue)")
+            }
+            if let start = minutesFrom(input["new_start"] as? String) {
+                let duration = max(0, e.endMinute - e.startMinute)
+                e.startMinute = start
+                if input["new_end"] == nil { e.endMinute = min(24 * 60, start + duration) }
+                changes.append("start → \(hhmm(start))")
+            }
+            if let end = minutesFrom(input["new_end"] as? String) {
+                e.endMinute = end
+                changes.append("end → \(hhmm(end))")
+            }
+            if let newTitle = input["new_title"] as? String, !newTitle.isEmpty {
+                e.title = newTitle
+                changes.append("title → \(newTitle)")
+            }
+        }
+        modelContext.saveOrLog()
+        let days = matches.map { JeevesChatView.dayString($0.date) }.joined(separator: ", ")
+        return .init(text: "Updated \(matches.count) event(s) (\(days)): \(Set(changes).joined(separator: "; ")).")
+    }
+
+    @MainActor
+    private func toolDeleteEvent(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let title = input["title"] as? String ?? ""
+        let matches = eventsMatching(title, dateRaw: input["date"] as? String)
+        guard !matches.isEmpty else {
+            return .init(text: "No future event matches '\(title)' — nothing deleted.")
+        }
+        let summary = matches.map { "\($0.title) (\(JeevesChatView.dayString($0.date)))" }.joined(separator: ", ")
+        for e in matches { modelContext.delete(e) }
+        modelContext.saveOrLog()
+        return .init(text: "Deleted \(matches.count) event(s): \(summary).")
+    }
+
+    // MARK: Commute estimate (eval finding: "when should I leave")
+
+    @MainActor
+    private func toolCommuteEstimate(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
+        let destination = input["destination"] as? String ?? ""
+        guard !destination.isEmpty, let arriveMinute = minutesFrom(input["arrive_by"] as? String) else {
+            return .init(text: "Need a destination and an arrive_by time (HH:MM).")
+        }
+        // Named origins resolve through the user's saved locations.
+        let originRaw = (input["origin"] as? String ?? "Home")
+        let origin = locations.first { $0.kind.rawValue.lowercased() == originRaw.lowercased() }
+            .map(\.address).flatMap { $0.isEmpty ? nil : $0 } ?? originRaw
+        let day = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: Date())
+        let arrival = Calendar.current.date(bySettingHour: arriveMinute / 60, minute: arriveMinute % 60,
+                                            second: 0, of: day) ?? day
+        guard let minutes = await GoogleMapsService.commuteMinutes(
+            from: origin, to: destination,
+            departure: max(arrival.addingTimeInterval(-3600), Date())) else {
+            return .init(text: "Couldn't get a route from \(origin) to \(destination) — the Maps key may be missing or the place ambiguous.")
+        }
+        let buffer = 10
+        let leave = arrival.addingTimeInterval(-Double((minutes + buffer) * 60))
+        let f = DateFormatter(); f.dateFormat = "HH:mm"
+        return .init(text: "Drive \(origin) → \(destination): about \(minutes) min with traffic. To arrive by \(hhmm(arriveMinute)) on \(JeevesChatView.dayString(day)), leave around \(f.string(from: leave)) (includes a \(buffer)-min buffer).")
+    }
+
+    // MARK: Fitness capture
+
+    @MainActor
+    private func toolLogWalk(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        guard let minutes = input["minutes"] as? Int, minutes > 0 else {
+            return .init(text: "Need the walk's minutes.")
+        }
+        let incline = input["incline_percent"] as? Double ?? 0
+        let day = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: Date())
+        let date = Calendar.current.isDateInToday(day) ? Date() : day
+        let workout = Workout(date: date, type: .walk, state: .done, source: .manual,
+                              title: "Walk", durationMin: minutes, inclinePercent: incline)
+        modelContext.insert(workout)
+        modelContext.saveOrLog()
+        return .init(text: "Walk logged: \(minutes) min\(incline > 0 ? " at \(incline)% incline" : "") on \(JeevesChatView.dayString(day)). The day's check-in cardio ticks itself.")
+    }
+
+    @MainActor
+    private func toolMarkBlockDone(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let query = input["block"] as? String ?? ""
+        let outcome: BlockOutcome = (input["outcome"] as? String) == "skipped" ? .skipped : .done
+        guard let state = todayPlanState, let plan = state.plan else {
+            return .init(text: "No plan exists for today, so there's no block to check off.")
+        }
+        let matches = plan.blocks.filter { JeevesChatService.fuzzyMatch($0.title, query: query) }
+        guard !matches.isEmpty else {
+            let names = plan.blocks.map(\.title).joined(separator: ", ")
+            return .init(text: "No block matches '\(query)'. Today's blocks: \(names).")
+        }
+        for block in matches { state.setManualOutcome(outcome, forKey: AdherenceEngine.key(block)) }
+        modelContext.saveOrLog()
+        return .init(text: "Marked \(outcome == .done ? "done" : "skipped"): \(matches.map(\.title).joined(separator: ", ")).")
+    }
+
+    // MARK: Task completion / removal
+
+    @MainActor
+    private func toolCompleteTodo(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let title = input["title"] as? String ?? ""
+        let open = ((try? modelContext.fetch(FetchDescriptor<Todo>())) ?? [])
+            .filter { $0.doneAt == nil && JeevesChatService.fuzzyMatch($0.title, query: title) }
+        guard !open.isEmpty else { return .init(text: "No open to-do matches '\(title)'.") }
+        for t in open { t.doneAt = Date() }
+        modelContext.saveOrLog()
+        return .init(text: "Done: \(open.map(\.title).joined(separator: ", ")).")
+    }
+
+    @MainActor
+    private func toolDeleteTodo(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let title = input["title"] as? String ?? ""
+        let matches = ((try? modelContext.fetch(FetchDescriptor<Todo>())) ?? [])
+            .filter { JeevesChatService.fuzzyMatch($0.title, query: title) }
+        guard !matches.isEmpty else { return .init(text: "No to-do matches '\(title)'.") }
+        let names = matches.map(\.title).joined(separator: ", ")
+        for t in matches { modelContext.delete(t) }
+        modelContext.saveOrLog()
+        return .init(text: "Deleted to-do(s): \(names).")
+    }
+
+    @MainActor
+    private func toolDeleteReminder(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let title = input["title"] as? String ?? ""
+        let all = (try? modelContext.fetch(FetchDescriptor<Reminder>())) ?? []
+        let matches = all.filter { JeevesChatService.fuzzyMatch($0.title, query: title) }
+        guard !matches.isEmpty else { return .init(text: "No reminder matches '\(title)'.") }
+        let names = matches.map(\.title).joined(separator: ", ")
+        for r in matches { modelContext.delete(r) }
+        modelContext.saveOrLog()
+        ReminderScheduler.reschedule(all.filter { !matches.contains($0) && $0.isActive })
+        return .init(text: "Deleted reminder(s): \(names) — their notifications are cancelled.")
+    }
+
+    // MARK: History + standing preferences
+
+    @MainActor
+    private func toolFetchChatHistory(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let daysBack = input["days_back"] as? Int ?? 7
+        let query = input["query"] as? String
+        let cutoff = Calendar.current.date(byAdding: .day, value: -max(1, daysBack), to: Date()) ?? Date()
+        var rows = allTurns.filter { $0.timestamp >= cutoff && !$0.content.isEmpty }
+        if let query, !query.isEmpty {
+            rows = rows.filter { JeevesChatService.fuzzyMatch($0.content, query: query) }
+        }
+        let f = DateFormatter(); f.dateFormat = "d MMM HH:mm"
+        let capped = rows.suffix(80).map {
+            ["t": f.string(from: $0.timestamp), "role": $0.roleRaw,
+             "text": String($0.content.prefix(200))]
+        }
+        let obj: [String: Any] = ["count": rows.count, "shown": capped.count, "turns": capped]
+        let data = (try? JSONSerialization.data(withJSONObject: obj)) ?? Data()
+        return .init(text: String(data: data, encoding: .utf8) ?? "{}")
+    }
+
+    @MainActor
+    private func toolRememberPreference(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let note = input["note"] as? String ?? ""
+        guard !note.isEmpty else { return .init(text: "Preference note was empty.") }
+        if input["forget"] as? Bool == true {
+            let removed = StandingPrefs.forget(matching: note)
+            return .init(text: removed > 0 ? "Forgot \(removed) preference(s) matching '\(note)'."
+                                           : "No stored preference matches '\(note)'.")
+        }
+        StandingPrefs.add(note)
+        return .init(text: "Remembered: '\(note)'. Current standing preferences: \(StandingPrefs.all().joined(separator: " | ")).")
     }
 
     // MARK: fetch_app_data — the read side of the chat
@@ -729,6 +946,11 @@ struct JeevesChatView: View {
             lines.append("No gym set for today.")
         }
         if todayPlanState?.plan != nil { lines.append("A plan for today already exists — planning again replaces it.") }
+        let prefs = StandingPrefs.all()
+        if !prefs.isEmpty {
+            lines.append("STANDING PREFERENCES (persist across days; honor without re-asking): "
+                         + prefs.map { "\u{2022} \($0)" }.joined(separator: " "))
+        }
         return "CURRENT STATE (today = \(dayLabel(today))):\n" + lines.joined(separator: "\n")
     }
 

@@ -43,6 +43,36 @@ enum JeevesChatError: LocalizedError {
     }
 }
 
+/// Standing preferences the user asked Jeeves to remember ("gym is always
+/// 7pm"). Stored in UserDefaults, injected into every agentic turn's state
+/// note, editable through the remember_preference tool.
+enum StandingPrefs {
+    static let key = "jeevesStandingPrefs"
+
+    static func all() -> [String] {
+        UserDefaults.standard.stringArray(forKey: key) ?? []
+    }
+
+    static func add(_ note: String) {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var prefs = all()
+        guard !prefs.contains(where: { JeevesChatService.fuzzyMatch($0, query: trimmed) }) else { return }
+        prefs.append(trimmed)
+        UserDefaults.standard.set(prefs, forKey: key)
+    }
+
+    /// Removes stored preferences matching the note; returns how many went.
+    @discardableResult
+    static func forget(matching note: String) -> Int {
+        var prefs = all()
+        let before = prefs.count
+        prefs.removeAll { JeevesChatService.fuzzyMatch($0, query: note) }
+        UserDefaults.standard.set(prefs, forKey: key)
+        return before - prefs.count
+    }
+}
+
 enum JeevesChatService {
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
     private static let model = "claude-sonnet-5"
@@ -167,6 +197,22 @@ enum JeevesChatService {
     - If the user declined an offer this conversation, don't offer it again. \
     When re-checking something (like the calendar) repeatedly, keep repeat \
     reports to one short line — vary the wording, never re-explain.
+    - Activity questions span collections: walks live in BOTH workouts and \
+    checkins (cardio fields), runs in runs + workouts. Check every relevant \
+    collection before saying "nothing logged". When reporting lift tonnage, say \
+    whether the number is one session or the whole day.
+    - State a limitation UP FRONT the moment it's relevant — never promise a \
+    workaround (like re-adding an event) without being sure the tools support it.
+    - You can fix events now: edit_event changes venue/time/title, delete_event \
+    removes (confirm with the user before deleting). commute_estimate answers \
+    "when should I leave" with live traffic. mark_block_done checks off plan \
+    blocks ("done with gym"). log_walk records a walk (it auto-ticks the \
+    check-in). complete_todo / delete_todo / delete_reminder finish or remove \
+    tasks. fetch_chat_history searches older conversations when the user asks \
+    about something said before.
+    - When the user states a STANDING preference ("gym is always 7pm", "never \
+    schedule calls before 10"), call remember_preference — it persists across \
+    days and appears in your context. Honor listed preferences without re-asking.
     """
 
     private static let toolSchemas: [[String: Any]] = [
@@ -261,6 +307,129 @@ enum JeevesChatService {
                     "recurrence": ["type": "string", "enum": ["once", "daily", "weekdays", "weekly"], "description": "Default once."],
                 ],
                 "required": ["title", "time"],
+            ],
+        ],
+        [
+            "name": "edit_event",
+            "description": "Edit an existing event — change its venue, times, or title. Matches by (partial) title; all matching future events change together (a multi-day event's days all update). Use this instead of re-adding.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "title": ["type": "string", "description": "Existing event's name, or a distinctive part of it."],
+                    "date": ["type": "string", "description": "'today', 'tomorrow', or YYYY-MM-DD — limit the edit to that day. Omit to edit every future match."],
+                    "new_venue": ["type": "string", "description": "New place/address."],
+                    "new_start": ["type": "string", "description": "New 24-hour HH:MM start."],
+                    "new_end": ["type": "string", "description": "New 24-hour HH:MM end."],
+                    "new_title": ["type": "string", "description": "Rename the event."],
+                ],
+                "required": ["title"],
+            ],
+        ],
+        [
+            "name": "delete_event",
+            "description": "Delete event(s) matched by (partial) title — every future match, or one day's if date is given. CONFIRM with the user before calling this; it is not undoable.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "title": ["type": "string", "description": "Event name (or distinctive part) to delete."],
+                    "date": ["type": "string", "description": "'today', 'tomorrow', or YYYY-MM-DD to limit to one day. Omit to delete all future matches."],
+                ],
+                "required": ["title"],
+            ],
+        ],
+        [
+            "name": "commute_estimate",
+            "description": "Live-traffic commute estimate: how long the drive is and when to leave to arrive on time. Use for 'when should I leave for X'.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "destination": ["type": "string", "description": "Place name or address."],
+                    "arrive_by": ["type": "string", "description": "24-hour HH:MM target arrival."],
+                    "date": ["type": "string", "description": "'today', 'tomorrow', or YYYY-MM-DD. Default 'today'."],
+                    "origin": ["type": "string", "description": "'Home', 'Work', 'Gym', or an address. Default Home."],
+                ],
+                "required": ["destination", "arrive_by"],
+            ],
+        ],
+        [
+            "name": "log_walk",
+            "description": "Record a completed walk (it lands on the Fitness Today feed and auto-ticks the day's check-in cardio). Use when the user says they walked.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "minutes": ["type": "integer", "description": "Walk duration in minutes."],
+                    "incline_percent": ["type": "number", "description": "Treadmill incline %, if mentioned."],
+                    "date": ["type": "string", "description": "'today', 'tomorrow', or YYYY-MM-DD. Default 'today'."],
+                ],
+                "required": ["minutes"],
+            ],
+        ],
+        [
+            "name": "mark_block_done",
+            "description": "Check off a block in today's plan as done or skipped ('done with gym', 'skipped reading'). Feeds the adherence score.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "block": ["type": "string", "description": "The block's name or a distinctive part ('gym', 'reading', 'lunch')."],
+                    "outcome": ["type": "string", "enum": ["done", "skipped"], "description": "Default done."],
+                ],
+                "required": ["block"],
+            ],
+        ],
+        [
+            "name": "complete_todo",
+            "description": "Mark an open to-do as done, matched by (partial) title.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "title": ["type": "string", "description": "The to-do's title, or a distinctive part."],
+                ],
+                "required": ["title"],
+            ],
+        ],
+        [
+            "name": "delete_todo",
+            "description": "Delete a to-do entirely (open or done), matched by (partial) title.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "title": ["type": "string", "description": "The to-do's title, or a distinctive part."],
+                ],
+                "required": ["title"],
+            ],
+        ],
+        [
+            "name": "delete_reminder",
+            "description": "Delete a reminder (its pending notification is cancelled too), matched by (partial) title.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "title": ["type": "string", "description": "The reminder's title, or a distinctive part."],
+                ],
+                "required": ["title"],
+            ],
+        ],
+        [
+            "name": "fetch_chat_history",
+            "description": "Search older conversations (beyond the current session). Use when the user references something said before or asks to see older chats.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "days_back": ["type": "integer", "description": "How many days of history to read. Default 7."],
+                    "query": ["type": "string", "description": "Filter turns containing this text. Omit for everything in range."],
+                ],
+            ],
+        ],
+        [
+            "name": "remember_preference",
+            "description": "Persist a standing preference ('gym is always at 7pm', 'no calls before 10am') so it survives across days and sessions. Set forget=true to remove a stored preference that matches the note.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "note": ["type": "string", "description": "The preference, short and self-contained."],
+                    "forget": ["type": "boolean", "description": "true = remove stored preferences matching this text instead of adding."],
+                ],
+                "required": ["note"],
             ],
         ],
         [
@@ -400,6 +569,15 @@ enum JeevesChatService {
                                   "note": "longestUnbrokenRunMinutes is the continuous-run length that week"]
         let data = (try? JSONSerialization.data(withJSONObject: obj)) ?? Data()
         return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
+    /// Case/whitespace-insensitive containment — how every "match by partial
+    /// title" tool finds its target. Pure and unit-tested.
+    nonisolated static func fuzzyMatch(_ text: String, query: String) -> Bool {
+        let t = text.lowercased().trimmingCharacters(in: .whitespaces)
+        let q = query.lowercased().trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return false }
+        return t.contains(q) || q.contains(t)
     }
 
     // MARK: - Transport
