@@ -23,10 +23,10 @@ struct TasksView: View {
                     Button { sub = s } label: {
                         Text(s.label)
                             .font(.system(size: 12.5, weight: .bold))
-                            .foregroundStyle(sub == s ? Color.accentDeep : Color.textSoft)
+                            .foregroundStyle(sub == s ? .white : Color.textSoft)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
-                            .background(RoundedRectangle(cornerRadius: 9).fill(sub == s ? Color.surface : Color.clear))
+                            .background(RoundedRectangle(cornerRadius: 9).fill(sub == s ? Color.accent : Color.clear))
                     }
                     .buttonStyle(.plain)
                 }

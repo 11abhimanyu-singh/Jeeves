@@ -97,10 +97,24 @@ struct RemindersListView: View {
                 Text("Snooze").font(.system(size: 11.5, weight: .bold)).foregroundStyle(Color.accentDeep)
             }
             .buttonStyle(.plain)
+            Button { delete(r) } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.textMuted)
+                    .padding(.leading, 4)
+            }
+            .buttonStyle(.plain)
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.surface))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.textPrimary.opacity(0.06), lineWidth: 1))
+    }
+
+    /// Remove a reminder entirely — and its pending notification with it.
+    private func delete(_ r: Reminder) {
+        modelContext.delete(r)
+        modelContext.saveOrLog()
+        rescheduleAll()
     }
 
     // MARK: Add sheet

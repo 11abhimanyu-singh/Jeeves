@@ -130,6 +130,14 @@ struct TodosListView: View {
             if let due = todo.dueDate {
                 dueBadge(due)
             }
+
+            Button { delete(todo) } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.textMuted)
+                    .padding(.leading, 2)
+            }
+            .buttonStyle(.plain)
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.surface))
@@ -195,9 +203,22 @@ struct TodosListView: View {
                 .lineLimit(2)
 
             Spacer(minLength: 8)
+
+            Button { delete(todo) } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.textMuted)
+            }
+            .buttonStyle(.plain)
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.surface.opacity(0.55)))
+    }
+
+    /// Remove a to-do entirely (works for open and done items).
+    private func delete(_ todo: Todo) {
+        modelContext.delete(todo)
+        modelContext.saveOrLog()
     }
 
     // MARK: Empty state
