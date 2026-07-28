@@ -545,7 +545,20 @@ struct WorkoutLiftView: View {
                     Section {
                         ForEach(section.exercises) { ex in
                             Button {
-                                exercises.append(DraftExercise(name: ex.name, sets: [DraftSet()]))
+                                // One block per exercise: picking one that's
+                                // already in the workout adds a set to it
+                                // (prefilled from its last set) instead of
+                                // creating a duplicate block.
+                                if let i = exercises.firstIndex(where: { $0.name == ex.name }) {
+                                    let base = exercises[i].sets.last ?? DraftSet()
+                                    exercises[i].sets.append(DraftSet(
+                                        inputType: base.inputType, reps: base.reps,
+                                        weightKg: base.weightKg, addedKg: base.addedKg,
+                                        bodyweightKg: base.bodyweightKg,
+                                        holdSeconds: base.holdSeconds))
+                                } else {
+                                    exercises.append(DraftExercise(name: ex.name, sets: [DraftSet()]))
+                                }
                                 showPicker = false
                                 pickerSearch = ""
                             } label: {
@@ -623,7 +636,7 @@ struct WorkoutLiftView: View {
             .sorted { $0.date < $1.date }
         guard !sessions.isEmpty else { return }
         let allSets = ((try? modelContext.fetch(FetchDescriptor<LiftSet>())) ?? [])
-        exercises = sessions.map { s in
+        let drafts = sessions.map { s in
             let sets = allSets.filter { $0.sessionID == s.id }.sorted { $0.order < $1.order }
                 .map { ls in
                     DraftSet(inputType: ls.inputType, reps: ls.reps, weightKg: ls.weightKg,
@@ -632,6 +645,17 @@ struct WorkoutLiftView: View {
                 }
             return DraftExercise(name: s.exerciseName, sets: sets)
         }
+        // Merge same-named blocks (older workouts could hold duplicates): all
+        // of an exercise's sets live under one entry, in logged order.
+        var merged: [DraftExercise] = []
+        for e in drafts {
+            if let i = merged.firstIndex(where: { $0.name == e.name }) {
+                merged[i].sets.append(contentsOf: e.sets)
+            } else {
+                merged.append(e)
+            }
+        }
+        exercises = merged
     }
 
     /// One save covers the whole session: replace the workout's persisted
