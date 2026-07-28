@@ -64,21 +64,32 @@ enum GoogleMapsService {
         request.setValue("routes.duration", forHTTPHeaderField: "X-Goog-FieldMask")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
+            return parseMinutes(data)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Pure decode + map of the Routes API (computeRoutes) response into rounded
+    /// driving minutes. Extracted from the network call so it can be unit-tested
+    /// against real payloads with no key and no round-trip. Reads the first
+    /// route's `duration` — a protobuf-style seconds string like "2491s" (which
+    /// can carry a fractional part, e.g. "150.5s") — and rounds to whole minutes.
+    /// Returns nil, not a throw, on empty routes, a missing/malformed duration,
+    /// an API error body, or junk — so a failed route falls back to the user's
+    /// default commute minutes.
+    static func parseMinutes(_ data: Data) -> Int? {
         struct Response: Decodable {
             struct Route: Decodable { let duration: String? } // e.g. "2491s"
             let routes: [Route]
         }
-
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
-            let decoded = try JSONDecoder().decode(Response.self, from: data)
-            guard let durationString = decoded.routes.first?.duration,
-                  let seconds = Double(durationString.replacingOccurrences(of: "s", with: "")) else { return nil }
-            return Int((seconds / 60).rounded())
-        } catch {
-            return nil
-        }
+        guard let decoded = try? JSONDecoder().decode(Response.self, from: data),
+              let durationString = decoded.routes.first?.duration,
+              let seconds = Double(durationString.replacingOccurrences(of: "s", with: "")) else { return nil }
+        return Int((seconds / 60).rounded())
     }
 
     /// Resolves the commute legs a plan needs, keyed "From→To" to match the
@@ -137,6 +148,72 @@ enum GoogleMapsService {
             return .location(lat: c.lat, lng: c.lng)
         }
         return .address(s)
+    }
+
+    /// A place identified from a Maps link: a human-readable name, the full
+    /// street address (reverse-geocoded from the pin, when possible), and the
+    /// exact pin coordinates when the URL exposes them.
+    nonisolated struct ResolvedPlace: Equatable, Sendable {
+        var name: String
+        var address: String?
+        var lat: Double?
+        var lng: Double?
+        /// The best string to store/route with: full address if we have it, else
+        /// the place name.
+        var displayAddress: String { address ?? name }
+    }
+
+    /// Identifies a Google Maps link as a place — e.g. a pasted
+    /// `https://maps.app.goo.gl/…` becomes "BlueStone Jewellery Koramangala" with
+    /// a full street address and pin. Expands a short link if needed, reads the
+    /// name from `/maps/place/<NAME>/` and the pin from `!3d…!4d…`, then
+    /// reverse-geocodes the pin to a full address. Returns nil for non-links or
+    /// anything it can't resolve (the caller keeps the raw text — no regression).
+    static func resolvePlace(_ raw: String) async -> ResolvedPlace? {
+        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isMapsLink(s) else { return nil }
+        // Parse the URL directly first; expand a short link only if we still lack
+        // the name or the pin.
+        var name = placeName(fromText: s)
+        var coord = extractCoordinates(fromText: s)
+        if name == nil || coord == nil, let text = await expand(s) {
+            name = name ?? placeName(fromText: text)
+            coord = coord ?? extractCoordinates(fromText: text)
+        }
+        guard name != nil || coord != nil else { return nil }
+        var address: String? = nil
+        if let c = coord { address = await reverseGeocode(lat: c.lat, lng: c.lng) }
+        return ResolvedPlace(name: name ?? "Pinned location", address: address,
+                             lat: coord?.lat, lng: coord?.lng)
+    }
+
+    /// Reverse-geocodes a pin to a full formatted street address via the
+    /// Geocoding API. Nil if there's no key, no network, or no result — callers
+    /// fall back to the place name.
+    static func reverseGeocode(lat: Double, lng: Double) async -> String? {
+        guard let key = KeychainService.loadGoogleMapsAPIKey(), !key.isEmpty,
+              let url = URL(string: "https://maps.googleapis.com/maps/api/geocode/json?latlng=\(lat),\(lng)&key=\(key)")
+        else { return nil }
+        guard let (data, response) = try? await URLSession.shared.data(from: url),
+              let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
+        struct GeoResponse: Decodable {
+            struct Result: Decodable { let formatted_address: String }
+            let results: [Result]
+        }
+        return (try? JSONDecoder().decode(GeoResponse.self, from: data))?.results.first?.formatted_address
+    }
+
+    /// Pulls the place name from a Maps URL's `/maps/place/<NAME>/` segment,
+    /// turning "BlueStone+Jewellery+Koramangala" into "BlueStone Jewellery
+    /// Koramangala". Pure — nil when the URL has no place segment.
+    static func placeName(fromText text: String) -> String? {
+        guard let re = try? NSRegularExpression(pattern: #"/maps/place/([^/@?]+)"#),
+              let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let r = Range(m.range(at: 1), in: text) else { return nil }
+        let spaced = String(text[r]).replacingOccurrences(of: "+", with: " ")
+        let name = (spaced.removingPercentEncoding ?? spaced)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
     }
 
     /// True for a Google Maps URL (short share link or a maps.google.com URL).

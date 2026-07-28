@@ -79,13 +79,33 @@ enum AnchorExtractionService {
             throw PlanGenerationError.requestFailed(message ?? "Extraction request failed.")
         }
 
+        guard let anchors = parse(data) else {
+            throw PlanGenerationError.unparsableResponse
+        }
+        return anchors
+    }
+
+    /// Pure decode of an Anthropic Messages response into ExtractedAnchors.
+    /// Extracted out of the network call so it can be unit-tested against real
+    /// payloads with no API key and no round-trip (the way
+    /// GoogleCalendarService.parse is). This owns the *whole* text→anchors
+    /// pipeline: pull the assistant text out of the message envelope, strip any
+    /// ```json fences and surrounding prose, then decode the anchor JSON.
+    /// Returns nil for a malformed/empty/text-less response, or when the text
+    /// isn't parseable anchor JSON — mirroring GoogleCalendarService.parse
+    /// returning [] on bad input; the caller maps that nil to
+    /// `.unparsableResponse`. A valid but empty result
+    /// (`{"events": [], "gymToday": null, "gymTime": null}`) decodes normally —
+    /// it is NOT nil.
+    static func parse(_ data: Data) -> ExtractedAnchors? {
         struct MessageResponse: Decodable {
             struct ContentBlock: Decodable { let type: String; let text: String? }
             let content: [ContentBlock]
         }
-        let decoded = try JSONDecoder().decode(MessageResponse.self, from: data)
-        guard let text = decoded.content.first(where: { $0.type == "text" })?.text, !text.isEmpty else {
-            throw PlanGenerationError.emptyResponse
+        guard let decoded = try? JSONDecoder().decode(MessageResponse.self, from: data),
+              let text = decoded.content.first(where: { $0.type == "text" })?.text,
+              !text.isEmpty else {
+            return nil
         }
 
         var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -95,7 +115,7 @@ enum AnchorExtractionService {
         }
         guard let jsonData = cleaned.data(using: .utf8),
               let anchors = try? JSONDecoder().decode(ExtractedAnchors.self, from: jsonData) else {
-            throw PlanGenerationError.unparsableResponse
+            return nil
         }
         return anchors
     }

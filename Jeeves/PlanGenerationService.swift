@@ -93,26 +93,56 @@ enum PlanGenerationService {
             throw PlanGenerationError.requestFailed(message ?? "Request failed (\(http.statusCode)).")
         }
 
-        struct MessageResponse: Decodable {
-            struct ContentBlock: Decodable { let type: String; let text: String? }
-            let content: [ContentBlock]
-        }
-        let decoded = try JSONDecoder().decode(MessageResponse.self, from: data)
-        guard let text = decoded.content.first(where: { $0.type == "text" })?.text, !text.isEmpty else {
+        guard let text = extractText(from: data) else {
             #if DEBUG
             print("=== RAW PLAN RESPONSE ===\n\(String(data: data, encoding: .utf8) ?? "nil")\n=== END RAW ===")
             #endif
             throw PlanGenerationError.emptyResponse
         }
-
-        // Claude may wrap JSON in prose or a code fence despite instructions;
-        // extract the outermost {...} object before decoding.
-        let cleaned = extractJSONObject(from: text)
-        guard let jsonData = cleaned.data(using: .utf8),
-              let plan = try? JSONDecoder().decode(GeneratedPlan.self, from: jsonData) else {
+        guard let plan = decodePlan(from: text) else {
             throw PlanGenerationError.unparsableResponse
         }
         return plan
+    }
+
+    // MARK: Response parsing (pure, testable — no network, no key)
+
+    /// Pulls the assistant's text out of an Anthropic Messages API response body.
+    /// The response shape is `{ "content": [ {"type":"text","text":"..."} ], ... }`;
+    /// with adaptive thinking a `{"type":"thinking",...}` block (which carries no
+    /// `text`) can precede the text block, and a tool_use-only reply or an empty
+    /// `content` array has no text block at all. Mirrors GoogleCalendarService.parse:
+    /// returns nil on a body it can't decode or one with no usable text block,
+    /// rather than throwing — the network caller maps nil to `.emptyResponse`.
+    static func extractText(from data: Data) -> String? {
+        struct MessageResponse: Decodable {
+            struct ContentBlock: Decodable { let type: String; let text: String? }
+            let content: [ContentBlock]
+        }
+        guard let decoded = try? JSONDecoder().decode(MessageResponse.self, from: data) else { return nil }
+        guard let text = decoded.content.first(where: { $0.type == "text" })?.text, !text.isEmpty else { return nil }
+        return text
+    }
+
+    /// Decodes a GeneratedPlan from the assistant's text. Claude may wrap the JSON
+    /// in prose or a ```json code fence despite instructions, so the outermost
+    /// {...} object is extracted first. Returns nil on unparsable text — the
+    /// network caller maps nil to `.unparsableResponse`.
+    static func decodePlan(from text: String) -> GeneratedPlan? {
+        let cleaned = extractJSONObject(from: text)
+        guard let jsonData = cleaned.data(using: .utf8),
+              let plan = try? JSONDecoder().decode(GeneratedPlan.self, from: jsonData) else {
+            return nil
+        }
+        return plan
+    }
+
+    /// Full pure pipeline: Anthropic response body → GeneratedPlan (or nil). A
+    /// convenience over `extractText` + `decodePlan` for tests and callers that
+    /// don't need to tell "no text" apart from "unparsable plan".
+    static func parse(_ data: Data) -> GeneratedPlan? {
+        guard let text = extractText(from: data) else { return nil }
+        return decodePlan(from: text)
     }
 
     private static func extractJSONObject(from text: String) -> String {
@@ -204,8 +234,11 @@ enum PlanGenerationService {
         } else {
             s += "- No gym today.\n"
         }
-        for e in req.events {
+        for e in req.events where !e.isAllDay {
             s += "- Event: \"\(e.title)\" \(hhmm(e.startMinute))–\(hhmm(e.endMinute)), at \(e.destinationAddress.isEmpty ? "(address not given)" : e.destinationAddress), leaving from \(e.outboundStart.rawValue). Return is always Event → Home.\n"
+        }
+        for e in req.events where e.isAllDay {
+            s += "- All-day: \"\(e.title)\" — occupies the whole day (context only; do NOT create a timed block for it, just plan the day sensibly around it).\n"
         }
         s += "\n"
 

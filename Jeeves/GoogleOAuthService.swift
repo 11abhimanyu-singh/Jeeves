@@ -33,6 +33,18 @@ enum GoogleOAuthError: LocalizedError {
     }
 }
 
+/// Decoded shape of Google's OAuth token-endpoint response — or of an error body.
+/// A plain value type so `GoogleOAuthService.parseToken` stays pure and its result
+/// is trivially assertable in tests. Every field is optional on purpose: a refresh
+/// response omits `refresh_token`, and an error body carries only `error` /
+/// `error_description` (no access token, no expiry).
+nonisolated struct GoogleTokenResponse: Equatable, Sendable {
+    let accessToken: String?
+    let refreshToken: String?
+    let expiresIn: Int?
+    let error: String?
+}
+
 @MainActor
 final class GoogleOAuthService: NSObject {
     static let shared = GoogleOAuthService()
@@ -95,6 +107,30 @@ final class GoogleOAuthService: NSObject {
         KeychainService.deleteGoogleTokens()
     }
 
+    // MARK: Token parsing
+
+    /// Pure parse of Google's token-endpoint JSON, shared by exchangeCode and
+    /// refreshAccessToken. Extracted from the network call so it can be unit-tested
+    /// against real token / refresh / error payloads with no round-trip and no
+    /// secrets. Returns all-nil fields on malformed input rather than throwing —
+    /// the caller decides what a missing access_token/expires_in means (mirrors
+    /// GoogleCalendarService.parse returning []).
+    nonisolated static func parseToken(_ data: Data) -> GoogleTokenResponse {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return GoogleTokenResponse(accessToken: nil, refreshToken: nil, expiresIn: nil, error: nil)
+        }
+        return GoogleTokenResponse(
+            accessToken: json["access_token"] as? String,
+            refreshToken: json["refresh_token"] as? String,
+            // expires_in comes back as a JSON number; read via NSNumber so an
+            // integer or (defensively) a floating value both map to whole seconds.
+            expiresIn: (json["expires_in"] as? NSNumber)?.intValue,
+            // Google surfaces the human-readable reason in error_description and a
+            // machine code in error; prefer the description, fall back to the code.
+            error: (json["error_description"] as? String) ?? (json["error"] as? String)
+        )
+    }
+
     // MARK: Token calls
 
     private func exchangeCode(_ code: String, clientID: String, redirectURI: String, verifier: String) async throws {
@@ -105,13 +141,13 @@ final class GoogleOAuthService: NSObject {
             "grant_type": "authorization_code",
             "code_verifier": verifier,
         ]
-        let json = try await postForm(params)
-        guard let access = json["access_token"] as? String,
-              let expiresIn = json["expires_in"] as? Double else {
-            throw GoogleOAuthError.tokenExchangeFailed(errorMessage(json) ?? "no access token")
+        let data = try await postForm(params)
+        let token = Self.parseToken(data)
+        guard let access = token.accessToken, let expiresIn = token.expiresIn else {
+            throw GoogleOAuthError.tokenExchangeFailed(token.error ?? "no access token")
         }
-        let refresh = json["refresh_token"] as? String
-        KeychainService.saveGoogleTokens(access: access, refresh: refresh, expiry: Date().addingTimeInterval(expiresIn))
+        KeychainService.saveGoogleTokens(access: access, refresh: token.refreshToken,
+                                         expiry: Date().addingTimeInterval(TimeInterval(expiresIn)))
     }
 
     private func refreshAccessToken(refresh: String, clientID: String) async throws -> String {
@@ -120,16 +156,16 @@ final class GoogleOAuthService: NSObject {
             "refresh_token": refresh,
             "grant_type": "refresh_token",
         ]
-        let json = try await postForm(params)
-        guard let access = json["access_token"] as? String,
-              let expiresIn = json["expires_in"] as? Double else {
-            throw GoogleOAuthError.tokenExchangeFailed(errorMessage(json) ?? "refresh failed")
+        let data = try await postForm(params)
+        let token = Self.parseToken(data)
+        guard let access = token.accessToken, let expiresIn = token.expiresIn else {
+            throw GoogleOAuthError.tokenExchangeFailed(token.error ?? "refresh failed")
         }
-        KeychainService.updateGoogleAccessToken(access, expiry: Date().addingTimeInterval(expiresIn))
+        KeychainService.updateGoogleAccessToken(access, expiry: Date().addingTimeInterval(TimeInterval(expiresIn)))
         return access
     }
 
-    private func postForm(_ params: [String: String]) async throws -> [String: Any] {
+    private func postForm(_ params: [String: String]) async throws -> Data {
         var request = URLRequest(url: URL(string: tokenEndpoint)!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -138,11 +174,7 @@ final class GoogleOAuthService: NSObject {
             .joined(separator: "&")
             .data(using: .utf8)
         let (data, _) = try await URLSession.shared.data(for: request)
-        return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
-    }
-
-    private func errorMessage(_ json: [String: Any]) -> String? {
-        (json["error_description"] as? String) ?? (json["error"] as? String)
+        return data
     }
 
     // MARK: ASWebAuthenticationSession

@@ -24,19 +24,6 @@ enum BookMetadataService {
 
     // MARK: Open Library
 
-    private struct OpenLibraryResponse: Decodable {
-        struct Doc: Decodable {
-            let isbn: [String]?
-            let coverID: Int?
-
-            enum CodingKeys: String, CodingKey {
-                case isbn
-                case coverID = "cover_i"
-            }
-        }
-        let docs: [Doc]
-    }
-
     private static func fetchFromOpenLibrary(title: String, author: String) async -> (isbn: String?, thumbnailURLString: String?) {
         var components = URLComponents(string: "https://openlibrary.org/search.json")
         components?.queryItems = [
@@ -49,16 +36,37 @@ enum BookMetadataService {
 
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
-            let decoded = try JSONDecoder().decode(OpenLibraryResponse.self, from: data)
-            guard let doc = decoded.docs.first else { return (nil, nil) }
-
-            // Prefer a 13-digit ISBN if one's in the list, else take whatever's first.
-            let isbn = doc.isbn?.first { $0.count == 13 } ?? doc.isbn?.first
-            let thumbnail = doc.coverID.map { "https://covers.openlibrary.org/b/id/\($0)-M.jpg" }
-            return (isbn, thumbnail)
+            return parse(data)
         } catch {
             return (nil, nil)
         }
+    }
+
+    /// Pure decode + map of an Open Library `search.json` payload into an
+    /// (isbn, thumbnail) pair from the first doc. Extracted from the network
+    /// call so it can be unit-tested against real payloads — including a doc
+    /// with no cover or no ISBN, zero results, and junk — with no round-trip.
+    /// Returns (nil, nil) on malformed JSON rather than throwing.
+    static func parse(_ data: Data) -> (isbn: String?, thumbnailURLString: String?) {
+        struct OpenLibraryResponse: Decodable {
+            struct Doc: Decodable {
+                let isbn: [String]?
+                let coverID: Int?
+
+                enum CodingKeys: String, CodingKey {
+                    case isbn
+                    case coverID = "cover_i"
+                }
+            }
+            let docs: [Doc]
+        }
+        guard let decoded = try? JSONDecoder().decode(OpenLibraryResponse.self, from: data),
+              let doc = decoded.docs.first else { return (nil, nil) }
+
+        // Prefer a 13-digit ISBN if one's in the list, else take whatever's first.
+        let isbn = doc.isbn?.first { $0.count == 13 } ?? doc.isbn?.first
+        let thumbnail = doc.coverID.map { "https://covers.openlibrary.org/b/id/\($0)-M.jpg" }
+        return (isbn, thumbnail)
     }
 
     // MARK: Google Books (fallback, requires a user-supplied key)

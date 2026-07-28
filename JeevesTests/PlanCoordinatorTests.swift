@@ -200,6 +200,40 @@ final class PlanCoordinatorTests: XCTestCase {
         XCTAssertNil(GoogleMapsService.extractCoordinates(fromText: "@200.0,999.0"), "impossible earth coords are rejected")
     }
 
+    func testPlaceNameFromExpandedShareLinkURL() {
+        // The exact URL a maps.app.goo.gl/… link expands to — name in the /place/
+        // path, pin in !3d…!4d… (12.9351856 / 77.6245997), viewport centre in @.
+        let url = "https://www.google.com/maps/place/BlueStone+Jewellery+Koramangala/@12.9351856,77.6220248,971m/data=!3m2!1e3!4b1!4m6!3m5!8m2!3d12.9351856!4d77.6245997"
+        XCTAssertEqual(GoogleMapsService.placeName(fromText: url), "BlueStone Jewellery Koramangala")
+        let c = GoogleMapsService.extractCoordinates(fromText: url)
+        XCTAssertEqual(c?.lat, 12.9351856)
+        XCTAssertEqual(c?.lng, 77.6245997)
+    }
+
+    func testPlaceNamePercentDecodesAndStopsBeforeCoords() {
+        let url = "https://www.google.com/maps/place/Caf%C3%A9+Noir/@40.0,-74.0,15z"
+        XCTAssertEqual(GoogleMapsService.placeName(fromText: url), "Café Noir")
+    }
+
+    func testPlaceNameNilWhenNoPlaceSegment() {
+        XCTAssertNil(GoogleMapsService.placeName(fromText: "https://www.google.com/maps/@48.8584,2.2945,15z"))
+        XCTAssertNil(GoogleMapsService.placeName(fromText: "MLR Convention Centre, Bengaluru"))
+    }
+
+    /// A long maps URL that already carries the name resolves with no network.
+    func testResolvePlaceFromFullURLNeedsNoNetwork() async {
+        let url = "https://www.google.com/maps/place/BlueStone+Jewellery+Koramangala/@12.9351856,77.6220248,971m/data=!4m6!3m5!8m2!3d12.9351856!4d77.6245997"
+        let place = await GoogleMapsService.resolvePlace(url)
+        XCTAssertEqual(place?.name, "BlueStone Jewellery Koramangala")
+        XCTAssertEqual(place?.lat, 12.9351856)
+        XCTAssertEqual(place?.lng, 77.6245997)
+    }
+
+    func testResolvePlaceNilForPlainAddress() async {
+        let place = await GoogleMapsService.resolvePlace("MLR Convention Centre, Bengaluru")
+        XCTAssertNil(place)
+    }
+
     /// A plain address must resolve to an .address waypoint without any network.
     func testResolveWaypointPassesPlainAddressThrough() async {
         let wp = await GoogleMapsService.resolveWaypoint("MLR Convention Centre, Bengaluru")

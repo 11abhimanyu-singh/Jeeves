@@ -71,17 +71,52 @@ enum OpenAIJudgeService {
             throw OpenAIJudgeError.requestFailed(message ?? "OpenAI request failed (\(http.statusCode)).")
         }
 
+        guard let verdict = parse(data) else {
+            throw OpenAIJudgeError.unparsable
+        }
+        return verdict
+    }
+
+    /// Pure decode of the OpenAI chat-completions envelope into a `Verdict`.
+    /// Path: `choices[0].message.content` (the model's JSON) → decode `Verdict`.
+    /// Extracted from the network call so it can be unit-tested against real
+    /// payloads — including a ```json-fenced body, which models sometimes emit
+    /// and which the inline decode used to choke on — with no key and no
+    /// round-trip. Returns nil on any malformed input (mirrors GoogleCalendar
+    /// .parse returning []); the caller maps that nil to `.unparsable`.
+    static func parse(_ data: Data) -> Verdict? {
         struct ChatResponse: Decodable {
             struct Choice: Decodable { struct Message: Decodable { let content: String }; let message: Message }
             let choices: [Choice]
         }
         guard let decoded = try? JSONDecoder().decode(ChatResponse.self, from: data),
-              let content = decoded.choices.first?.message.content,
-              let verdictData = content.data(using: .utf8),
+              let content = decoded.choices.first?.message.content else {
+            return nil
+        }
+        let json = stripCodeFence(content)
+        guard let verdictData = json.data(using: .utf8),
               let verdict = try? JSONDecoder().decode(Verdict.self, from: verdictData) else {
-            throw OpenAIJudgeError.unparsable
+            return nil
         }
         return verdict
+    }
+
+    /// Strips an optional Markdown code fence (```json … ``` or plain ``` … ```)
+    /// so a fenced object still decodes. A bare JSON object (what json_object
+    /// mode returns) has no leading fence and passes through unchanged, so real
+    /// responses are unaffected.
+    private static func stripCodeFence(_ raw: String) -> String {
+        var t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.hasPrefix("```") else { return t }
+        if let firstNewline = t.firstIndex(of: "\n") {
+            t = String(t[t.index(after: firstNewline)...])   // drop the opening ``` / ```json line
+        } else {
+            t = String(t.drop(while: { $0 == "`" }))
+        }
+        if let closing = t.range(of: "```", options: .backwards) {
+            t = String(t[..<closing.lowerBound])              // drop the trailing closing fence
+        }
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: Prompt

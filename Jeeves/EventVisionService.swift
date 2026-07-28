@@ -76,13 +76,29 @@ enum EventVisionService {
             throw ClaudeVisionError.requestFailed(message ?? "Request failed (\(http.statusCode)).")
         }
 
+        guard let event = parse(data) else {
+            throw ClaudeVisionError.unparsableResponse
+        }
+        return event
+    }
+
+    /// Pure decode of the Anthropic Messages API response into a DetectedEvent.
+    /// Extracted from the network call so it can be unit-tested against real
+    /// payloads — including ```json-fenced text, null fields, and "nothing
+    /// detected" — with no API key and no round-trip. Returns nil (never
+    /// throws) when the response can't be read: bad envelope, no text block,
+    /// or malformed event JSON. The network caller maps nil to the same
+    /// user-facing error it threw before.
+    static func parse(_ data: Data) -> DetectedEvent? {
         struct MessageResponse: Decodable {
             struct ContentBlock: Decodable { let type: String; let text: String? }
             let content: [ContentBlock]
         }
-        let decoded = try JSONDecoder().decode(MessageResponse.self, from: data)
-        guard let text = decoded.content.first(where: { $0.type == "text" })?.text, !text.isEmpty else {
-            throw ClaudeVisionError.emptyResponse
+
+        guard let decoded = try? JSONDecoder().decode(MessageResponse.self, from: data),
+              let text = decoded.content.first(where: { $0.type == "text" })?.text,
+              !text.isEmpty else {
+            return nil
         }
 
         let cleaned = text
@@ -93,7 +109,7 @@ enum EventVisionService {
 
         guard let jsonData = cleaned.data(using: .utf8),
               let event = try? JSONDecoder().decode(DetectedEvent.self, from: jsonData) else {
-            throw ClaudeVisionError.unparsableResponse
+            return nil
         }
         return event
     }

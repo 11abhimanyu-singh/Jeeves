@@ -30,23 +30,6 @@ enum BookSearchService {
 
     // MARK: Open Library
 
-    private struct OpenLibraryResponse: Decodable {
-        struct Doc: Decodable {
-            let title: String?
-            let authorName: [String]?
-            let isbn: [String]?
-            let coverID: Int?
-
-            enum CodingKeys: String, CodingKey {
-                case title
-                case authorName = "author_name"
-                case isbn
-                case coverID = "cover_i"
-            }
-        }
-        let docs: [Doc]
-    }
-
     private static func searchOpenLibrary(query: String) async -> [BookSearchResult] {
         var components = URLComponents(string: "https://openlibrary.org/search.json")
         components?.queryItems = [
@@ -58,15 +41,40 @@ enum BookSearchService {
 
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
-            let decoded = try JSONDecoder().decode(OpenLibraryResponse.self, from: data)
-            return decoded.docs.compactMap { doc in
-                guard let title = doc.title, let author = doc.authorName?.first else { return nil }
-                let isbn = doc.isbn?.first { $0.count == 13 } ?? doc.isbn?.first
-                let thumbnail = doc.coverID.map { "https://covers.openlibrary.org/b/id/\($0)-M.jpg" }
-                return BookSearchResult(title: title, author: author, isbn: isbn, thumbnailURLString: thumbnail)
-            }
+            return parse(data)
         } catch {
             return []
+        }
+    }
+
+    /// Pure decode + map of an Open Library `search.json` payload into
+    /// BookSearchResults. Extracted from the network call so it can be
+    /// unit-tested against real payloads — including docs missing a cover or
+    /// author, and empty/junk bodies — with no round-trip. Returns [] on
+    /// malformed JSON rather than throwing (mirrors GoogleCalendarService.parse).
+    static func parse(_ data: Data) -> [BookSearchResult] {
+        struct OpenLibraryResponse: Decodable {
+            struct Doc: Decodable {
+                let title: String?
+                let authorName: [String]?
+                let isbn: [String]?
+                let coverID: Int?
+
+                enum CodingKeys: String, CodingKey {
+                    case title
+                    case authorName = "author_name"
+                    case isbn
+                    case coverID = "cover_i"
+                }
+            }
+            let docs: [Doc]
+        }
+        guard let decoded = try? JSONDecoder().decode(OpenLibraryResponse.self, from: data) else { return [] }
+        return decoded.docs.compactMap { doc in
+            guard let title = doc.title, let author = doc.authorName?.first else { return nil }
+            let isbn = doc.isbn?.first { $0.count == 13 } ?? doc.isbn?.first
+            let thumbnail = doc.coverID.map { "https://covers.openlibrary.org/b/id/\($0)-M.jpg" }
+            return BookSearchResult(title: title, author: author, isbn: isbn, thumbnailURLString: thumbnail)
         }
     }
 

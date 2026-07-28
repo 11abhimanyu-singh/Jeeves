@@ -101,14 +101,26 @@ enum ClaudeVisionService {
             throw ClaudeVisionError.requestFailed(message ?? "Request failed (\(http.statusCode)).")
         }
 
+        return parse(data)
+    }
+
+    /// Pure decode of the Anthropic Messages API response into DetectedBooks.
+    /// Extracted from the network call so it can be unit-tested against real
+    /// payloads — including ```json-fenced text and "nothing detected" — with
+    /// no API key and no round-trip. Mirrors GoogleCalendarService.parse:
+    /// anything it can't read (bad envelope, no text block, malformed book
+    /// JSON) yields [] rather than a throw. A legitimately empty scan also
+    /// yields [], which is the correct "nothing detected" result.
+    static func parse(_ data: Data) -> [DetectedBook] {
         struct MessageResponse: Decodable {
             struct ContentBlock: Decodable { let type: String; let text: String? }
             let content: [ContentBlock]
         }
 
-        let decoded = try JSONDecoder().decode(MessageResponse.self, from: data)
-        guard let text = decoded.content.first(where: { $0.type == "text" })?.text, !text.isEmpty else {
-            throw ClaudeVisionError.emptyResponse
+        guard let decoded = try? JSONDecoder().decode(MessageResponse.self, from: data),
+              let text = decoded.content.first(where: { $0.type == "text" })?.text,
+              !text.isEmpty else {
+            return []
         }
 
         let cleaned = text
@@ -119,7 +131,7 @@ enum ClaudeVisionService {
 
         guard let jsonData = cleaned.data(using: .utf8),
               let books = try? JSONDecoder().decode([DetectedBook].self, from: jsonData) else {
-            throw ClaudeVisionError.unparsableResponse
+            return []
         }
         return books
     }
