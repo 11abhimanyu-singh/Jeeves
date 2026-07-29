@@ -35,6 +35,21 @@ final class DailyEvent {
     // An all-day calendar event has no start/end time — it's day-long context the
     // planner works AROUND, never a timed block (startMinute/endMinute are unused).
     var isAllDay: Bool = false
+    /// The LAST day this event covers when it spans several (nil = single day).
+    /// Google's all-day end is exclusive, so this is already decremented — the
+    /// span is what lets one sync set up a whole trip instead of one orphaned
+    /// day.
+    var spanEndDate: Date? = nil
+    /// Google's event id, so a re-sync updates rather than duplicates.
+    var externalID: String = ""
+
+    /// How many days this event covers, inclusive.
+    var spanDays: Int {
+        guard let spanEndDate else { return 1 }
+        let d = Calendar.current.dateComponents([.day], from: date.startOfDay,
+                                                to: spanEndDate.startOfDay).day ?? 0
+        return max(1, d + 1)
+    }
 
     var outboundStart: LocationKind {
         get { LocationKind(rawValue: outboundStartRaw) ?? .home }
@@ -54,7 +69,9 @@ final class DailyEvent {
         destinationAddress: String = "",
         outboundStart: LocationKind = .home,
         source: EventSource = .manual,
-        isAllDay: Bool = false
+        isAllDay: Bool = false,
+        spanEndDate: Date? = nil,
+        externalID: String = ""
     ) {
         self.date = date
         self.title = title
@@ -64,5 +81,7 @@ final class DailyEvent {
         self.outboundStartRaw = outboundStart.rawValue
         self.sourceRaw = source.rawValue
         self.isAllDay = isAllDay
+        self.spanEndDate = spanEndDate
+        self.externalID = externalID
     }
 }

@@ -217,6 +217,25 @@ enum GoogleMapsService {
                              lat: loc?["lat"] as? Double, lng: loc?["lng"] as? Double)
     }
 
+    /// The IANA timezone at a pin ("Asia/Makassar"). Paired with geocoding this
+    /// means a venue anywhere carries its own zone without any hardcoded table
+    /// of airports or cities.
+    static func timeZoneID(lat: Double, lng: Double, at date: Date = Date()) async -> String? {
+        guard let key = KeychainService.loadGoogleMapsAPIKey(), !key.isEmpty,
+              let url = URL(string: "https://maps.googleapis.com/maps/api/timezone/json?location=\(lat),\(lng)&timestamp=\(Int(date.timeIntervalSince1970))&key=\(key)")
+        else { return nil }
+        guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
+        return parseTimeZone(data)
+    }
+
+    /// Pure decode of a Time Zone API response.
+    nonisolated static func parseTimeZone(_ data: Data) -> String? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (json["status"] as? String) == "OK",
+              let id = json["timeZoneId"] as? String, !id.isEmpty else { return nil }
+        return id
+    }
+
     /// Reverse-geocodes a pin to a full formatted street address via the
     /// Geocoding API. Nil if there's no key, no network, or no result — callers
     /// fall back to the place name.

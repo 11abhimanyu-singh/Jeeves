@@ -627,8 +627,27 @@ struct JeevesChatView: View {
             return .init(text: "Need a 24-hour HH:MM time.")
         }
         let day = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
-        let when = Calendar.current.date(bySettingHour: minute / 60, minute: minute % 60,
+        // The time the user says is on the clock where the journey STARTS —
+        // "19:40 leaving Singapore" is 19:40 SGT even if they're in India when
+        // they say it. Read it in that zone, store the instant.
+        let fromZoneID = input["from_timezone"] as? String ?? ""
+        let toZoneID = input["to_timezone"] as? String ?? ""
+        let fromZone = TimeZone(identifier: fromZoneID) ?? .current
+        let toZone = TimeZone(identifier: toZoneID) ?? .current
+        let wall = Calendar.current.date(bySettingHour: minute / 60, minute: minute % 60,
                                          second: 0, of: day) ?? day
+        let when = TravelClock.instant(readingWallClock: wall, in: fromZone)
+
+        // Optional scheduled arrival, on the destination's clock.
+        var arriveAt: Date? = nil
+        if let aMin = minutesFrom(input["arrive_time"] as? String) {
+            let aDay = JeevesChatService.resolveDate(input["arrive_date"] as? String ?? input["date"] as? String,
+                                                     relativeTo: today)
+            if let aWall = Calendar.current.date(bySettingHour: aMin / 60, minute: aMin % 60,
+                                                 second: 0, of: aDay) {
+                arriveAt = TravelClock.instant(readingWallClock: aWall, in: toZone)
+            }
+        }
 
         let segment = TravelSegment(
             tripID: trip.id, mode: mode,
@@ -637,6 +656,9 @@ struct JeevesChatView: View {
             toPlace: input["to"] as? String ?? "",
             departAt: mode == .drive ? .distantPast : when,
             arriveBy: mode == .drive ? when : nil,
+            arriveAt: mode == .drive ? nil : arriveAt,
+            fromTimeZoneID: fromZoneID,
+            toTimeZoneID: toZoneID,
             checkInMinutes: input["check_in_minutes"] as? Int ?? (mode == .drive ? 0 : 180),
             securityMinutes: input["security_minutes"] as? Int ?? (mode == .drive ? 0 : 30),
             bufferMinutes: input["buffer_minutes"] as? Int ?? 20,
@@ -665,13 +687,14 @@ struct JeevesChatView: View {
         guard let plan = LeaveBy.plan(for: segment) else {
             return .init(text: "Journey saved, but I need \(mode == .drive ? "an arrival" : "a departure") time to compute a leave-by.")
         }
-        let f = DateFormatter(); f.dateFormat = "HH:mm"
+        let leaveLabel = TravelClock.hhmm(plan.leaveAt, in: fromZone)
+            + (fromZoneID.isEmpty ? "" : " " + TravelClock.label(fromZone, at: plan.leaveAt))
         let caveat = segment.travelMinutes == 0
             ? " I couldn't measure the journey — tell me roughly how long it takes and I'll redo this."
             : (measured ? " Journey measured against live traffic (\(segment.travelMinutes) min)."
                         : " Journey time \(segment.travelMinutes) min as given.")
         return .init(text: "Added to \(trip.title): \(segment.label.isEmpty ? mode.label : segment.label). "
-                     + "Leave at \(f.string(from: plan.leaveAt)) on \(JeevesChatView.dayString(day)).\(caveat) "
+                     + "Leave at \(leaveLabel) on \(JeevesChatView.dayString(day)).\(caveat) "
                      + "I'll nudge you 30 minutes before.")
     }
 

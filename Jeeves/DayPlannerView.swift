@@ -121,8 +121,12 @@ struct DayPlannerView: View {
         guard !dayEvents.isEmpty else { return nil }
 
         let candidates = dayEvents.map { e -> TravelDetection.Candidate in
-            // The same title on consecutive days is one multi-day thing.
-            let sameTitle = events.filter { $0.title == e.title }.map(\.date)
+            // Prefer the span the calendar actually told us; fall back to
+            // inferring it from same-titled rows on consecutive days (events
+            // built by hand, day by day).
+            let inferred = TravelDetection.spanDays(title: e.title,
+                                                    days: events.filter { $0.title == e.title }.map(\.date),
+                                                    calendar: cal)
             return TravelDetection.Candidate(
                 title: e.title,
                 day: cal.startOfDay(for: e.date),
@@ -130,7 +134,7 @@ struct DayPlannerView: View {
                 hasLocation: !e.destinationAddress.isEmpty,
                 eventMinutes: max(0, e.endMinute - e.startMinute),
                 journeyMinutes: measuredJourneys[e.destinationAddress],
-                spanDays: TravelDetection.spanDays(title: e.title, days: sameTitle, calendar: cal))
+                spanDays: max(e.spanDays, inferred))
         }
         return TravelDetection.suggestion(for: candidates, calendar: cal)
     }
@@ -179,9 +183,46 @@ struct DayPlannerView: View {
         (Calendar.current.dateComponents([.day], from: s.startDay, to: s.endDay).day ?? 0) + 1
     }
 
+    /// Build the whole trip, not just the day in front of us. Every event that
+    /// overlaps the suggested range becomes a stay; overlaps resolve in favour
+    /// of the later start (a new stay beginning means you moved), and the trip
+    /// spans the union. This is what turns "Bali 3–12" + "Travel to Singapore
+    /// 11–14" into one 3–14 Sep trip with two legs and a move on the 11th.
     private func acceptTravel(_ s: TravelDetection.Suggestion) {
-        let trip = Trip(title: s.title, startDate: s.startDay, endDate: s.endDay)
+        let cal = Calendar.current
+        let spans = events
+            .filter { e in
+                let end = e.spanEndDate ?? e.date
+                return end >= s.startDay && e.date <= s.endDay && !e.destinationAddress.isEmpty
+            }
+            .map { e in
+                Itinerary.Span(place: e.title, start: cal.startOfDay(for: e.date),
+                               end: cal.startOfDay(for: e.spanEndDate ?? e.date),
+                               externalID: e.externalID, address: e.destinationAddress)
+            }
+        let resolved = Itinerary.resolveOverlaps(spans, calendar: cal)
+        let bounds = Itinerary.bounds(resolved)
+        let trip = Trip(title: resolved.count > 1
+                            ? resolved.map(\.place).joined(separator: " + ")
+                            : s.title,
+                        startDate: bounds?.start ?? s.startDay,
+                        endDate: bounds?.end ?? s.endDay)
         modelContext.insert(trip)
+        for span in resolved {
+            modelContext.insert(TripStay(tripID: trip.id, place: span.place, address: span.address,
+                                         arriveDate: span.start, departDate: span.end,
+                                         externalID: span.externalID))
+        }
+        // Each move gets a journey ready for its times — the only days of a
+        // trip where anything is time-critical.
+        for t in Itinerary.transitions(resolved) {
+            let noon = cal.date(bySettingHour: 12, minute: 0, second: 0, of: t.day) ?? t.day
+            modelContext.insert(TravelSegment(
+                tripID: trip.id, mode: .flight,
+                label: "\(t.from.place) → \(t.to.place)",
+                fromPlace: t.from.address, toPlace: t.to.address,
+                departAt: noon))
+        }
         modelContext.saveOrLog("DayPlanner.acceptTravel")
         editingTrip = trip
     }
@@ -596,7 +637,11 @@ struct DayPlannerView: View {
                 date: day, title: c.title,
                 startMinute: c.startMinute, endMinute: c.endMinute,
                 destinationAddress: c.location, outboundStart: .home, source: .calendar,
-                isAllDay: c.isAllDay
+                isAllDay: c.isAllDay,
+                // Carry the event's full span, so a multi-day trip is set up
+                // from a single sync instead of one orphaned day.
+                spanEndDate: c.spanDays > 1 ? c.endDay : nil,
+                externalID: c.externalID
             ))
         }
         modelContext.saveOrLog()
