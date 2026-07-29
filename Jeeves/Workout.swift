@@ -62,6 +62,11 @@ final class Workout {
     var avgBPM: Int = 0                    // 0 = none captured
     var distanceKm: Double = 0             // runs (and future outdoor walks)
     var inclinePercent: Double = 0         // walks
+    /// True once the Watch's end-of-workout summary has been folded in. Until
+    /// then the session stays matchable, so logging its details on the phone
+    /// before the (opportunistically delivered) summary arrives enriches this
+    /// record instead of spawning a duplicate.
+    var receivedWatchSummary: Bool = false
 
     var type: WorkoutType {
         get { WorkoutType(rawValue: typeRaw) ?? .lift }
@@ -89,6 +94,38 @@ final class Workout {
         self.avgBPM = avgBPM
         self.distanceKm = distanceKm
         self.inclinePercent = inclinePercent
+    }
+}
+
+// MARK: - Claiming a Watch summary
+
+extension Workout {
+    /// Which existing workout an arriving Watch summary belongs to (nil = file a
+    /// new one). Kept separate from the store so the matching rules are
+    /// unit-testable:
+    ///   • only sessions that haven't already taken a summary are claimable —
+    ///     otherwise an evening run lands on the morning's record;
+    ///   • a live session of the same type wins, even if the user already filled
+    ///     in its details (that's what stops a saved walk being duplicated);
+    ///   • otherwise the nearest device-filed session within a few hours, and
+    ///     for runs only, since the run tool files its Workout before the
+    ///     summary arrives.
+    nonisolated static func claimTarget(in all: [Workout], type: WorkoutType, start: Date,
+                                        calendar: Calendar = .current) -> Workout? {
+        let claimable = all.filter {
+            $0.type == type && !$0.receivedWatchSummary
+                && calendar.isDate($0.date, inSameDayAs: start)
+        }
+        let nearby = claimable
+            .filter { abs($0.date.timeIntervalSince(start)) < 6 * 3600 && $0.source != .manual }
+        return claimable.first { $0.state == .live }
+            // A watch-born session that hasn't taken its summary yet is still
+            // this one, whatever the user has already filled in on the phone.
+            ?? nearby.first { $0.source == .watch }
+            // The run tool files its own Workout before the summary lands.
+            ?? (type == .run
+                ? nearby.min { abs($0.date.timeIntervalSince(start)) < abs($1.date.timeIntervalSince(start)) }
+                : nil)
     }
 }
 

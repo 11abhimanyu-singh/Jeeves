@@ -52,6 +52,57 @@ final class WorkoutLogicTests: XCTestCase {
                        "unknown codes fall back to run (the original activity)")
     }
 
+    // MARK: Claiming a Watch summary (overnight review findings)
+
+    private func workout(_ type: WorkoutType, _ hour: Int, state: WorkoutState = .live,
+                         source: WorkoutSource = .watch, minutes: Int = 0,
+                         claimed: Bool = false) -> Workout {
+        let w = Workout(date: date(2026, 7, 29, hour), type: type, state: state,
+                        source: source, title: "", durationMin: minutes)
+        w.receivedWatchSummary = claimed
+        return w
+    }
+
+    func testLiveWalkIsClaimedEvenAfterTheUserSavedItsDetails() {
+        // The user typed the incline while the treadmill walk was still running,
+        // so the card is .done with a placeholder duration. The late summary
+        // must enrich THAT record, not create a second walk card.
+        let saved = workout(.walk, 9, state: .done, minutes: 30)
+        let target = Workout.claimTarget(in: [saved], type: .walk,
+                                         start: date(2026, 7, 29, 9), calendar: cal)
+        XCTAssertTrue(target === saved, "the saved walk is still claimable")
+    }
+
+    func testSecondRunDoesNotLandOnTheMorningRun() {
+        // A 7am run already took its summary; the 7pm run must file its own.
+        let morning = workout(.run, 7, state: .done, source: .phone, minutes: 30, claimed: true)
+        let target = Workout.claimTarget(in: [morning], type: .run,
+                                         start: date(2026, 7, 29, 19), calendar: cal)
+        XCTAssertNil(target, "an already-claimed run can't absorb a later session")
+    }
+
+    func testDistantUnclaimedRunIsNotClaimed() {
+        // Even unclaimed, a morning run is too far from an evening session.
+        let morning = workout(.run, 7, state: .done, source: .phone, minutes: 30)
+        XCTAssertNil(Workout.claimTarget(in: [morning], type: .run,
+                                         start: date(2026, 7, 29, 19), calendar: cal))
+    }
+
+    func testRunToolWorkoutIsEnrichedByItsOwnSummary() {
+        // The run tool files the Workout minutes before the summary arrives.
+        let justSaved = workout(.run, 18, state: .done, source: .phone, minutes: 28)
+        let target = Workout.claimTarget(in: [justSaved], type: .run,
+                                         start: date(2026, 7, 29, 18), calendar: cal)
+        XCTAssertTrue(target === justSaved)
+    }
+
+    func testManualEntriesAreNeverClaimed() {
+        let typed = workout(.walk, 9, state: .done, source: .manual, minutes: 45)
+        XCTAssertNil(Workout.claimTarget(in: [typed], type: .walk,
+                                         start: date(2026, 7, 29, 9), calendar: cal),
+                     "a hand-logged walk isn't overwritten by a watch summary")
+    }
+
     func testActivityCodeTitles() {
         XCTAssertEqual(WorkoutType.title(forActivity: "strength"), "Lifting")
         XCTAssertEqual(WorkoutType.title(forActivity: "walkIndoor"), "Indoor Walk")

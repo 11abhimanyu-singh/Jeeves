@@ -66,7 +66,7 @@ final class WatchLink: NSObject, ObservableObject {
     private func workoutStarted(activity: String) {
         guard let context = container?.mainContext else { return }
         let type = WorkoutType.from(activity: activity)
-        guard matchToday(context, type: type, day: Date()) == nil else { return }
+        guard matchToday(context, type: type, start: Date()) == nil else { return }
         context.insert(Workout(date: Date(), type: type, state: .live, source: .watch,
                                title: WorkoutType.title(forActivity: activity)))
         context.saveOrLog("WatchLink.workoutStarted")
@@ -80,36 +80,41 @@ final class WatchLink: NSObject, ObservableObject {
         let type = WorkoutType.from(activity: activity)
         let start = startEpoch > 0 ? Date(timeIntervalSince1970: startEpoch) : Date()
 
-        if let w = matchToday(context, type: type, day: start) {
-            if w.durationMin == 0 { w.durationMin = durationMin }
-            if w.avgBPM == 0, avgBPM > 0 { w.avgBPM = avgBPM }
+        if let w = matchToday(context, type: type, start: start) {
+            // The watch measured this session, so its duration wins over a
+            // placeholder the user typed on the phone — but never over a
+            // workout they logged entirely by hand.
+            if w.durationMin == 0 || w.source != .manual { w.durationMin = durationMin }
+            if avgBPM > 0 { w.avgBPM = avgBPM }
             if w.state == .live {
                 w.date = start
                 // A run needs nothing more from the user; lifts and walks wait
-                // for their sets / incline.
+                // for their sets / incline — unless the user already filled
+                // them in while the session was live.
                 w.state = (type == .run) ? .done : .needsDetail
             }
+            w.receivedWatchSummary = true
         } else {
-            context.insert(Workout(date: start, type: type,
-                                   state: (type == .run) ? .done : .needsDetail,
-                                   source: .watch,
-                                   title: WorkoutType.title(forActivity: activity),
-                                   durationMin: durationMin, avgBPM: avgBPM))
+            let created = Workout(date: start, type: type,
+                                  state: (type == .run) ? .done : .needsDetail,
+                                  source: .watch,
+                                  title: WorkoutType.title(forActivity: activity),
+                                  durationMin: durationMin, avgBPM: avgBPM)
+            created.receivedWatchSummary = true
+            context.insert(created)
         }
         context.saveOrLog("WatchLink.workoutEnded")
     }
 
-    /// Today's workout this summary belongs to: a live one of the same type
-    /// first; failing that, one the watch/phone already created for the same
-    /// day that still lacks device data (or, for runs, the day's run — the run
-    /// tool files it before the watch summary arrives).
-    private func matchToday(_ context: ModelContext, type: WorkoutType, day: Date) -> Workout? {
-        let cal = Calendar.current
-        let all = ((try? context.fetch(FetchDescriptor<Workout>())) ?? [])
-            .filter { $0.type == type && cal.isDate($0.date, inSameDayAs: day) }
-        return all.first { $0.state == .live }
-            ?? all.first { $0.durationMin == 0 && $0.source != .manual }
-            ?? (type == .run ? all.max { $0.date < $1.date } : nil)
+    /// The workout this summary belongs to. A session stays claimable until its
+    /// summary lands (`receivedWatchSummary`), so filling in a walk's incline or
+    /// a lift's sets mid-session doesn't orphan the card and duplicate it. The
+    /// run tool files its own Workout before the summary arrives, so a run is
+    /// also matched by start-time proximity — but only within a few hours, so
+    /// an evening run never lands on the morning's record.
+    private func matchToday(_ context: ModelContext, type: WorkoutType, start: Date) -> Workout? {
+        let all = (try? context.fetch(FetchDescriptor<Workout>())) ?? []
+        return Workout.claimTarget(in: all, type: type, start: start)
     }
 }
 
