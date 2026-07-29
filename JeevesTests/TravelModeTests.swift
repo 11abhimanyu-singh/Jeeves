@@ -23,13 +23,18 @@ final class TravelModeTests: XCTestCase {
 
     func testFlightChainMatchesTheWorkedExample() {
         // 6E 1605 departs 09:40; 3 h cut-off, 30 m security, 60 m drive, 20 m buffer.
+        // Steps read CHRONOLOGICALLY — leave first, departure last — so the
+        // card is a morning checklist, not a derivation.
         let plan = LeaveBy.forFlight(departAt: at(2026, 9, 4, 9, 40), checkInMinutes: 180,
                                      securityMinutes: 30, travelMinutes: 60, bufferMinutes: 20)
         XCTAssertEqual(plan.leaveAt, at(2026, 9, 4, 4, 50), "leave home at 04:50")
-        XCTAssertEqual(plan.steps.count, 5)
-        XCTAssertEqual(plan.steps[1].time, at(2026, 9, 4, 6, 40), "cut-off 3 h before")
-        XCTAssertEqual(plan.steps[2].time, at(2026, 9, 4, 6, 10), "at the terminal")
-        XCTAssertTrue(plan.steps.last?.isLeave == true)
+        XCTAssertEqual(plan.steps.count, 4)
+        XCTAssertTrue(plan.steps.first?.isLeave == true, "the checklist starts with LEAVE")
+        XCTAssertEqual(plan.steps[1].time, at(2026, 9, 4, 6, 10), "then be at the terminal")
+        XCTAssertEqual(plan.steps[2].time, at(2026, 9, 4, 6, 40), "then the cut-off")
+        XCTAssertEqual(plan.steps.last?.time, at(2026, 9, 4, 9, 40), "departure closes the chain")
+        XCTAssertEqual(plan.steps.map(\.time), plan.steps.map(\.time).sorted(),
+                       "strictly chronological")
     }
 
     func testFlightChainCrossesMidnightBackwards() {
@@ -56,8 +61,9 @@ final class TravelModeTests: XCTestCase {
         let plan = LeaveBy.forDrive(arriveBy: at(2026, 8, 15, 13, 0), travelMinutes: 360,
                                     stopMinutes: 55, bufferMinutes: 20)
         XCTAssertEqual(plan.leaveAt, at(2026, 8, 15, 5, 45), "leave home at 05:45")
-        XCTAssertEqual(plan.steps.first?.time, at(2026, 8, 15, 13, 0))
+        XCTAssertTrue(plan.steps.first?.isLeave == true, "chronological: LEAVE opens the chain")
         XCTAssertEqual(plan.steps[1].time, at(2026, 8, 15, 12, 40), "planned arrival keeps the contingency")
+        XCTAssertEqual(plan.steps.last?.time, at(2026, 8, 15, 13, 0), "the deadline is last")
     }
 
     func testStopsPushTheDepartureEarlier() {

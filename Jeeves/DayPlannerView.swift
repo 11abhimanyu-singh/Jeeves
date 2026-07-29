@@ -189,17 +189,34 @@ struct DayPlannerView: View {
     /// spans the union. This is what turns "Bali 3–12" + "Travel to Singapore
     /// 11–14" into one 3–14 Sep trip with two legs and a move on the 11th.
     private func acceptTravel(_ s: TravelDetection.Suggestion) {
+        // One range, one trip: if any existing trip touches these days, open it
+        // rather than stacking a second one on top (overlapping trips made
+        // tripCovering effectively arbitrary).
+        if let existing = trips.first(where: { !($0.endDate < s.startDay || $0.startDate > s.endDay) }) {
+            editingTrip = existing
+            return
+        }
         let cal = Calendar.current
-        let spans = events
-            .filter { e in
-                let end = e.spanEndDate ?? e.date
-                return end >= s.startDay && e.date <= s.endDay && !e.destinationAddress.isEmpty
-            }
-            .map { e in
-                Itinerary.Span(place: e.title, start: cal.startOfDay(for: e.date),
-                               end: cal.startOfDay(for: e.spanEndDate ?? e.date),
-                               externalID: e.externalID, address: e.destinationAddress)
-            }
+        let overlapping = events.filter { e in
+            let end = e.spanEndDate ?? e.date
+            return end >= s.startDay && e.date <= s.endDay && !e.destinationAddress.isEmpty
+        }
+        // The SAME calendar event can exist as several rows (synced from
+        // different days before re-syncs became idempotent). Group by identity
+        // first, or each copy becomes its own stay — which is how a trip once
+        // got titled "Bali + Bali + Bali" with flights from Bali to Bali.
+        let grouped = Dictionary(grouping: overlapping) {
+            $0.externalID.isEmpty ? "title:\($0.title)" : $0.externalID
+        }
+        let spans = grouped.values.compactMap { rows -> Itinerary.Span? in
+            guard let first = rows.min(by: { $0.date < $1.date }) else { return nil }
+            let end = rows.compactMap { $0.spanEndDate ?? $0.date }.max() ?? first.date
+            return Itinerary.Span(place: first.title,
+                                  start: cal.startOfDay(for: first.date),
+                                  end: cal.startOfDay(for: end),
+                                  externalID: first.externalID,
+                                  address: rows.first { !$0.destinationAddress.isEmpty }?.destinationAddress ?? "")
+        }
         let resolved = Itinerary.resolveOverlaps(spans, calendar: cal)
         let bounds = Itinerary.bounds(resolved)
         let trip = Trip(title: resolved.count > 1
@@ -214,8 +231,10 @@ struct DayPlannerView: View {
                                          externalID: span.externalID))
         }
         // Each move gets a journey ready for its times — the only days of a
-        // trip where anything is time-critical.
-        for t in Itinerary.transitions(resolved) {
+        // trip where anything is time-critical. A "move" between the same
+        // place is a data artifact, never a journey.
+        for t in Itinerary.transitions(resolved)
+        where t.from.place != t.to.place && t.from.address != t.to.address {
             let noon = cal.date(bySettingHour: 12, minute: 0, second: 0, of: t.day) ?? t.day
             modelContext.insert(TravelSegment(
                 tripID: trip.id, mode: .flight,
@@ -629,12 +648,32 @@ struct DayPlannerView: View {
     /// that already exist on that day.
     private func addFromCalendar(_ chosen: [CalendarEvent]) {
         for c in chosen {
+            // Google's event id makes re-syncing idempotent: the SAME calendar
+            // event — synced again today, or from a different day of its span —
+            // updates the record we already have instead of spawning a copy.
+            // (Syncing "Bali" from the 4th, 5th and 7th once produced three
+            // extra single-day Balis and a trip titled "Bali + Bali + Bali".)
+            if !c.externalID.isEmpty,
+               let existing = events.first(where: { $0.externalID == c.externalID }) {
+                existing.title = c.title
+                existing.isAllDay = c.isAllDay
+                existing.startMinute = c.startMinute
+                existing.endMinute = c.endMinute
+                if let s = c.startDay { existing.date = s }
+                existing.spanEndDate = c.spanDays > 1 ? c.endDay : nil
+                if !c.location.isEmpty, c.location != existing.destinationAddress {
+                    existing.destinationAddress = c.location
+                    existing.destinationLat = nil     // stale pin for the old venue
+                    existing.destinationLng = nil
+                }
+                continue
+            }
             let dup = events.contains {
                 $0.date == calendarReview?.date && $0.title == c.title && $0.startMinute == c.startMinute
             }
             guard !dup, let day = calendarReview?.date else { continue }
             modelContext.insert(DailyEvent(
-                date: day, title: c.title,
+                date: c.startDay ?? day, title: c.title,
                 startMinute: c.startMinute, endMinute: c.endMinute,
                 destinationAddress: c.location, outboundStart: .home, source: .calendar,
                 isAllDay: c.isAllDay,

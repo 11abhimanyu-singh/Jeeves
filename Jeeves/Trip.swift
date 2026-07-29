@@ -346,12 +346,13 @@ enum LeaveBy {
         let terminal = cutoff.addingTimeInterval(-Double(securityMinutes) * 60)
         let latest   = terminal.addingTimeInterval(-Double(travelMinutes) * 60)
         let leave    = latest.addingTimeInterval(-Double(bufferMinutes) * 60)
+        // Chronological — the order the morning actually happens, so the list
+        // reads top-to-bottom as a checklist and the departure comes last.
         return Plan(leaveAt: leave, steps: [
-            Step(time: departAt, label: label.isEmpty ? "Departure" : "\(label) departs", detail: ""),
-            Step(time: cutoff, label: "Airline cut-off", detail: "\(hours(checkInMinutes)) before"),
-            Step(time: terminal, label: "Be at the terminal", detail: "\(securityMinutes) min immigration & security"),
-            Step(time: latest, label: "Latest you could leave", detail: "\(travelMinutes) min journey"),
             Step(time: leave, label: "LEAVE", detail: "\(bufferMinutes) min of your own buffer", isLeave: true),
+            Step(time: terminal, label: "Be at the terminal", detail: "\(travelMinutes) min journey + \(securityMinutes) min security"),
+            Step(time: cutoff, label: "Airline cut-off", detail: "\(hours(checkInMinutes)) before departure"),
+            Step(time: departAt, label: label.isEmpty ? "Departure" : "\(label) departs", detail: ""),
         ], travelIsEstimated: isEstimated)
     }
 
@@ -362,16 +363,16 @@ enum LeaveBy {
         let planned = arriveBy.addingTimeInterval(-Double(bufferMinutes) * 60)
         let afterStops = planned.addingTimeInterval(-Double(travelMinutes) * 60)
         let leave = afterStops.addingTimeInterval(-Double(stopMinutes) * 60)
+        // Chronological: leave → drive (with stops) → planned arrival → the
+        // deadline, last.
         var steps: [Step] = [
-            Step(time: arriveBy, label: "Must be there", detail: "your deadline"),
-            Step(time: planned, label: "Planned arrival", detail: "\(bufferMinutes) min contingency"),
+            Step(time: leave, label: "LEAVE",
+                 detail: stopMinutes > 0 ? "\(hours(travelMinutes)) driving + \(stopMinutes) min stops"
+                                         : "\(hours(travelMinutes)) driving",
+                 isLeave: true),
         ]
-        if stopMinutes > 0 {
-            steps.append(Step(time: afterStops, label: "Driving", detail: hours(travelMinutes)))
-            steps.append(Step(time: leave, label: "LEAVE", detail: "\(stopMinutes) min of stops on route", isLeave: true))
-        } else {
-            steps.append(Step(time: leave, label: "LEAVE", detail: "\(hours(travelMinutes)) driving", isLeave: true))
-        }
+        steps.append(Step(time: planned, label: "Planned arrival", detail: "\(bufferMinutes) min contingency in hand"))
+        steps.append(Step(time: arriveBy, label: "Must be there", detail: "your deadline"))
         return Plan(leaveAt: leave, steps: steps, travelIsEstimated: isEstimated)
     }
 

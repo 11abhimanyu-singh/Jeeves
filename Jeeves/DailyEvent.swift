@@ -51,6 +51,31 @@ final class DailyEvent {
         return max(1, d + 1)
     }
 
+    /// One-time repair for calendar events synced before re-syncs became
+    /// idempotent: several rows carrying the same Google event id collapse into
+    /// one, keeping the earliest start and the widest span. Idempotent and
+    /// cheap, so it's safe to run on every launch.
+    static func dedupeExternal(context: ModelContext) {
+        let all = (try? context.fetch(FetchDescriptor<DailyEvent>())) ?? []
+        let grouped = Dictionary(grouping: all.filter { !$0.externalID.isEmpty },
+                                 by: \.externalID)
+        var changed = false
+        for (_, rows) in grouped where rows.count > 1 {
+            let sorted = rows.sorted { $0.date < $1.date }
+            guard let keeper = sorted.first else { continue }
+            let widestEnd = rows.compactMap { $0.spanEndDate ?? ($0.spanDays > 1 ? $0.date : nil) }.max()
+            let lastDate = sorted.last?.date
+            keeper.spanEndDate = [widestEnd, lastDate].compactMap { $0 }.max()
+                .flatMap { $0 > keeper.date ? $0 : keeper.spanEndDate }
+            if keeper.destinationAddress.isEmpty {
+                keeper.destinationAddress = rows.first { !$0.destinationAddress.isEmpty }?.destinationAddress ?? ""
+            }
+            for extra in sorted.dropFirst() { context.delete(extra) }
+            changed = true
+        }
+        if changed { context.saveOrLog("DailyEvent.dedupeExternal") }
+    }
+
     var outboundStart: LocationKind {
         get { LocationKind(rawValue: outboundStartRaw) ?? .home }
         set { outboundStartRaw = newValue.rawValue }

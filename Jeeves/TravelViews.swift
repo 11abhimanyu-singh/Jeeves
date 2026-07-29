@@ -110,33 +110,6 @@ struct LeaveByCard: View {
                     }
                 }
 
-                // An arrival in another zone is meaningless without saying which
-                // clock it's on — and whether it lands on the next day.
-                if let arriveAt = segment.arriveAt {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.down.right").font(.system(size: 10))
-                        Text("Arrives \(TravelClock.hhmm(arriveAt, in: segment.toTimeZone)) "
-                             + TravelClock.label(segment.toTimeZone, at: arriveAt))
-                            .font(.system(size: 12, weight: .medium))
-                        if TravelClock.crossesDay(departure: segment.departAt,
-                                                  departureZone: segment.fromTimeZone,
-                                                  arrival: arriveAt, arrivalZone: segment.toTimeZone) {
-                            Text("next day")
-                                .font(.system(size: 9.5, weight: .bold))
-                                .padding(.horizontal, 5).padding(.vertical, 2)
-                                .background(Capsule().fill(Color.accent.opacity(0.18)))
-                                .foregroundStyle(Color.accentDeep)
-                        }
-                        if let off = TravelClock.offsetLabel(from: segment.fromTimeZone,
-                                                             to: segment.toTimeZone, at: arriveAt) {
-                            Text("clock \(off)")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Color.textMuted)
-                        }
-                    }
-                    .foregroundStyle(Color.textSoft)
-                }
-
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(plan.steps.enumerated()), id: \.offset) { _, step in
                         HStack(alignment: .top, spacing: 9) {
@@ -157,6 +130,43 @@ struct LeaveByCard: View {
                                 .font(.system(size: 10.5))
                                 .foregroundStyle(Color.textMuted)
                                 .multilineTextAlignment(.trailing)
+                        }
+                        .padding(.vertical, 3)
+                    }
+
+                    // Arrival closes the story — the last thing that happens,
+                    // shown on the DESTINATION's clock (and flagged when it
+                    // lands on a different calendar day there).
+                    if let arriveAt = segment.arriveAt, arriveAt != segment.departAt {
+                        HStack(alignment: .top, spacing: 9) {
+                            Circle()
+                                .fill(Color.sageDeep)
+                                .frame(width: 6, height: 6)
+                                .padding(.top, 6)
+                            Text(TravelClock.hhmm(arriveAt, in: segment.toTimeZone))
+                                .font(.system(size: 13, weight: .semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(Color.sageDeep)
+                                .frame(width: 46, alignment: .leading)
+                            Text("Arrives")
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(Color.sageDeep)
+                            if TravelClock.crossesDay(departure: segment.departAt,
+                                                      departureZone: segment.fromTimeZone,
+                                                      arrival: arriveAt, arrivalZone: segment.toTimeZone) {
+                                Text("next day")
+                                    .font(.system(size: 9.5, weight: .bold))
+                                    .padding(.horizontal, 5).padding(.vertical, 2)
+                                    .background(Capsule().fill(Color.accent.opacity(0.18)))
+                                    .foregroundStyle(Color.accentDeep)
+                            }
+                            Spacer(minLength: 4)
+                            Text(TravelClock.label(segment.toTimeZone, at: arriveAt)
+                                 + (TravelClock.offsetLabel(from: segment.fromTimeZone,
+                                                            to: segment.toTimeZone,
+                                                            at: arriveAt).map { " \u{00B7} clock \($0)" } ?? ""))
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(Color.textMuted)
                         }
                         .padding(.vertical, 3)
                     }
@@ -291,6 +301,13 @@ struct TripEditorView: View {
             .navigationTitle(trip.title.isEmpty ? "Trip" : trip.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    // Deleting a trip takes its stays and journeys with it and
+                    // hands the days back to the planner.
+                    Button(role: .destructive) { deleteTrip() } label: {
+                        Image(systemName: "trash")
+                    }.tint(.red)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }.tint(Color.accentDeep)
                 }
@@ -300,9 +317,23 @@ struct TripEditorView: View {
     }
 
     private func newSegment(_ mode: TravelMode) -> TravelSegment {
-        let noon = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: trip.startDate) ?? trip.startDate
+        let cal = Calendar.current
+        let noon = cal.date(bySettingHour: 9, minute: 0, second: 0, of: trip.startDate) ?? trip.startDate
+        // Jeeves usually already knows both ends of this journey from the
+        // calendar: you're leaving wherever you were last, for this trip's
+        // first stay. Pre-fill both instead of asking again — across trips too,
+        // since one trip often ends the day the next begins.
+        let stays = ((try? modelContext.fetch(FetchDescriptor<TripStay>())) ?? [])
+            .sorted { $0.arriveDate < $1.arriveDate }
+        let tripStays = stays.filter { $0.tripID == trip.id }
+        let destination = tripStays.first
+        let origin = stays
+            .filter { $0.id != destination?.id && $0.departDate <= trip.startDate }
+            .max { $0.departDate < $1.departDate }
         let s = TravelSegment(tripID: trip.id, mode: mode,
                               label: mode == .flight ? "" : "Drive",
+                              fromPlace: origin.map { $0.address.isEmpty ? $0.place : $0.address } ?? "",
+                              toPlace: destination.map { $0.address.isEmpty ? $0.place : $0.address } ?? "",
                               departAt: mode == .flight ? noon : .distantPast,
                               arriveBy: mode == .drive ? noon : nil,
                               checkInMinutes: mode == .flight ? 180 : 0,
@@ -310,6 +341,15 @@ struct TripEditorView: View {
         modelContext.insert(s)
         modelContext.saveOrLog("TripEditor.newSegment")
         return s
+    }
+
+    private func deleteTrip() {
+        for s in allSegments where s.tripID == trip.id { modelContext.delete(s) }
+        let stays = (try? modelContext.fetch(FetchDescriptor<TripStay>())) ?? []
+        for st in stays where st.tripID == trip.id { modelContext.delete(st) }
+        modelContext.delete(trip)
+        modelContext.saveOrLog("TripEditor.deleteTrip")
+        dismiss()
     }
 
     private func addLabel(_ t: String, _ icon: String) -> some View {
@@ -460,7 +500,11 @@ struct SegmentEditorView: View {
         if isFlight {
             segment.departAt = departInstant
             segment.arriveBy = nil
-            segment.arriveAt = TravelClock.instant(readingWallClock: arrives, in: zone(toZoneID))
+            // An untouched arrival picker still reads the departure time —
+            // storing that would show "arrives 09:00" for a 09:00 departure.
+            // Equality means "not set".
+            let arriveInstant = TravelClock.instant(readingWallClock: arrives, in: zone(toZoneID))
+            segment.arriveAt = arriveInstant == departInstant ? nil : arriveInstant
         } else {
             segment.arriveBy = departInstant
             segment.arriveAt = nil

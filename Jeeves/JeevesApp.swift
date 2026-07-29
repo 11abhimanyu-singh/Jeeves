@@ -22,6 +22,8 @@ struct JeevesApp: App {
         // and old lift/run logs get wrapped into Workouts once.
         WatchLink.shared.configure(container: sharedModelContainer)
         Workout.migrateIfNeeded(context: sharedModelContainer.mainContext)
+        // Collapse duplicate calendar rows from the pre-idempotent sync era.
+        DailyEvent.dedupeExternal(context: sharedModelContainer.mainContext)
     }
 
     var sharedModelContainer: ModelContainer = {
