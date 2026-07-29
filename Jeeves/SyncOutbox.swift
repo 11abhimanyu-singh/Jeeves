@@ -138,6 +138,10 @@ enum SyncOutbox {
         var distanceKm: Double
         var inclinePercent: Double
     }
+    /// Most recent chat turns carried in the export (the eval corpus); older
+    /// ones stay in the store but don't re-encode on every plan generation.
+    static let chatTurnExportLimit = 500
+
     nonisolated struct ChatTurnRow: Codable, Sendable {
         var timestamp: Date
         var role: String
@@ -286,10 +290,14 @@ enum SyncOutbox {
                            avgBPM: $0.avgBPM, distanceKm: $0.distanceKm,
                            inclinePercent: $0.inclinePercent)
             },
-            chatTurns: chatTurns.sorted { $0.timestamp < $1.timestamp }.map {
-                ChatTurnRow(timestamp: $0.timestamp, role: $0.roleRaw,
-                            content: $0.content, isPlan: $0.planJSON != nil)
-            },
+            // Cap the exported transcript: this export runs on every plan
+            // generation, and the eval only ever reads recent conversations.
+            chatTurns: chatTurns.sorted { $0.timestamp < $1.timestamp }
+                .suffix(chatTurnExportLimit).map {
+                    ChatTurnRow(timestamp: $0.timestamp, role: $0.roleRaw,
+                                content: String($0.content.prefix(2000)),
+                                isPlan: $0.planJSON != nil)
+                },
             voiceNotes: voiceNotes.sorted { $0.date < $1.date }.map {
                 VoiceNoteRow(date: $0.date, durationSec: $0.durationSec,
                              locale: $0.localeID, transcript: $0.transcript,

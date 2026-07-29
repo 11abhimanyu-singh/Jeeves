@@ -85,6 +85,64 @@ final class ChatDataToolTests: XCTestCase {
                        "blank queries match nothing")
     }
 
+    // MARK: destructive matching (overnight review, HIGH)
+
+    func testStrictMatchIsOneDirectional() {
+        XCTAssertTrue(JeevesChatService.strictMatch("Dinner with Sam", query: "dinner"))
+        XCTAssertFalse(JeevesChatService.strictMatch("Dinner", query: "Dinner with Sam"),
+                       "a specific query must not match a shorter unrelated title")
+    }
+
+    func testBestMatchesKeepsOnlyTheClosestTitle() {
+        let events = ["Dinner", "Dinner with Sam"]
+        // Deleting "Dinner with Sam" must not sweep up the separate "Dinner".
+        let specific = JeevesChatService.bestMatches(events, title: { $0 }, query: "Dinner with Sam")
+        XCTAssertEqual(specific, ["Dinner with Sam"])
+        // An exact title wins over longer ones that also contain it.
+        let exact = JeevesChatService.bestMatches(events, title: { $0 }, query: "Dinner")
+        XCTAssertEqual(exact, ["Dinner"])
+    }
+
+    func testBestMatchesKeepsMultiDayGroupsTogether() {
+        // The same event on three days is a legitimate group edit.
+        let events = ["Bhadra Tour", "Bhadra Tour", "Bhadra Tour"]
+        XCTAssertEqual(JeevesChatService.bestMatches(events, title: { $0 }, query: "bhadra").count, 3)
+    }
+
+    // MARK: cardio merge (overnight review, MEDIUM)
+
+    func testManualRunSurvivesALoggedWalk() throws {
+        // An untracked run recorded in the check-in must not vanish when a walk
+        // is logged the same day.
+        let auto = CheckInAutoFill.derive([CheckInAutoFill.WorkoutFact(type: .walk, durationMin: 15)])
+        let manual = CheckInAutoFill.ManualFacts(workedOut: true, cardio: true,
+                                                 cardioType: "Running", cardioDuration: 45)
+        let s = try XCTUnwrap(CheckInAutoFill.mergedDay(auto: auto, manual: manual))
+        XCTAssertTrue(s.summary.contains("45min"), "the manual run is still reported: \(s.summary)")
+        XCTAssertTrue(s.summary.contains("15min"), "and so is the logged walk: \(s.summary)")
+    }
+
+    func testSameActivityIsNotDoubleReported() throws {
+        let auto = CheckInAutoFill.derive([CheckInAutoFill.WorkoutFact(type: .walk, durationMin: 32, incline: 4)])
+        let manual = CheckInAutoFill.ManualFacts(workedOut: true, cardio: true,
+                                                 cardioType: "Inclined Walk", cardioDuration: 30)
+        let s = try XCTUnwrap(CheckInAutoFill.mergedDay(auto: auto, manual: manual))
+        XCTAssertTrue(s.summary.contains("32min"), "the workout's numbers win")
+        XCTAssertFalse(s.summary.contains("30min"), "the same walk isn't listed twice: \(s.summary)")
+    }
+
+    // MARK: reminder time strictness (overnight review, LOW)
+
+    func testMalformedTimeNeverSchedulesAWrongHour() {
+        let now = at(2026, 7, 29, 10)
+        // "9pm" has no colon — must fall back to the 09:00 default (rolled
+        // forward), never be half-read as hour 9 when the user meant 21:00.
+        XCTAssertEqual(JeevesChatService.resolveFireDate(dateRaw: "today", timeRaw: "9pm", relativeTo: now),
+                       at(2026, 7, 30, 9))
+        XCTAssertEqual(JeevesChatService.resolveFireDate(dateRaw: "today", timeRaw: "23.30", relativeTo: now),
+                       at(2026, 7, 30, 9))
+    }
+
     // MARK: standing-preference expiry ("for the next 45 days")
 
     func testUnboundedPreferenceIsAlwaysActive() {
@@ -101,6 +159,13 @@ final class ChatDataToolTests: XCTestCase {
 
     func testMalformedExpiryTreatedAsPermanent() {
         XCTAssertTrue(StandingPrefs.isActive("No calls (until someday)", now: at(2030, 1, 1, 0)))
+    }
+
+    func testStripExpiryComparesWordingOnly() {
+        // Re-stating a preference with a new expiry must replace it, not be
+        // silently swallowed as a duplicate.
+        XCTAssertEqual(StandingPrefs.stripExpiry("Gym is always at 7 PM (until 2026-09-12)"),
+                       StandingPrefs.stripExpiry("Gym is always at 7 PM"))
     }
 
     // MARK: voice-note retention

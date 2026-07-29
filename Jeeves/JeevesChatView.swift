@@ -264,7 +264,12 @@ struct JeevesChatView: View {
     private func voiceTapped() {
         switch voice.phase {
         case .idle:
-            Task { await voice.start() }
+            Task {
+                await voice.start()
+                // Surface a denied-permission / failed-start message; otherwise
+                // the mic button just silently does nothing.
+                if let e = voice.errorText { errorText = e }
+            }
         case .recording:
             Task {
                 if let r = await voice.stopAndTranscribe(contextualStrings: voiceVocabulary) {
@@ -416,7 +421,9 @@ struct JeevesChatView: View {
     @MainActor
     private func eventsMatching(_ title: String, dateRaw: String?) -> [DailyEvent] {
         let all = (try? modelContext.fetch(FetchDescriptor<DailyEvent>())) ?? []
-        let matches = all.filter { JeevesChatService.fuzzyMatch($0.title, query: title) }
+        // strict + closest-title: "delete Dinner with Sam" must never also take
+        // the separate "Dinner" event.
+        let matches = JeevesChatService.bestMatches(all, title: \.title, query: title)
         if let dateRaw, !dateRaw.isEmpty {
             let day = JeevesChatService.resolveDate(dateRaw, relativeTo: Date())
             return matches.filter { Calendar.current.isDate($0.date, inSameDayAs: day) }
@@ -439,6 +446,11 @@ struct JeevesChatView: View {
             return .init(text: "No future event matches '\(title)'. Use fetch_app_data(events) to see what exists.")
         }
         var changes: [String] = []
+        // Parse the times ONCE: a model may send null or a malformed string for
+        // new_end, and keying off "was the key present" would then leave the
+        // event ending before it starts.
+        let newStart = minutesFrom(input["new_start"] as? String)
+        let newEnd = minutesFrom(input["new_end"] as? String)
         for e in matches {
             if let venue = input["new_venue"] as? String, !venue.isEmpty {
                 e.destinationAddress = venue
@@ -447,14 +459,17 @@ struct JeevesChatView: View {
                 e.destinationLng = nil
                 changes.append("venue → \(venue)")
             }
-            if let start = minutesFrom(input["new_start"] as? String) {
+            if let start = newStart {
                 let duration = max(0, e.endMinute - e.startMinute)
                 e.startMinute = start
-                if input["new_end"] == nil { e.endMinute = min(24 * 60, start + duration) }
+                // Only the parsed end may override the preserved duration.
+                e.endMinute = newEnd ?? min(24 * 60, start + duration)
+                // Giving an all-day event real times makes it a timed event.
+                if e.isAllDay { e.isAllDay = false; changes.append("now timed") }
                 changes.append("start → \(hhmm(start))")
-            }
-            if let end = minutesFrom(input["new_end"] as? String) {
-                e.endMinute = end
+            } else if let end = newEnd {
+                e.endMinute = max(end, e.startMinute)
+                if e.isAllDay { e.isAllDay = false; changes.append("now timed") }
                 changes.append("end → \(hhmm(end))")
             }
             if let newTitle = input["new_title"] as? String, !newTitle.isEmpty {
@@ -463,6 +478,8 @@ struct JeevesChatView: View {
             }
         }
         modelContext.saveOrLog()
+        // A pasted Maps link resolves to a real address + pin, same as add_event.
+        for e in matches { resolveEventDestinationIfLink(e) }
         let days = matches.map { JeevesChatView.dayString($0.date) }.joined(separator: ", ")
         return .init(text: "Updated \(matches.count) event(s) (\(days)): \(Set(changes).joined(separator: "; ")).")
     }
@@ -545,8 +562,9 @@ struct JeevesChatView: View {
     @MainActor
     private func toolCompleteTodo(_ input: [String: Any]) -> JeevesChatService.ToolResult {
         let title = input["title"] as? String ?? ""
-        let open = ((try? modelContext.fetch(FetchDescriptor<Todo>())) ?? [])
-            .filter { $0.doneAt == nil && JeevesChatService.fuzzyMatch($0.title, query: title) }
+        let openTodos = ((try? modelContext.fetch(FetchDescriptor<Todo>())) ?? [])
+            .filter { $0.doneAt == nil }
+        let open = JeevesChatService.bestMatches(openTodos, title: \.title, query: title)
         guard !open.isEmpty else { return .init(text: "No open to-do matches '\(title)'.") }
         for t in open { t.doneAt = Date() }
         modelContext.saveOrLog()
@@ -556,8 +574,8 @@ struct JeevesChatView: View {
     @MainActor
     private func toolDeleteTodo(_ input: [String: Any]) -> JeevesChatService.ToolResult {
         let title = input["title"] as? String ?? ""
-        let matches = ((try? modelContext.fetch(FetchDescriptor<Todo>())) ?? [])
-            .filter { JeevesChatService.fuzzyMatch($0.title, query: title) }
+        let allTodos = (try? modelContext.fetch(FetchDescriptor<Todo>())) ?? []
+        let matches = JeevesChatService.bestMatches(allTodos, title: \.title, query: title)
         guard !matches.isEmpty else { return .init(text: "No to-do matches '\(title)'.") }
         let names = matches.map(\.title).joined(separator: ", ")
         for t in matches { modelContext.delete(t) }
@@ -569,7 +587,7 @@ struct JeevesChatView: View {
     private func toolDeleteReminder(_ input: [String: Any]) -> JeevesChatService.ToolResult {
         let title = input["title"] as? String ?? ""
         let all = (try? modelContext.fetch(FetchDescriptor<Reminder>())) ?? []
-        let matches = all.filter { JeevesChatService.fuzzyMatch($0.title, query: title) }
+        let matches = JeevesChatService.bestMatches(all, title: \.title, query: title)
         guard !matches.isEmpty else { return .init(text: "No reminder matches '\(title)'.") }
         let names = matches.map(\.title).joined(separator: ", ")
         for r in matches { modelContext.delete(r) }

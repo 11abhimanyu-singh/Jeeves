@@ -81,12 +81,52 @@ def load_turns() -> list[dict]:
              "isPlan": r.get("isPlan", False)} for r in rows]
 
 
+def parse_ts(raw: str):
+    """The app exports IST-labelled stamps ('2026-07-28 12:21:23 IST'); a
+    cable pull yields plain SQL datetimes. Accept both (and ISO 'T')."""
+    from datetime import datetime
+    cleaned = raw.strip()
+    for suffix in (" IST", "Z"):
+        if cleaned.endswith(suffix):
+            cleaned = cleaned[: -len(suffix)].strip()
+    try:
+        return datetime.fromisoformat(cleaned)
+    except ValueError:
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                return datetime.strptime(cleaned[:19], fmt)
+            except ValueError:
+                continue
+        raise
+
+
+def ground_truth() -> str:
+    """What the judge checks the assistant's claims against. Prefers an
+    explicit ground-truth.json, else derives one from the app's own export
+    (state-latest.json). Judging with NO ground truth produces phantom
+    findings, so say so loudly rather than silently passing '{}'."""
+    explicit = DATA_DIR / "ground-truth.json"
+    if explicit.exists():
+        return explicit.read_text()
+    state = DATA_DIR / "state-latest.json"
+    if state.exists():
+        s = json.loads(state.read_text())
+        derived = {k: s.get(k, []) for k in
+                   ("events", "workouts", "lifts", "runs", "todos", "reminders",
+                    "checkIns", "plans", "voiceNotes")}
+        if any(derived.values()):
+            print(f"ground truth derived from {state.name} "
+                  f"({sum(len(v) for v in derived.values())} records)")
+            return json.dumps(derived, indent=1)
+    print("WARNING: no ground truth — correctness verdicts will be unreliable.")
+    return "{}"
+
+
 def sessions(turns: list[dict]) -> list[list[dict]]:
     """Split on >45-minute gaps (same window as the app's session)."""
-    from datetime import datetime
     out, cur, prev = [], [], None
     for t in turns:
-        ts = datetime.fromisoformat(t["ts"])
+        ts = parse_ts(t["ts"])
         if prev and (ts - prev).total_seconds() > SESSION_GAP_MIN * 60 and cur:
             out.append(cur)
             cur = []
@@ -105,8 +145,7 @@ def main() -> None:
     if not turns:
         print("No chat turns found.")
         return
-    truth_path = DATA_DIR / "ground-truth.json"
-    truth = truth_path.read_text() if truth_path.exists() else "{}"
+    truth = ground_truth()
 
     reports = []
     for i, sess in enumerate(sessions(turns), 1):

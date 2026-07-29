@@ -148,23 +148,40 @@ enum CheckInAutoFill {
         if auto.weightTraining || m.weightTraining { parts.append("Weight") }
         if auto.stretching || m.stretching { parts.append("Stretch") }
         if m.mobility { parts.append("Mobility") }
-        if auto.cardio || m.cardio {
-            let type = auto.cardio ? auto.cardioType : m.cardioType
-            let dur = auto.cardio ? auto.cardioDuration : m.cardioDuration
-            let inc = auto.cardio ? auto.cardioIncline : m.cardioIncline
-            var c = "Cardio"
-            if let type {
-                c += " (\(type == "Running" ? "Run" : "Walk")"
-                if let dur { c += ", \(Int(dur))min" }
-                if let inc { c += ", \(trim(inc))%" }
-                c += ")"
+        // Cardio can come from both layers and they may describe DIFFERENT
+        // sessions (a manually recorded run + a logged walk). Report each once,
+        // rather than letting the auto layer mask the manual one wholesale.
+        var cardioBits: [String] = []
+        if auto.cardio {
+            cardioBits.append(cardioPhrase(type: auto.cardioType, minutes: auto.cardioDuration,
+                                           incline: auto.cardioIncline))
+        }
+        if m.cardio {
+            // Only add the manual entry when it isn't the same activity the
+            // workout log already described.
+            let sameActivity = auto.cardio && (m.cardioType == nil || m.cardioType == auto.cardioType)
+            if !sameActivity {
+                cardioBits.append(cardioPhrase(type: m.cardioType, minutes: m.cardioDuration,
+                                               incline: m.cardioIncline))
             }
-            parts.append(c)
+        }
+        if !cardioBits.isEmpty {
+            parts.append("Cardio (" + cardioBits.joined(separator: " + ") + ")")
         }
 
         let qualifies = m.workedOut == true || auto.hasAnything || !parts.isEmpty
         return DayStatus(isRest: false, qualifies: qualifies,
                          summary: parts.isEmpty ? "Logged" : parts.joined(separator: " \u{00B7} "))
+    }
+
+    /// "Walk, 32min, 4%" — one cardio session described from whichever layer
+    /// holds it.
+    nonisolated private static func cardioPhrase(type: String?, minutes: Double?,
+                                                 incline: Double?) -> String {
+        var s = type == "Running" ? "Run" : (type == nil ? "logged" : "Walk")
+        if let minutes { s += ", \(Int(minutes))min" }
+        if let incline, incline > 0 { s += ", \(trim(incline))%" }
+        return s
     }
 
     nonisolated private static func trim(_ v: Double) -> String {

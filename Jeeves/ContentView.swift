@@ -406,7 +406,11 @@ struct ContentView: View {
                         }
                         .padding(14)
                         .background(RoundedRectangle(cornerRadius: 16).fill(Color.surface))
-                    } else if cardio {
+                    }
+                    // A manually recorded cardio session stays editable even when
+                    // a workout also logged cardio — they can be different
+                    // sessions (an untracked run plus a logged walk).
+                    if cardio {
                         VStack(alignment: .leading, spacing: 14) {
                             Text("CARDIO TYPE").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.textMuted)
                             HStack(spacing: 8) {

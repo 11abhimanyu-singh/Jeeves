@@ -69,16 +69,29 @@ enum StandingPrefs {
         return Calendar.current.startOfDay(for: now) <= Calendar.current.startOfDay(for: expiry)
     }
 
-    static func add(_ note: String, expires: String? = nil) {
+    /// Stores a preference, REPLACING any existing one that says the same thing
+    /// (so re-stating it with a new expiry updates rather than silently
+    /// no-ops). Lapsed entries never block a re-add.
+    static func add(_ note: String, expires: String? = nil, now: Date = Date()) {
         var trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         if let expires, !expires.isEmpty, !trimmed.contains("(until") {
             trimmed += " (until \(expires))"
         }
-        var prefs = UserDefaults.standard.stringArray(forKey: key) ?? []
-        guard !prefs.contains(where: { JeevesChatService.fuzzyMatch($0, query: trimmed) }) else { return }
+        // Compare on the wording alone, ignoring any "(until …)" suffix.
+        let body = stripExpiry(trimmed)
+        var prefs = (UserDefaults.standard.stringArray(forKey: key) ?? [])
+            .filter { isActive($0, now: now) && stripExpiry($0) != body }
         prefs.append(trimmed)
         UserDefaults.standard.set(prefs, forKey: key)
+    }
+
+    /// The preference's wording without its "(until YYYY-MM-DD)" suffix.
+    nonisolated static func stripExpiry(_ note: String) -> String {
+        note.replacingOccurrences(of: #"\s*\(until [^)]*\)"#, with: "",
+                                  options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+            .lowercased()
     }
 
     /// Removes stored preferences matching the note (lapsed ones included);
@@ -568,9 +581,13 @@ enum JeevesChatService {
     static func resolveFireDate(dateRaw: String?, timeRaw: String, relativeTo now: Date) -> Date {
         let cal = Calendar.current
         let day = resolveDate(dateRaw, relativeTo: now)
-        let parts = timeRaw.split(separator: ":").compactMap { Int($0) }
-        let hour = parts.count > 0 ? min(23, max(0, parts[0])) : 9
-        let minute = parts.count > 1 ? min(59, max(0, parts[1])) : 0
+        // Require a real HH:MM — a partially-parsed "9pm" or "23.30" would
+        // otherwise schedule the reminder at a silently wrong hour.
+        let parts = timeRaw.split(separator: ":").map(String.init)
+        let hourValue = parts.count == 2 ? Int(parts[0].trimmingCharacters(in: .whitespaces)) : nil
+        let minuteValue = parts.count == 2 ? Int(parts[1].trimmingCharacters(in: .whitespaces)) : nil
+        let hour = hourValue.map { min(23, max(0, $0)) } ?? 9
+        let minute = (hourValue == nil ? nil : minuteValue).map { min(59, max(0, $0)) } ?? 0
         var fire = cal.date(bySettingHour: hour, minute: minute, second: 0, of: day) ?? day
         if fire <= now {
             fire = cal.date(byAdding: .day, value: 1, to: fire) ?? fire
@@ -597,13 +614,43 @@ enum JeevesChatService {
         return String(data: data, encoding: .utf8) ?? "{}"
     }
 
-    /// Case/whitespace-insensitive containment — how every "match by partial
-    /// title" tool finds its target. Pure and unit-tested.
+    /// Case/whitespace-insensitive containment, BOTH directions — a stored
+    /// title matches a longer user phrase too ("gym" ← "done with the gym").
+    /// Only for read-only/idempotent matching: the reverse direction makes a
+    /// specific query match every shorter title inside it, which would delete
+    /// "Dinner" while removing "Dinner with Sam". Destructive tools must use
+    /// `strictMatch`. Pure and unit-tested.
     nonisolated static func fuzzyMatch(_ text: String, query: String) -> Bool {
         let t = text.lowercased().trimmingCharacters(in: .whitespaces)
         let q = query.lowercased().trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return false }
+        guard !q.isEmpty, !t.isEmpty else { return false }
         return t.contains(q) || q.contains(t)
+    }
+
+    /// One-directional: the stored title must contain the query. What every
+    /// edit/delete/complete tool matches on, so a more specific request can
+    /// never sweep up shorter-titled records.
+    nonisolated static func strictMatch(_ text: String, query: String) -> Bool {
+        let t = text.lowercased().trimmingCharacters(in: .whitespaces)
+        let q = query.lowercased().trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty, !t.isEmpty else { return false }
+        return t.contains(q)
+    }
+
+    /// Narrow a match set the way a human would: if some titles match the
+    /// query exactly, those win; otherwise prefer the closest (shortest) title
+    /// so "Dinner with Sam" doesn't drag "Dinner" along. Used by the
+    /// destructive tools to keep a sloppy query from hitting several records.
+    nonisolated static func bestMatches<T>(_ items: [T], title: (T) -> String, query: String) -> [T] {
+        let q = query.lowercased().trimmingCharacters(in: .whitespaces)
+        let matches = items.filter { strictMatch(title($0), query: q) }
+        guard matches.count > 1 else { return matches }
+        let exact = matches.filter { title($0).lowercased().trimmingCharacters(in: .whitespaces) == q }
+        if !exact.isEmpty { return exact }
+        // Same title on several days (a multi-day event) is a legitimate group;
+        // differing titles are not — keep only the closest one.
+        let shortest = matches.min { title($0).count < title($1).count }.map { title($0).lowercased() }
+        return matches.filter { title($0).lowercased() == shortest }
     }
 
     // MARK: - Transport

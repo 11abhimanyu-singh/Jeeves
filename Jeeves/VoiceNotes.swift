@@ -64,8 +64,11 @@ final class VoiceRecorder: NSObject, ObservableObject {
         return dir
     }
 
-    /// Ask for mic + speech permissions, then begin recording.
+    /// Ask for mic + speech permissions, then begin recording. A second call
+    /// while already recording is ignored (a double-tap must not spawn two
+    /// recorders writing different files).
     func start() async {
+        guard phase == .idle, recorder == nil else { return }
         errorText = nil
         let micOK = await AVAudioApplication.requestRecordPermission()
         guard micOK else { errorText = "Microphone access is off — enable it in Settings."; return }
@@ -94,6 +97,8 @@ final class VoiceRecorder: NSObject, ObservableObject {
         } catch {
             errorText = "Couldn't start recording: \(error.localizedDescription)"
             phase = .idle
+            // Don't hold the audio session (playAndRecord ducks other apps).
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
     }
 
@@ -211,10 +216,17 @@ enum VoiceNoteSync {
         let liveNames = Set(live.map(\.fileName))
         Task.detached(priority: .utility) {
             let localDir = VoiceRecorder.audioDirectory()
-            // Delete pruned local audio.
+            // Delete pruned local audio — but never touch a file that has no
+            // VoiceNote record *yet*: it's a recording still in progress, or one
+            // whose transcription hasn't returned. Only files untouched for the
+            // grace window are orphans safe to remove.
+            let orphanGrace: TimeInterval = 15 * 60
             let localFiles = (try? FileManager.default.contentsOfDirectory(atPath: localDir.path)) ?? []
             for f in localFiles where f.hasSuffix(".m4a") && !liveNames.contains(f) {
-                try? FileManager.default.removeItem(at: localDir.appendingPathComponent(f))
+                let url = localDir.appendingPathComponent(f)
+                let modified = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date
+                if let modified, now.timeIntervalSince(modified) < orphanGrace { continue }
+                try? FileManager.default.removeItem(at: url)
             }
             guard let container = FileManager.default.url(
                 forUbiquityContainerIdentifier: "iCloud.abhimanyusingh.me.Jeeves") else { return }
