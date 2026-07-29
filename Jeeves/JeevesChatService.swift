@@ -505,7 +505,7 @@ enum JeevesChatService {
                     "from": ["type": "string", "description": "Where the journey starts: 'Home', or a hotel/address when abroad. Default Home."],
                     "to": ["type": "string", "description": "Airport or destination — a real place name so the journey can be measured."],
                     "date": ["type": "string", "description": "YYYY-MM-DD (or 'today'/'tomorrow')."],
-                    "time": ["type": "string", "description": "24-hour HH:MM. For a flight this is DEPARTURE; for a drive it's the time they must ARRIVE. ALWAYS the local clock where the journey starts."],
+                    "time": ["type": "string", "description": "24-hour HH:MM. For a flight this is DEPARTURE on the origin airport's local clock; for a drive it's the time they must ARRIVE, on the DESTINATION's local clock ('reach the lodge by 13:00' is 13:00 where the lodge is)."],
                     "from_timezone": ["type": "string", "description": "IANA zone the departure time is read on, e.g. 'Asia/Kolkata', 'Asia/Singapore'. Omit for journeys that start where the user lives — I'll look it up from the place when I can."],
                     "to_timezone": ["type": "string", "description": "IANA zone at the destination, e.g. 'Asia/Makassar' for Bali."],
                     "arrive_time": ["type": "string", "description": "Flights: scheduled arrival HH:MM on the DESTINATION's clock."],

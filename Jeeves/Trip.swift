@@ -344,6 +344,26 @@ enum TravelClock {
 
 // MARK: - The leave-by arithmetic (pure)
 
+/// Where a new journey's From/To prefill from. Pure and tested, because the
+/// hotel-as-flight-destination bug shipped twice: first on the outbound leg
+/// (Kathmandu — measured a 40 h road route), then mirrored on the return leg
+/// (To = Home for a flight — measured a 46 h road route into the flight's
+/// door-to-terminal slot). The rule, both directions: a flight's To is the
+/// departure airport, which nothing stored can know — it stays EMPTY.
+enum JourneyPrefill {
+    nonisolated static func places(mode: TravelMode, isReturn: Bool, home: String,
+                                   lastStay: String?, firstStay: String?,
+                                   priorStay: String?) -> (from: String, to: String) {
+        if isReturn {
+            // Leaving the trip's last stay; a drive heads Home.
+            return (lastStay ?? "", mode == .drive ? home : "")
+        }
+        // Outbound: leaving wherever you were last (a prior trip's stay that
+        // ends as this one begins, else Home); a drive heads to the first stay.
+        return (priorStay ?? home, mode == .drive ? (firstStay ?? "") : "")
+    }
+}
+
 enum LeaveBy {
 
     /// One line of the backward chain, newest (latest) first.

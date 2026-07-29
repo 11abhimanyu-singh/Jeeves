@@ -36,6 +36,30 @@ enum TravelGuard {
         return "\(f.string(from: day)) is in travel mode (\(trip.title.isEmpty ? "trip" : trip.title)) — nothing to plan. Your journeys and leave-by times are on the planner."
     }
 
+    /// Grows a journey's trip to cover the days the journey actually spans —
+    /// leave-by day through arrival day — then sweeps. EVERY path that writes
+    /// a journey's times must call this (editor Save, the card's Measure, chat
+    /// add_journey); the eval found each surface that skipped it left a
+    /// journey rendered on no day at all, because cards only show on
+    /// trip-covered days. Returns true when the window moved.
+    @discardableResult
+    static func absorb(_ segment: TravelSegment, context: ModelContext) async -> Bool {
+        let trips = (try? context.fetch(FetchDescriptor<Trip>())) ?? []
+        guard let trip = trips.first(where: { $0.id == segment.tripID }) else { return false }
+        var changed = false
+        let leaveDay = segment.day
+        if leaveDay < trip.startDate { trip.startDate = leaveDay; changed = true }
+        if leaveDay > trip.endDate { trip.endDate = leaveDay; changed = true }
+        if let landing = segment.arrivalDay, landing > trip.endDate {
+            trip.endDate = landing
+            changed = true
+        }
+        guard changed else { return false }
+        context.saveOrLog("TravelGuard.absorb")
+        await sweep(context: context)
+        return true
+    }
+
     /// Deletes stored plans (and cancels their block notifications) for every
     /// trip-covered day. Idempotent and cheap; runs at launch and whenever a
     /// trip is created or its dates grow.

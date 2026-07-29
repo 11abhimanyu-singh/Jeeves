@@ -73,6 +73,7 @@ struct LeaveByCard: View {
     let segment: TravelSegment
     @Environment(\.modelContext) private var modelContext
     @State private var pricing = false
+    @State private var measureNote: String?
 
     private var plan: LeaveBy.Plan? { LeaveBy.plan(for: segment) }
 
@@ -124,15 +125,22 @@ struct LeaveByCard: View {
                                 .padding(.top, 6)
                             // A long drive's chain spans days — "LEAVE 09:20 …
                             // arrive 20:00" read as one morning until each row
-                            // carried its date.
+                            // carried its date. And a drive's arrival rows live
+                            // on the DESTINATION's clock: "Must be there 15:00"
+                            // at Thimphu is 15:00 Bhutan time, labelled so.
                             VStack(alignment: .leading, spacing: 0) {
-                                Text(hhmm(step.time))
+                                Text(TravelClock.hhmm(step.time, in: zone(for: step)))
                                     .font(.system(size: 13, weight: step.isLeave ? .bold : .regular))
                                     .monospacedDigit()
                                     .foregroundStyle(step.isLeave ? Color.travelInk : Color.textPrimary)
                                 if chainIsMultiDay {
-                                    Text(dayTag(step.time, in: segment.fromTimeZone))
+                                    Text(dayTag(step.time, in: zone(for: step)))
                                         .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(Color.textMuted)
+                                }
+                                if driveZonesDiffer {
+                                    Text(TravelClock.label(zone(for: step), at: step.time))
+                                        .font(.system(size: 8.5, weight: .semibold))
                                         .foregroundStyle(Color.textMuted)
                                 }
                             }
@@ -194,11 +202,15 @@ struct LeaveByCard: View {
                     }
                 }
 
-                Text(plan.travelIsEstimated
+                Text(segment.travelMinutes == 0
+                     ? (segment.mode == .drive
+                        ? "No journey time yet — this chain is missing the drive itself. Add the route and I'll redo it; no nudge until then."
+                        : "No airport run yet — this chain budgets zero minutes to the terminal. Add the airport in the To field and I'll redo it; no nudge until then.")
+                     : plan.travelIsEstimated
                      ? "Journey time is an estimate — tap Measure to price it against live traffic. Cut-off, security and buffer are always your assumptions."
                      : "Journey measured against live traffic. Cut-off, security and buffer are your assumptions.")
                     .font(.system(size: 10.5))
-                    .foregroundStyle(Color.textMuted)
+                    .foregroundStyle(segment.travelMinutes == 0 ? Color.accentDeep : Color.textMuted)
                     .padding(.top, 2)
 
                 if !segment.toPlace.isEmpty {
@@ -215,6 +227,12 @@ struct LeaveByCard: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(pricing)
+                }
+                if let measureNote {
+                    Text(measureNote)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Color.accentDeep)
+                        .padding(.top, 2)
                 }
             } else {
                 Text(segment.mode == .drive
@@ -233,6 +251,7 @@ struct LeaveByCard: View {
     /// (Home, or the hotel you're actually in).
     private func measure() {
         pricing = true
+        measureNote = nil
         let from = segment.fromPlace
         let to = segment.toPlace
         let target = LeaveBy.plan(for: segment)?.leaveAt ?? Date()
@@ -240,10 +259,20 @@ struct LeaveByCard: View {
             let origin = await resolvedOrigin(from)
             if let minutes = await GoogleMapsService.commuteMinutes(from: origin, to: to,
                                                                    departure: max(target, Date())) {
-                segment.travelMinutes = minutes
-                segment.travelIsEstimated = false
-                modelContext.saveOrLog("LeaveByCard.measure")
-                await TravelNotifier.schedule(segment: segment)
+                if segment.mode != .drive && minutes > 360 {
+                    // Days of road time in a flight's door-to-terminal slot
+                    // means To isn't an airport — refuse, don't schedule.
+                    measureNote = "That routes \(LeaveBy.hours(minutes)) by road — the To field should be the departure airport, not a city or home."
+                } else {
+                    segment.travelMinutes = minutes
+                    segment.travelIsEstimated = false
+                    modelContext.saveOrLog("LeaveByCard.measure")
+                    // A newly real journey time can move the leave-by day
+                    // outside the trip — grow the window so the card doesn't
+                    // relocate itself into invisibility.
+                    await TravelGuard.absorb(segment, context: modelContext)
+                    await TravelNotifier.schedule(segment: segment)
+                }
             }
             pricing = false
         }
@@ -269,20 +298,41 @@ struct LeaveByCard: View {
     }
 
     private var crossesZones: Bool {
+        // Offsets only: the editor now auto-fills zone IDs for every journey,
+        // so "an ID is set" no longer implies a cross-zone trip — a domestic
+        // Bhadra drive would have sprouted a spurious IST chip.
         segment.fromTimeZone.secondsFromGMT(for: segment.departAt)
             != segment.toTimeZone.secondsFromGMT(for: segment.departAt)
-            || !segment.fromTimeZoneID.isEmpty
     }
 
-    /// True when the chain doesn't fit in one calendar day (on the origin's
-    /// clock, arrival included) — the trigger for dating every row.
+    /// A drive's LEAVE happens on the origin's clock; every later row —
+    /// planned arrival, the deadline — lives at the destination. A flight's
+    /// whole chain (terminal, cut-off, departure) runs at the origin airport;
+    /// only its separate Arrives row uses the destination clock.
+    private func zone(for step: LeaveBy.Step) -> TimeZone {
+        segment.mode == .drive && !step.isLeave ? segment.toTimeZone : segment.fromTimeZone
+    }
+
+    private var driveZonesDiffer: Bool {
+        guard segment.mode == .drive else { return false }
+        let at = segment.arriveBy ?? Date()
+        return segment.fromTimeZone.secondsFromGMT(for: at) != segment.toTimeZone.secondsFromGMT(for: at)
+    }
+
+    /// True when the chain doesn't fit in one calendar day — judged on the
+    /// clock EACH ROW RENDERS IN (a drive can stay same-day at the origin yet
+    /// cross midnight on the destination clock its deadline is shown in).
     private var chainIsMultiDay: Bool {
-        guard let plan, let first = plan.steps.first?.time else { return false }
-        var cal = Calendar.current
-        cal.timeZone = segment.fromTimeZone
-        var times = plan.steps.map(\.time)
-        if let a = segment.arriveAt { times.append(a) }
-        return times.contains { !cal.isDate($0, inSameDayAs: first) }
+        guard let plan, let first = plan.steps.first else { return false }
+        func ymd(_ t: Date, _ z: TimeZone) -> DateComponents {
+            var c = Calendar.current
+            c.timeZone = z
+            return c.dateComponents([.year, .month, .day], from: t)
+        }
+        let base = ymd(first.time, zone(for: first))
+        var rows: [(Date, TimeZone)] = plan.steps.map { ($0.time, zone(for: $0)) }
+        if let a = segment.arriveAt { rows.append((a, segment.toTimeZone)) }
+        return rows.contains { ymd($0.0, $0.1) != base }
     }
 
     private func dayTag(_ d: Date, in zone: TimeZone) -> String {
@@ -390,26 +440,15 @@ struct TripEditorView: View {
         let stays = ((try? modelContext.fetch(FetchDescriptor<TripStay>())) ?? [])
             .sorted { $0.arriveDate < $1.arriveDate }
         let tripStays = stays.filter { $0.tripID == trip.id }
-        let home = homeAddress()
-
-        let fromPlace: String
-        let toPlace: String
-        if isReturn {
-            // Leaving the trip's last stay, headed home.
-            let origin = tripStays.max { $0.departDate < $1.departDate }
-            fromPlace = origin.map { $0.address.isEmpty ? $0.place : $0.address } ?? ""
-            toPlace = home
-        } else {
-            // Leaving wherever you were last — the previous trip's stay if one
-            // ends as this trip begins, otherwise Home.
-            let prior = stays
-                .filter { s in !tripStays.contains { $0.id == s.id } && s.departDate <= trip.startDate }
-                .max { $0.departDate < $1.departDate }
-            fromPlace = prior.map { $0.address.isEmpty ? $0.place : $0.address } ?? home
-            toPlace = mode == .drive
-                ? (tripStays.first.map { $0.address.isEmpty ? $0.place : $0.address } ?? "")
-                : ""
-        }
+        let prior = stays
+            .filter { s in !tripStays.contains { $0.id == s.id } && s.departDate <= trip.startDate }
+            .max { $0.departDate < $1.departDate }
+        func addr(_ s: TripStay?) -> String? { s.map { $0.address.isEmpty ? $0.place : $0.address } }
+        let (fromPlace, toPlace) = JourneyPrefill.places(
+            mode: mode, isReturn: isReturn, home: homeAddress(),
+            lastStay: addr(tripStays.max { $0.departDate < $1.departDate }),
+            firstStay: addr(tripStays.first),
+            priorStay: addr(prior))
 
         // Outbound anchors to the trip's first day, the return to its last.
         let anchorDay = isReturn ? trip.endDate : trip.startDate
@@ -459,7 +498,10 @@ struct TripEditorView: View {
     }
 
     private func deleteTrip() {
-        for s in allSegments where s.tripID == trip.id { modelContext.delete(s) }
+        for s in allSegments where s.tripID == trip.id {
+            TravelNotifier.cancel(segment: s)
+            modelContext.delete(s)
+        }
         let stays = (try? modelContext.fetch(FetchDescriptor<TripStay>())) ?? []
         for st in stays where st.tripID == trip.id { modelContext.delete(st) }
         modelContext.delete(trip)
@@ -509,12 +551,30 @@ struct SegmentEditorView: View {
     @State private var arrives = Date()
     @State private var fromZoneID = ""
     @State private var toZoneID = ""
-    @State private var lookingUpZone = false
+    // A counter, not a Bool: two zone lookups can run at once (origin and
+    // destination) and a shared flag reported "done" when the first landed.
+    @State private var zoneLookups = 0
+    private var lookingUpZone: Bool { zoneLookups > 0 }
     @State private var measuring = false
     @State private var measureFailed = false
     @State private var travelMeasured = false
+    // A "successful" measurement can still be nonsense — a flight's To
+    // pointing at a city routes days of road time into the door-to-terminal
+    // slot. Anything over 6 h is refused, not stored.
+    @State private var implausibleMinutes = 0
+    // What the arrival picker held when the sheet opened; an arrival is only
+    // stored if the user actually moved it (or one was already stored) —
+    // otherwise editing just the departure used to freeze a phantom arrival.
+    @State private var loadedArrives = Date.distantPast
+    // What the main picker held when the sheet opened (or was last re-rendered
+    // by an arriving zone) — the marker for "the user hasn't touched this".
+    @State private var loadedWhen = Date.distantPast
 
     private var isFlight: Bool { segment.mode != .drive }
+    /// The clock the main time picker is read on: a flight departs on the
+    /// origin's clock, but a drive's "must arrive by" lives at the DESTINATION
+    /// — "arrive 15:00" means 15:00 where you're going.
+    private var deadlineZoneID: String { isFlight ? fromZoneID : toZoneID }
 
     var body: some View {
         NavigationStack {
@@ -524,10 +584,13 @@ struct SegmentEditorView: View {
                     // From/To are the two ends of the JOURNEY — for a flight
                     // that's door to departure airport, and the labels say so,
                     // because prefilling a hotel abroad once measured a 40-hour
-                    // road route to Kathmandu.
-                    field("From — where you set off", text: $from, placeholder: "Home — or a hotel address")
+                    // road route to Kathmandu. A flight's To never offers the
+                    // Home chip: home is the one place you can't fly from.
+                    field("From — where you set off", text: $from,
+                          placeholder: "Home — or a hotel address", homeChip: true)
                     field(isFlight ? "To — the airport you fly from" : "To — your destination",
-                          text: $to, placeholder: isFlight ? "BLR airport" : "JLR River Tern Lodge")
+                          text: $to, placeholder: isFlight ? "BLR airport" : "JLR River Tern Lodge",
+                          homeChip: !isFlight)
 
                     DatePicker(isFlight ? "Departs" : "Must arrive by",
                                selection: $when, displayedComponents: [.date, .hourAndMinute])
@@ -537,8 +600,14 @@ struct SegmentEditorView: View {
 
                     // The clock the time above is read on. Getting this wrong is
                     // the difference between making a flight and missing it, so
-                    // it's stated rather than assumed.
-                    zoneRow("Time is local to", $fromZoneID, place: from.isEmpty ? "Home" : from)
+                    // it's stated rather than assumed — and auto-filled from the
+                    // place on open, because a silently wrong default zone made
+                    // every Bhutan deadline 30 minutes late.
+                    if isFlight {
+                        zoneRow("Time is local to", $fromZoneID, place: from.isEmpty ? "Home" : from)
+                    } else {
+                        zoneRow("Deadline is local to", $toZoneID, place: to)
+                    }
                     if isFlight {
                         DatePicker("Arrives", selection: $arrives,
                                    displayedComponents: [.date, .hourAndMinute])
@@ -577,13 +646,19 @@ struct SegmentEditorView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(role: .destructive) {
+                        // A deleted journey must take its leave-by nudge with
+                        // it — a cancelled trip still fired 3 a.m. reminders.
+                        TravelNotifier.cancel(segment: segment)
                         modelContext.delete(segment)
                         modelContext.saveOrLog("SegmentEditor.delete")
                         dismiss()
                     } label: { Image(systemName: "trash") }.tint(.red)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    // Saving mid-lookup stored an empty zone or a zero journey
+                    // and let the async result land in a dismissed sheet.
                     Button("Save") { save() }.tint(Color.accentDeep)
+                        .disabled(measuring || zoneLookups > 0)
                 }
             }
             .onAppear(perform: load)
@@ -599,11 +674,20 @@ struct SegmentEditorView: View {
         // so opening and saving without edits changes nothing.
         let stored = isFlight ? (segment.departAt == .distantPast ? nil : segment.departAt)
                               : segment.arriveBy
-        when = stored.map { TravelClock.wallClock(of: $0, in: zone(fromZoneID)) } ?? Date()
+        when = stored.map { TravelClock.wallClock(of: $0, in: zone(deadlineZoneID)) } ?? Date()
         arrives = segment.arriveAt.map { TravelClock.wallClock(of: $0, in: zone(toZoneID)) } ?? when
+        loadedArrives = arrives
+        loadedWhen = when
         checkIn = segment.checkInMinutes; security = segment.securityMinutes
         buffer = segment.bufferMinutes; stops = segment.stopMinutes; travel = segment.travelMinutes
         travelMeasured = !segment.travelIsEstimated
+        // Zones are looked up from the places on open, never assumed: the
+        // device clock as a silent default made a 15:00 Thimphu deadline store
+        // as 15:00 IST — thirty minutes late. (A flight's arrival clock stays
+        // manual: the To field is the departure airport, so it can't tell us
+        // where the flight lands.)
+        if fromZoneID.isEmpty, !from.isEmpty { lookUpZone(for: from, into: $fromZoneID) }
+        if !isFlight, toZoneID.isEmpty, !to.isEmpty { lookUpZone(for: to, into: $toZoneID) }
         // Nothing measured yet but we know where we're going — do it now rather
         // than making the user type a distance.
         if travel == 0, !to.isEmpty { measureJourney() }
@@ -615,16 +699,21 @@ struct SegmentEditorView: View {
         segment.toPlace = to
         segment.fromTimeZoneID = fromZoneID
         segment.toTimeZoneID = toZoneID
-        // Read the typed wall-clock on the journey's own clock, not the phone's.
-        let departInstant = TravelClock.instant(readingWallClock: when, in: zone(fromZoneID))
+        // Read the typed wall-clock on the journey's own clock, not the phone's
+        // — the origin's for a flight departure, the DESTINATION's for a
+        // drive's arrival deadline.
+        let departInstant = TravelClock.instant(readingWallClock: when, in: zone(deadlineZoneID))
         if isFlight {
             segment.departAt = departInstant
             segment.arriveBy = nil
-            // An untouched arrival picker still reads the departure time —
-            // storing that would show "arrives 09:00" for a 09:00 departure.
-            // Equality means "not set".
+            // An arrival is stored only if the user moved the picker (or one
+            // was already stored): the untouched picker just echoes whatever
+            // the sheet opened with, and storing that froze phantom arrivals —
+            // including ones BEFORE departure once only the departure was
+            // edited. Equality with departure still means "not set".
+            let arrivesTouched = arrives != loadedArrives || segment.arriveAt != nil
             let arriveInstant = TravelClock.instant(readingWallClock: arrives, in: zone(toZoneID))
-            segment.arriveAt = arriveInstant == departInstant ? nil : arriveInstant
+            segment.arriveAt = (arrivesTouched && arriveInstant != departInstant) ? arriveInstant : nil
         } else {
             segment.arriveBy = departInstant
             segment.arriveAt = nil
@@ -643,28 +732,15 @@ struct SegmentEditorView: View {
 
     /// A journey that leaves before the trip starts or lands after it ends
     /// grows the trip to match — days you're on the road are trip days, and
-    /// the planner must stand down on them too. (The Kathmandu case: the trip
-    /// ends 12 Oct with the calendar event, but the return drive arrives the
-    /// 14th; without this the drive was invisible and 13–14 Oct got a routine
-    /// plan.) The trip editor shows the changed dates, so the growth is
-    /// visible and reversible.
+    /// the planner must stand down on them too. Shared with the card's
+    /// Measure and chat's add_journey via TravelGuard.absorb, so no surface
+    /// can leave a journey stranded outside its trip's window.
     private func extendTripIfNeeded() {
-        let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
-        guard let trip = trips.first(where: { $0.id == segment.tripID }) else { return }
-        var changed = false
-        let leaveDay = segment.day
-        if leaveDay < trip.startDate { trip.startDate = leaveDay; changed = true }
-        if leaveDay > trip.endDate { trip.endDate = leaveDay; changed = true }
-        if let landing = segment.arrivalDay, landing > trip.endDate {
-            trip.endDate = landing; changed = true
-        }
-        guard changed else { return }
-        modelContext.saveOrLog("SegmentEditor.extendTrip")
-        // Newly covered days may hold stale plans — the trip owns them now.
-        Task { await TravelGuard.sweep(context: modelContext) }
+        Task { await TravelGuard.absorb(segment, context: modelContext) }
     }
 
-    private func field(_ title: String, text: Binding<String>, placeholder: String) -> some View {
+    private func field(_ title: String, text: Binding<String>, placeholder: String,
+                       homeChip: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title.uppercased()).font(.system(size: 10, weight: .bold)).kerning(0.8)
                 .foregroundStyle(Color.textMuted)
@@ -673,8 +749,7 @@ struct SegmentEditorView: View {
                     .font(.system(size: 15))
                 // One tap for the place the app already knows. Only offered
                 // when a Home address is actually saved — never an invented one.
-                if text.wrappedValue.isEmpty, !homeAddress.isEmpty,
-                   title.hasPrefix("From") || title.hasPrefix("To") {
+                if homeChip, text.wrappedValue.isEmpty, !homeAddress.isEmpty {
                     Button { text.wrappedValue = homeAddress } label: {
                         HStack(spacing: 3) {
                             Image(systemName: "house.fill").font(.system(size: 9))
@@ -715,6 +790,10 @@ struct SegmentEditorView: View {
                              + (travelMeasured ? " \u{00B7} live traffic" : " \u{00B7} entered by you"))
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(Color.textPrimary)
+                    } else if implausibleMinutes > 0 {
+                        Text("That routes \(LeaveBy.hours(implausibleMinutes)) by road")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Color.accentDeep)
                     } else if measureFailed {
                         Text("Couldn't find that place")
                             .font(.system(size: 13, weight: .medium))
@@ -740,10 +819,16 @@ struct SegmentEditorView: View {
             .padding(.horizontal, 12).padding(.vertical, 9)
             .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
 
-            // Only ask once the automatic route has actually failed.
-            if measureFailed || (travel > 0 && !travelMeasured) {
-                stepper("Override", $travel, step: 15, unit: "min")
-                Text(measureFailed
+            // Only ask once the automatic route has actually failed or refused.
+            if measureFailed || implausibleMinutes > 0 || (travel > 0 && !travelMeasured) {
+                // Hand-entered minutes are the user's estimate, never "live
+                // traffic" — moving the stepper clears the measured flag.
+                stepper("Override", Binding(get: { travel },
+                                            set: { travel = $0; travelMeasured = false }),
+                        step: 15, unit: "min")
+                Text(implausibleMinutes > 0
+                     ? "A flight's journey is door to departure airport — \u{201C}\(to)\u{201D} doesn't look like one. Fix the To field, or give me the real airport-run minutes."
+                     : measureFailed
                      ? "I couldn't route to \u{201C}\(to)\u{201D} — give me a rough number and I'll work backwards from it."
                      : "Using your number. Tap Measure to price the real route instead.")
                     .font(.system(size: 11)).foregroundStyle(Color.textMuted)
@@ -756,6 +841,7 @@ struct SegmentEditorView: View {
         guard !to.isEmpty else { return }
         measuring = true
         measureFailed = false
+        implausibleMinutes = 0
         let originRaw = from.isEmpty ? "Home" : from
         Task {
             let saved = (try? modelContext.fetch(FetchDescriptor<SavedLocation>())) ?? []
@@ -763,8 +849,22 @@ struct SegmentEditorView: View {
                 .map(\.address).flatMap { $0.isEmpty ? nil : $0 } ?? originRaw
             if let m = await GoogleMapsService.commuteMinutes(from: origin, to: to,
                                                              departure: max(when, Date())) {
-                travel = m
-                travelMeasured = true
+                // A flight's journey is door-to-terminal. Days of road time
+                // mean the To field is a city or a house, not an airport —
+                // refuse the number instead of confidently scheduling a
+                // leave-by two days early.
+                if isFlight && m > 360 {
+                    implausibleMinutes = m
+                    // The stale previous measurement must die with the refusal
+                    // — otherwise Save stored the OLD airport's minutes as
+                    // "live traffic" against the new, unmeasured To.
+                    travel = 0
+                    travelMeasured = false
+                } else {
+                    travel = m
+                    travelMeasured = true
+                    implausibleMinutes = 0
+                }
             } else {
                 measureFailed = true
             }
@@ -818,14 +918,43 @@ struct SegmentEditorView: View {
     /// Geocode the place, then ask which zone that pin sits in — so no table of
     /// airports is needed and it works anywhere.
     private func lookUpZone(for place: String, into binding: Binding<String>) {
-        lookingUpZone = true
+        zoneLookups += 1
+        // "Home"/"Work"/"Gym" resolve to their saved addresses before
+        // geocoding — the literal word "Home" geocodes to an arbitrary town.
+        let target = resolvedPlace(place)
         Task {
-            if let p = await GoogleMapsService.geocodePlace(place),
+            if let p = await GoogleMapsService.geocodePlace(target),
                let lat = p.lat, let lng = p.lng,
                let id = await GoogleMapsService.timeZoneID(lat: lat, lng: lng) {
                 binding.wrappedValue = id
+                rerenderClocks()
             }
-            lookingUpZone = false
+            zoneLookups -= 1
+        }
+    }
+
+    private func resolvedPlace(_ raw: String) -> String {
+        let saved = (try? modelContext.fetch(FetchDescriptor<SavedLocation>())) ?? []
+        if let match = saved.first(where: { $0.kind.rawValue.lowercased() == raw.lowercased() }),
+           !match.address.isEmpty { return match.address }
+        return raw
+    }
+
+    /// A zone that arrives after the sheet rendered must not reinterpret the
+    /// digits on screen. Untouched pickers re-render the STORED instant on the
+    /// new clock — same moment, new digits — so an open-and-save changes
+    /// nothing. Pickers the user already moved keep their digits: what they
+    /// typed is read in the zone now shown beneath the picker.
+    private func rerenderClocks() {
+        let stored = isFlight ? (segment.departAt == .distantPast ? nil : segment.departAt)
+                              : segment.arriveBy
+        if when == loadedWhen, let stored {
+            when = TravelClock.wallClock(of: stored, in: zone(deadlineZoneID))
+            loadedWhen = when
+        }
+        if arrives == loadedArrives, let a = segment.arriveAt {
+            arrives = TravelClock.wallClock(of: a, in: zone(toZoneID))
+            loadedArrives = arrives
         }
     }
 
@@ -865,14 +994,28 @@ enum TravelNotifier {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: [id])
         guard let plan = LeaveBy.plan(for: segment) else { return }
+        // A chain with no journey time is missing its biggest leg — a nudge
+        // computed from it would fire confidently wrong. The pending request
+        // is already removed above, so a stale nudge dies here too.
+        guard segment.travelMinutes > 0 else { return }
         let fire = plan.leaveAt.addingTimeInterval(-30 * 60)
         guard fire > Date() else { return }
+        // Same authorization path as plan reminders — without it the nudge was
+        // silently added-but-undeliverable for anyone who never granted
+        // notifications, while chat promised "I'll nudge you 30 minutes before."
+        guard await NotificationService.ensureAuthorized() else { return }
 
         let content = UNMutableNotificationContent()
         content.title = "Leave in 30 minutes"
+        // The leave time reads on the journey's own clock — the one the card
+        // shows — with a zone label whenever that differs from the phone's.
         let f = DateFormatter(); f.dateFormat = "HH:mm"
+        f.timeZone = segment.fromTimeZone
+        let zoneNote = segment.fromTimeZone.secondsFromGMT(for: plan.leaveAt)
+            == TimeZone.current.secondsFromGMT(for: plan.leaveAt)
+            ? "" : " \(TravelClock.label(segment.fromTimeZone, at: plan.leaveAt))"
         let what = segment.label.isEmpty ? segment.mode.label : segment.label
-        content.body = "\(what) — leave at \(f.string(from: plan.leaveAt))"
+        content.body = "\(what) — leave at \(f.string(from: plan.leaveAt))\(zoneNote)"
             + (segment.toPlace.isEmpty ? "" : " for \(segment.toPlace)")
             + (plan.travelIsEstimated ? ". Journey time is an estimate." : ".")
         content.sound = .default
@@ -880,6 +1023,12 @@ enum TravelNotifier {
         let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
         try? await center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+    }
+
+    /// A deleted journey takes its pending nudge with it.
+    static func cancel(segment: TravelSegment) {
+        UNUserNotificationCenter.current()
+            .removePendingNotificationRequests(withIdentifiers: ["travel-\(segment.id.uuidString)"])
     }
 }
 

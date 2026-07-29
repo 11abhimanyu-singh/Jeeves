@@ -629,16 +629,18 @@ struct JeevesChatView: View {
             return .init(text: "Need a 24-hour HH:MM time.")
         }
         let day = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
-        // The time the user says is on the clock where the journey STARTS —
-        // "19:40 leaving Singapore" is 19:40 SGT even if they're in India when
-        // they say it. Read it in that zone, store the instant.
+        // A flight's time is its departure, read at the ORIGIN airport ("19:40
+        // leaving Singapore" is 19:40 SGT). A drive's time is its arrival
+        // deadline, read at the DESTINATION ("reach the lodge by 13:00" is
+        // 13:00 where the lodge is) — the same convention as the editor and
+        // the card, which briefly disagreed with this tool.
         let fromZoneID = input["from_timezone"] as? String ?? ""
         let toZoneID = input["to_timezone"] as? String ?? ""
         let fromZone = TimeZone(identifier: fromZoneID) ?? .current
         let toZone = TimeZone(identifier: toZoneID) ?? .current
         let wall = Calendar.current.date(bySettingHour: minute / 60, minute: minute % 60,
                                          second: 0, of: day) ?? day
-        let when = TravelClock.instant(readingWallClock: wall, in: fromZone)
+        let when = TravelClock.instant(readingWallClock: wall, in: mode == .drive ? toZone : fromZone)
 
         // Optional scheduled arrival, on the destination's clock.
         var arriveAt: Date? = nil
@@ -671,6 +673,7 @@ struct JeevesChatView: View {
         // Measure the journey now if we can — a leave-by built on a guess is
         // exactly the failure this feature exists to prevent.
         var measured = false
+        var refusedRoadMinutes = 0
         if segment.travelMinutes == 0, !segment.toPlace.isEmpty {
             let saved = (try? modelContext.fetch(FetchDescriptor<SavedLocation>())) ?? []
             let originRaw = segment.fromPlace.isEmpty ? "Home" : segment.fromPlace
@@ -678,12 +681,24 @@ struct JeevesChatView: View {
                 .map(\.address).flatMap { $0.isEmpty ? nil : $0 } ?? originRaw
             if let m = await GoogleMapsService.commuteMinutes(from: origin, to: segment.toPlace,
                                                              departure: max(when.addingTimeInterval(-3600), Date())) {
-                segment.travelMinutes = m
-                segment.travelIsEstimated = false
-                measured = true
+                // Same guard as the editor and the card: days of road time in
+                // a flight's door-to-terminal slot means `to` isn't an airport
+                // — refuse it, or absorb would grow the trip around a chain
+                // that leaves days early.
+                if mode != .drive && m > 360 {
+                    refusedRoadMinutes = m
+                } else {
+                    segment.travelMinutes = m
+                    segment.travelIsEstimated = false
+                    measured = true
+                }
             }
         }
         modelContext.saveOrLog("chat.addJourney")
+        // Same rule as the editor and the card: a journey's days belong to its
+        // trip. Without this, a chat-added two-day drive computed a leave day
+        // outside the trip window and its card rendered on no day at all.
+        let widened = await TravelGuard.absorb(segment, context: modelContext)
         await TravelNotifier.schedule(segment: segment)
 
         guard let plan = LeaveBy.plan(for: segment) else {
@@ -691,13 +706,24 @@ struct JeevesChatView: View {
         }
         let leaveLabel = TravelClock.hhmm(plan.leaveAt, in: fromZone)
             + (fromZoneID.isEmpty ? "" : " " + TravelClock.label(fromZone, at: plan.leaveAt))
-        let caveat = segment.travelMinutes == 0
-            ? " I couldn't measure the journey — tell me roughly how long it takes and I'll redo this."
-            : (measured ? " Journey measured against live traffic (\(segment.travelMinutes) min)."
-                        : " Journey time \(segment.travelMinutes) min as given.")
+        let caveat: String
+        if refusedRoadMinutes > 0 {
+            caveat = " I measured \(refusedRoadMinutes) min by ROAD to '\(segment.toPlace)' — that's not a door-to-airport run, so I ignored it. Give me the departure airport (or the real airport-run minutes) and I'll redo this."
+        } else if segment.travelMinutes == 0 {
+            caveat = " I couldn't measure the journey — tell me roughly how long it takes and I'll redo this."
+        } else if measured {
+            caveat = " Journey measured against live traffic (\(segment.travelMinutes) min)."
+        } else {
+            caveat = " Journey time \(segment.travelMinutes) min as given."
+        }
+        let windowNote = widened
+            ? " The trip's dates grew to cover the journey days (the planner stands down on them)."
+            : ""
+        // No nudge is scheduled for a chain with no journey time — don't
+        // promise one.
+        let nudge = segment.travelMinutes > 0 ? " I'll nudge you 30 minutes before." : ""
         return .init(text: "Added to \(trip.title): \(segment.label.isEmpty ? mode.label : segment.label). "
-                     + "Leave at \(leaveLabel) on \(JeevesChatView.dayString(day)).\(caveat) "
-                     + "I'll nudge you 30 minutes before.")
+                     + "Leave at \(leaveLabel) on \(JeevesChatView.dayString(day)).\(caveat)\(windowNote)\(nudge)")
     }
 
     // MARK: History + standing preferences

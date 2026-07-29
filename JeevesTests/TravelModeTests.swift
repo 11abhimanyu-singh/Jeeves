@@ -95,6 +95,49 @@ final class TravelModeTests: XCTestCase {
         XCTAssertEqual(drive.day, cal.startOfDay(for: at(2026, 8, 15, 13, 0)))
     }
 
+    // MARK: Journey prefill — the hotel-as-flight-destination bug shipped
+    // twice (outbound Kathmandu, then mirrored on the return leg), so the
+    // rule is pinned: a flight's To is ALWAYS empty; only drives get places.
+
+    func testReturnFlightNeverPrefillsADestination() {
+        let p = JourneyPrefill.places(mode: .flight, isReturn: true, home: "12 Home Rd, Bengaluru",
+                                      lastStay: "Hotel, Thimphu", firstStay: "Hotel, Thimphu",
+                                      priorStay: nil)
+        XCTAssertEqual(p.from, "Hotel, Thimphu", "the return leg leaves the last stay")
+        XCTAssertEqual(p.to, "", "no stored place can know the departure airport — never Home")
+    }
+
+    func testReturnDriveHeadsHome() {
+        let p = JourneyPrefill.places(mode: .drive, isReturn: true, home: "12 Home Rd, Bengaluru",
+                                      lastStay: "Hotel, Thimphu", firstStay: "Hotel, Thimphu",
+                                      priorStay: nil)
+        XCTAssertEqual(p.from, "Hotel, Thimphu")
+        XCTAssertEqual(p.to, "12 Home Rd, Bengaluru")
+    }
+
+    func testOutboundFlightNeverPrefillsADestination() {
+        let p = JourneyPrefill.places(mode: .flight, isReturn: false, home: "12 Home Rd, Bengaluru",
+                                      lastStay: "Hotel, Kathmandu", firstStay: "Hotel, Kathmandu",
+                                      priorStay: nil)
+        XCTAssertEqual(p.from, "12 Home Rd, Bengaluru", "outbound sets off from Home")
+        XCTAssertEqual(p.to, "", "a flight's To stays empty — the Kathmandu 40-hour-road-route lesson")
+    }
+
+    func testOutboundDriveHeadsToTheFirstStay() {
+        let p = JourneyPrefill.places(mode: .drive, isReturn: false, home: "12 Home Rd, Bengaluru",
+                                      lastStay: "JLR River Tern Lodge", firstStay: "JLR River Tern Lodge",
+                                      priorStay: nil)
+        XCTAssertEqual(p.from, "12 Home Rd, Bengaluru")
+        XCTAssertEqual(p.to, "JLR River Tern Lodge")
+    }
+
+    func testOutboundLeavesFromAPriorTripsStayWhenOneChains() {
+        let p = JourneyPrefill.places(mode: .drive, isReturn: false, home: "12 Home Rd, Bengaluru",
+                                      lastStay: "Marina Bay, Singapore", firstStay: "Marina Bay, Singapore",
+                                      priorStay: "Karma Kandara, Bali")
+        XCTAssertEqual(p.from, "Karma Kandara, Bali", "back-to-back trips chain stay to stay")
+    }
+
     func testLongDriveAnchorsToItsLeaveByDay() {
         // The Kathmandu return: must arrive home 14 Oct 20:00 after ~40 h of
         // driving plus stops. The journey belongs to the day you LEAVE (the

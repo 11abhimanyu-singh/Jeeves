@@ -24,7 +24,7 @@ final class TravelGuardTests: XCTestCase {
     }
 
     private func makeContext() throws -> ModelContext {
-        let schema = Schema([Trip.self, DailyPlanState.self])
+        let schema = Schema([Trip.self, DailyPlanState.self, TravelSegment.self])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true,
                                         cloudKitDatabase: .none)
         container = try ModelContainer(for: schema, configurations: [config])
@@ -86,6 +86,42 @@ final class TravelGuardTests: XCTestCase {
             .filter { !TravelGuard.isTravelDay($0, context: context) }
         XCTAssertEqual(needed, [day(2026, 9, 2), day(2026, 9, 3)],
                        "only the pre-trip days survive the filter")
+    }
+
+    func testAbsorbGrowsTheTripToCoverAJourney() async throws {
+        let context = try makeContext()
+        let trip = Trip(title: "Thimphu", startDate: day(2026, 8, 12), endDate: day(2026, 8, 18))
+        context.insert(trip)
+        // A ~50 h outbound drive arriving 12 Aug 15:00 leaves on the 10th —
+        // before the trip. Absorb must pull the start back to the leave day.
+        let cal = Calendar.current
+        let arrive = cal.date(bySettingHour: 15, minute: 0, second: 0, of: day(2026, 8, 12))!
+        let drive = TravelSegment(tripID: trip.id, mode: .drive, label: "Drive",
+                                  arriveBy: arrive, stopMinutes: 60, travelMinutes: 2950)
+        context.insert(drive)
+
+        let widened = await TravelGuard.absorb(drive, context: context)
+        XCTAssertTrue(widened)
+        XCTAssertEqual(trip.startDate, drive.day, "the trip now starts on the leave-by day")
+        XCTAssertEqual(trip.endDate, day(2026, 8, 18), "the end is untouched")
+        let again = await TravelGuard.absorb(drive, context: context)
+        XCTAssertFalse(again, "idempotent once covered")
+    }
+
+    func testAbsorbIgnoresAJourneyAlreadyInsideTheWindow() async throws {
+        let context = try makeContext()
+        let trip = Trip(title: "Thimphu", startDate: day(2026, 8, 10), endDate: day(2026, 8, 18))
+        context.insert(trip)
+        let cal = Calendar.current
+        let depart = cal.date(bySettingHour: 10, minute: 30, second: 0, of: day(2026, 8, 18))!
+        let flight = TravelSegment(tripID: trip.id, mode: .flight, label: "KB 121",
+                                   departAt: depart, travelMinutes: 90)
+        context.insert(flight)
+
+        let widened = await TravelGuard.absorb(flight, context: context)
+        XCTAssertFalse(widened)
+        XCTAssertEqual(trip.startDate, day(2026, 8, 10))
+        XCTAssertEqual(trip.endDate, day(2026, 8, 18))
     }
 
     func testRefusalMessageNamesTheDayAndTrip() {

@@ -191,7 +191,9 @@ enum NotificationService {
 
     // MARK: Private
 
-    private static func ensureAuthorized() async -> Bool {
+    // Internal (not private) so TravelNotifier's leave-by nudges run the same
+    // authorization path as plan-block reminders instead of silently no-oping.
+    static func ensureAuthorized() async -> Bool {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         switch settings.authorizationStatus {
         case .authorized, .provisional, .ephemeral: return true
