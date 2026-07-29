@@ -22,12 +22,14 @@ struct DayPlannerView: View {
     @Query private var checkins: [CheckIn]
     @Query private var jobApplications: [JobApplication]
     @Query private var readingLogs: [ReadingLog]
+    @Query private var trips: [Trip]
 
     @State private var hasGymToday = true
     @State private var gymTime: Date = Calendar.current.date(bySettingHour: 11, minute: 0, second: 0, of: Date()) ?? Date()
 
     // Date dial: defaults to today, scrollable through the next 60 days.
     @State private var selectedDate: Date = Date().startOfDay
+    @State private var editingTrip: Trip?
     @State private var eventDraft: EventDraft?
     @State private var editingEvent: DailyEvent?
 
@@ -77,6 +79,7 @@ struct DayPlannerView: View {
                 PlanEditorView(original: plan, onSave: commitEditedPlan)
             }
         }
+        .sheet(item: $editingTrip) { TripEditorView(trip: $0) }
         .onAppear { loadGymState() }
         .onChange(of: selectedDate) { _, _ in loadGymState() }
         .onChange(of: hasGymToday) { _, _ in saveGymState() }
@@ -86,11 +89,36 @@ struct DayPlannerView: View {
     @ViewBuilder
     private var scrollContent: some View {
         VStack(alignment: .leading, spacing: 18) {
-            eventsSection
-            gymCard
-            planBar
-            planCard
+            if let trip = tripCovering(selectedDate) {
+                // Travel mode: the planner stands down. No routine, no gym you
+                // can't reach, no commute to nowhere — just the journeys.
+                TravelDayCard(trip: trip, day: selectedDate)
+                eventsSection
+            } else {
+                eventsSection
+                gymCard
+                planBar
+                planCard
+            }
         }
+    }
+
+    /// The trip that puts this day in travel mode, if any.
+    private func tripCovering(_ day: Date) -> Trip? {
+        trips.first { $0.covers(day) }
+    }
+
+    /// Open the trip covering the selected day, or start one that begins there.
+    /// A one-day trip is a perfectly good travel day; extend it in the editor.
+    private func openOrCreateTrip() {
+        if let existing = tripCovering(selectedDate) {
+            editingTrip = existing
+            return
+        }
+        let trip = Trip(title: "Trip", startDate: selectedDate, endDate: selectedDate)
+        modelContext.insert(trip)
+        modelContext.saveOrLog("DayPlanner.newTrip")
+        editingTrip = trip
     }
 
     // MARK: Plan my day (persisted, Claude-first)
@@ -568,6 +596,16 @@ struct DayPlannerView: View {
                 Text("Day Planner").font(.heading(20)).foregroundStyle(Color.textPrimary)
             }
             Spacer()
+            // Travel mode: open the trip covering this day, or start one from it.
+            Button { openOrCreateTrip() } label: {
+                Circle()
+                    .fill(tripCovering(selectedDate) != nil ? Color.travelBg : Color.surface)
+                    .frame(width: 38, height: 38)
+                    .overlay(Image(systemName: "airplane")
+                        .foregroundStyle(tripCovering(selectedDate) != nil ? Color.travelInk : Color.textSoft)
+                        .font(.system(size: 15)))
+            }
+            .buttonStyle(.plain)
             // Tap to jump back to today.
             Button { withAnimation { selectedDate = today } } label: {
                 Circle()

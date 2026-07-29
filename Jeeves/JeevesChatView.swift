@@ -410,6 +410,8 @@ struct JeevesChatView: View {
         case "delete_reminder": return toolDeleteReminder(call.input)
         case "fetch_chat_history": return toolFetchChatHistory(call.input)
         case "remember_preference": return toolRememberPreference(call.input)
+        case "add_trip":       return toolAddTrip(call.input)
+        case "add_journey":    return await toolAddJourney(call.input)
         default:               return .init(text: "Unknown tool \(call.name).")
         }
     }
@@ -594,6 +596,83 @@ struct JeevesChatView: View {
         modelContext.saveOrLog()
         ReminderScheduler.reschedule(all.filter { !matches.contains($0) && $0.isActive })
         return .init(text: "Deleted reminder(s): \(names) — their notifications are cancelled.")
+    }
+
+    // MARK: Travel mode
+
+    @MainActor
+    private func toolAddTrip(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let title = (input["title"] as? String ?? "Trip")
+        let start = JeevesChatService.resolveDate(input["start_date"] as? String, relativeTo: today)
+        let end = JeevesChatService.resolveDate(input["end_date"] as? String, relativeTo: today)
+        guard end >= start else { return .init(text: "The trip's end date is before its start.") }
+        let trip = Trip(title: title, startDate: start, endDate: end)
+        modelContext.insert(trip)
+        modelContext.saveOrLog("chat.addTrip")
+        return .init(text: "Travel mode on for \(trip.dayCount) day(s): \(title), "
+                     + "\(JeevesChatView.dayString(start)) – \(JeevesChatView.dayString(end)). "
+                     + "The planner stands down on those days. Add each flight or drive with add_journey.")
+    }
+
+    @MainActor
+    private func toolAddJourney(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
+        let tripQuery = input["trip"] as? String ?? ""
+        let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
+        guard let trip = JeevesChatService.bestMatches(trips, title: \.title, query: tripQuery).first
+                ?? trips.last else {
+            return .init(text: "No trip matches '\(tripQuery)'. Create one with add_trip first.")
+        }
+        let mode = TravelMode(rawValue: input["mode"] as? String ?? "flight") ?? .flight
+        guard let minute = minutesFrom(input["time"] as? String) else {
+            return .init(text: "Need a 24-hour HH:MM time.")
+        }
+        let day = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
+        let when = Calendar.current.date(bySettingHour: minute / 60, minute: minute % 60,
+                                         second: 0, of: day) ?? day
+
+        let segment = TravelSegment(
+            tripID: trip.id, mode: mode,
+            label: input["label"] as? String ?? "",
+            fromPlace: input["from"] as? String ?? "",
+            toPlace: input["to"] as? String ?? "",
+            departAt: mode == .drive ? .distantPast : when,
+            arriveBy: mode == .drive ? when : nil,
+            checkInMinutes: input["check_in_minutes"] as? Int ?? (mode == .drive ? 0 : 180),
+            securityMinutes: input["security_minutes"] as? Int ?? (mode == .drive ? 0 : 30),
+            bufferMinutes: input["buffer_minutes"] as? Int ?? 20,
+            stopMinutes: input["stop_minutes"] as? Int ?? 0,
+            travelMinutes: input["travel_minutes"] as? Int ?? 0)
+        modelContext.insert(segment)
+
+        // Measure the journey now if we can — a leave-by built on a guess is
+        // exactly the failure this feature exists to prevent.
+        var measured = false
+        if segment.travelMinutes == 0, !segment.toPlace.isEmpty {
+            let saved = (try? modelContext.fetch(FetchDescriptor<SavedLocation>())) ?? []
+            let originRaw = segment.fromPlace.isEmpty ? "Home" : segment.fromPlace
+            let origin = saved.first { $0.kind.rawValue.lowercased() == originRaw.lowercased() }
+                .map(\.address).flatMap { $0.isEmpty ? nil : $0 } ?? originRaw
+            if let m = await GoogleMapsService.commuteMinutes(from: origin, to: segment.toPlace,
+                                                             departure: max(when.addingTimeInterval(-3600), Date())) {
+                segment.travelMinutes = m
+                segment.travelIsEstimated = false
+                measured = true
+            }
+        }
+        modelContext.saveOrLog("chat.addJourney")
+        await TravelNotifier.schedule(segment: segment)
+
+        guard let plan = LeaveBy.plan(for: segment) else {
+            return .init(text: "Journey saved, but I need \(mode == .drive ? "an arrival" : "a departure") time to compute a leave-by.")
+        }
+        let f = DateFormatter(); f.dateFormat = "HH:mm"
+        let caveat = segment.travelMinutes == 0
+            ? " I couldn't measure the journey — tell me roughly how long it takes and I'll redo this."
+            : (measured ? " Journey measured against live traffic (\(segment.travelMinutes) min)."
+                        : " Journey time \(segment.travelMinutes) min as given.")
+        return .init(text: "Added to \(trip.title): \(segment.label.isEmpty ? mode.label : segment.label). "
+                     + "Leave at \(f.string(from: plan.leaveAt)) on \(JeevesChatView.dayString(day)).\(caveat) "
+                     + "I'll nudge you 30 minutes before.")
     }
 
     // MARK: History + standing preferences

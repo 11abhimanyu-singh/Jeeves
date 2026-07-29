@@ -243,6 +243,12 @@ enum JeevesChatService {
     check-in). complete_todo / delete_todo / delete_reminder finish or remove \
     tasks. fetch_chat_history searches older conversations when the user asks \
     about something said before.
+    - When the user is going away — a trip, a flight, a long drive — call \
+    add_trip for the span of days, then add_journey for each flight or drive. \
+    Travel mode stops you planning those days; the journeys give the user the \
+    one thing that matters: when to leave. For a drive, `time` is when they \
+    must ARRIVE; for a flight it's the DEPARTURE. Ask for stops on a long drive \
+    (fuel, breakfast) — they push the leave time earlier.
     - When the user states a STANDING preference ("gym is always 7pm", "never \
     schedule calls before 10"), call remember_preference — it persists across \
     days and appears in your context. If they time-bound it ("for the next 45 \
@@ -469,6 +475,41 @@ enum JeevesChatService {
                     "forget": ["type": "boolean", "description": "true = remove stored preferences matching this text instead of adding."],
                 ],
                 "required": ["note"],
+            ],
+        ],
+        [
+            "name": "add_trip",
+            "description": "Mark a span of days as travel. On those days the planner stands down — no routine, gym or commute — and the user gets journey anchors instead. Create this FIRST, then add each flight or drive with add_journey.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "title": ["type": "string", "description": "e.g. 'Bali + Singapore' or 'Bhadra'"],
+                    "start_date": ["type": "string", "description": "First travel day, YYYY-MM-DD (or 'today'/'tomorrow')."],
+                    "end_date": ["type": "string", "description": "LAST travel day, inclusive, YYYY-MM-DD."],
+                ],
+                "required": ["title", "start_date", "end_date"],
+            ],
+        ],
+        [
+            "name": "add_journey",
+            "description": "Add one journey to a trip — a flight (works backwards from its departure through the airline cut-off, security and traffic) or a drive (works backwards from a hard arrival time through the driving and any stops). Returns the leave-by time.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "trip": ["type": "string", "description": "The trip's title (or part of it)."],
+                    "mode": ["type": "string", "enum": ["flight", "drive", "train"], "description": "Default flight."],
+                    "label": ["type": "string", "description": "Flight number ('6E 1605') or a name ('Drive to Bhadra')."],
+                    "from": ["type": "string", "description": "Where the journey starts: 'Home', or a hotel/address when abroad. Default Home."],
+                    "to": ["type": "string", "description": "Airport or destination — a real place name so the journey can be measured."],
+                    "date": ["type": "string", "description": "YYYY-MM-DD (or 'today'/'tomorrow')."],
+                    "time": ["type": "string", "description": "24-hour HH:MM. For a flight this is DEPARTURE; for a drive it's the time they must ARRIVE."],
+                    "check_in_minutes": ["type": "integer", "description": "Airline cut-off before departure. Default 180 international, 120 domestic."],
+                    "security_minutes": ["type": "integer", "description": "Immigration + security. Default 30."],
+                    "stop_minutes": ["type": "integer", "description": "Drives only: total time stopping for fuel, food, rest."],
+                    "buffer_minutes": ["type": "integer", "description": "The user's own slack. Default 20."],
+                    "travel_minutes": ["type": "integer", "description": "Journey time if known; omit and I'll measure it against live traffic."],
+                ],
+                "required": ["trip", "to", "date", "time"],
             ],
         ],
         [
