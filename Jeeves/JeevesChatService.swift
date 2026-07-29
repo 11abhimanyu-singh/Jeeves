@@ -262,7 +262,9 @@ enum JeevesChatService {
     the tool list and use the tool; never repeat a remembered limitation.
     """
 
-    private static let toolSchemas: [[String: Any]] = [
+    // Internal (not private) so ChatToolParityTests can pin this roster
+    // against JeevesChatView.handledToolNames.
+    static let toolSchemas: [[String: Any]] = [
         [
             "name": "add_event",
             "description": "Record a fixed appointment/event on a day (a show, meeting, dinner, flight…). The planner schedules everything else around it. Call this once the event's details are clear.",

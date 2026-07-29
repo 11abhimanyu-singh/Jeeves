@@ -2,6 +2,11 @@
 """
 Jeeves store audit: deterministic invariant checks over a pulled default.store.
 
+Scope: the WHOLE store — travel, plans, events, workouts, lifts, runs,
+reminders, todos, voice notes, check-ins, books, chat, and the plan-generation
+log. Every check scans all rows with no date limits; only the pipeline
+liveness checks may reference 'now'.
+
 The GPT evals each see one surface (plans, chat, a scripted walkthrough); none
 of them reads the travel rows themselves — which is exactly where a flight-
 dressed-as-a-drive, a trip that ends before its last stay, and three
@@ -202,6 +207,154 @@ def main():
     bad = [e for e in events if not e["allDay"] and e["end"] < e["start"]]
     check("no events ending before they start", bad,
           lambda e: f"'{e['title'][:40]}' on {day(e['date'])}: {e['start']}→{e['end']} min")
+
+    # ------------------------------------------------------------------
+    # FULL-STORE INVARIANTS — every table, every row, no date limits.
+    # ------------------------------------------------------------------
+    workouts = [dict(uuid=r["ZID"], date=ts(r["ZDATE"]), title=r["ZTITLE"] or "",
+                     type=r["ZTYPERAW"], state=r["ZSTATERAW"], source=r["ZSOURCERAW"],
+                     dur=r["ZDURATIONMIN"], dist=r["ZDISTANCEKM"])
+                for r in db.execute("SELECT * FROM ZWORKOUT")]
+    lifts = [dict(uuid=r["ZID"], workoutUUID=r["ZWORKOUTID"], name=r["ZEXERCISENAME"] or "")
+             for r in db.execute("SELECT * FROM ZLIFTSESSION")]
+    sets_ = [dict(sessionUUID=r["ZSESSIONID"], reps=r["ZREPS"])
+             for r in db.execute("SELECT * FROM ZLIFTSET")]
+    runs = [dict(workoutUUID=r["ZWORKOUTID"]) for r in db.execute("SELECT * FROM ZRUNSESSION")]
+    reminders = [dict(title=r["ZTITLE"] or "", enabled=r["ZENABLED"],
+                      done=ts(r["ZCOMPLETEDAT"]), fire=ts(r["ZFIREAT"]),
+                      rec=r["ZRECURRENCERAW"])
+                 for r in db.execute("SELECT * FROM ZREMINDER")]
+    todos = [dict(title=r["ZTITLE"] or "", done=ts(r["ZDONEAT"]), due=ts(r["ZDUEDATE"]))
+             for r in db.execute("SELECT * FROM ZTODO")]
+    notes = [dict(file=r["ZAUDIOFILENAME"] or "", dur=r["ZDURATIONSEC"],
+                  transcript=r["ZTRANSCRIPT"] or "", date=ts(r["ZDATE"]))
+             for r in db.execute("SELECT * FROM ZVOICENOTE")]
+    checkins = [ts(r["ZDATE"]) for r in db.execute("SELECT ZDATE FROM ZCHECKIN")]
+    books = [dict(title=r["ZTITLE"] or "", cur=r["ZCURRENTPAGE"], total=r["ZTOTALPAGES"])
+             for r in db.execute("SELECT * FROM ZBOOK")]
+    plan_dates = [ts(r["ZDATE"]) for r in db.execute("SELECT ZDATE FROM ZDAILYPLANSTATE")]
+    ext_ids = [r["ZEXTERNALID"] for r in db.execute(
+        "SELECT ZEXTERNALID FROM ZDAILYEVENT WHERE ZEXTERNALID != ''")]
+    genlog = [dict(at=ts(r["ZSTARTEDAT"]), trigger=r["ZTRIGGERRAW"], outcome=r["ZOUTCOMERAW"])
+              for r in db.execute("SELECT * FROM ZPLANGENERATIONLOG ORDER BY ZSTARTEDAT")]
+    chat_count = db.execute("SELECT COUNT(*) FROM ZCHATTURN").fetchone()[0]
+    empty_turns = db.execute(
+        "SELECT COUNT(*) FROM ZCHATTURN WHERE (ZCONTENT IS NULL OR ZCONTENT = '')"
+        " AND ZPLANJSON IS NULL AND ZIMAGEDATA IS NULL").fetchone()[0]
+
+    workout_by_uuid = {w["uuid"]: w for w in workouts}
+    lift_by_uuid = {l["uuid"]: l for l in lifts}
+
+    bad = [l for l in lifts if l["workoutUUID"] is not None and l["workoutUUID"] not in workout_by_uuid]
+    check("no lift sessions pointing at a missing workout", bad,
+          lambda l: f"'{l['name'][:40]}' workout missing")
+    bad = [s for s in sets_ if s["sessionUUID"] is not None and s["sessionUUID"] not in lift_by_uuid]
+    check("no lift sets pointing at a missing session", bad,
+          lambda s: f"set ({s['reps']} reps) session missing")
+    bad = [r for r in runs if r["workoutUUID"] is not None and r["workoutUUID"] not in workout_by_uuid]
+    check("no run sessions pointing at a missing workout", bad, lambda r: "run workout missing")
+
+    bad = []
+    for i, a in enumerate(workouts):
+        for b in workouts[i + 1:]:
+            if (a["date"] and b["date"] and day(a["date"]) == day(b["date"])
+                    and a["type"] == b["type"] and a["dur"] == b["dur"] and a["uuid"] != b["uuid"]):
+                bad.append((a, b))
+    check("no cloned workouts (same day, type, duration)", bad,
+          lambda p: f"'{p[0]['title'][:30]}' x2 on {day(p[0]['date'])} ({p[0]['dur']} min)", warn=True)
+
+    bad = [w for w in workouts if (w["dur"] or 0) < 0 or (w["dur"] or 0) > 600
+           or (w["dist"] or 0) < 0]
+    check("no workouts with impossible numbers", bad,
+          lambda w: f"'{w['title'][:30]}' {w['dur']} min / {w['dist']} km")
+    bad = [w for w in workouts if w["state"] == "live" and w["date"]
+           and (datetime.datetime.now() - w["date"]).days >= 1]
+    check("no workouts stuck 'live' for over a day", bad,
+          lambda w: f"'{w['title'][:30]}' live since {day(w['date'])}")
+
+    active = [r for r in reminders if r["enabled"] and not r["done"]]
+    seen = {}
+    bad = []
+    for r in active:
+        key = r["title"].strip().lower()
+        if key in seen:
+            bad.append((seen[key], r))
+        else:
+            seen[key] = r
+    check("no duplicate active reminders", bad,
+          lambda p: f"'{p[0]['title'][:40]}' twice, fires {fmt(p[0]['fire'])} and {fmt(p[1]['fire'])}")
+    bad = [r for r in active if r["fire"] and r["fire"] < datetime.datetime.now()
+           and (r["rec"] or "none") == "none"]
+    check("no one-shot reminders past their fire time still active", bad,
+          lambda r: f"'{r['title'][:40]}' fired {fmt(r['fire'])}, never completed", warn=True)
+
+    open_todos = [t for t in todos if not t["done"]]
+    seen = {}
+    bad = []
+    for t in open_todos:
+        key = t["title"].strip().lower()
+        if key in seen:
+            bad.append(t)
+        else:
+            seen[key] = t
+    check("no duplicate open todos", bad, lambda t: f"'{t['title'][:45]}' twice", warn=True)
+
+    bad = [n for n in notes if (n["dur"] or 0) <= 0]
+    check("no zero-length voice notes", bad, lambda n: f"{n['file'][:40]} ({n['dur']} s)")
+    bad = [n for n in notes if not n["transcript"].strip()]
+    check("no voice notes without a transcript", bad,
+          lambda n: f"{n['file'][:40]} on {day(n['date'])}", warn=True)
+    seen = {}
+    bad = [n for n in notes if n["file"] and (n["file"] in seen or seen.setdefault(n["file"], True) is None)]
+    check("no duplicate voice-note files", bad, lambda n: n["file"][:50])
+
+    day_counts = {}
+    for d in checkins:
+        if d:
+            day_counts[day(d)] = day_counts.get(day(d), 0) + 1
+    bad = [d for d, c in day_counts.items() if c > 1]
+    check("no duplicate check-ins per day", bad, lambda d: f"{d} has multiple check-ins")
+
+    bad = [b for b in books if (b["total"] or 0) > 0 and (b["cur"] or 0) > b["total"]]
+    check("no books read past their last page", bad,
+          lambda b: f"'{b['title'][:40]}' page {b['cur']}/{b['total']}")
+
+    day_counts = {}
+    for d in plan_dates:
+        if d:
+            day_counts[day(d)] = day_counts.get(day(d), 0) + 1
+    bad = [d for d, c in day_counts.items() if c > 1]
+    check("no duplicate plan-state rows per day", bad, lambda d: f"{d} has multiple rows")
+
+    seen = {}
+    bad = [e for e in ext_ids if e in seen or seen.setdefault(e, True) is None]
+    check("no duplicate calendar externalIDs", bad, lambda e: str(e)[:50])
+
+    check("no empty chat turns", [None] * empty_turns, lambda _: "turn with no content, plan, or image")
+    check("chat history within bounds", [None] * (1 if chat_count > 5000 else 0),
+          lambda _: f"{chat_count} turns stored — consider retention policy", warn=True)
+
+    # Pipeline liveness — inherently recency-based; the only checks allowed
+    # to look at 'now'. Everything above scans all history unconditionally.
+    dated_log = [g for g in genlog if g["at"]]
+    if dated_log:
+        last = dated_log[-1]
+        age = (datetime.datetime.now() - last["at"]).days
+        check("plan generation ran recently", [None] * (1 if age > 3 else 0),
+              lambda _: f"last entry {age} days ago ({last['trigger']}/{last['outcome']})", warn=True)
+        last_auto = next((g for g in reversed(dated_log) if g["trigger"] == "autoPlan"), None)
+        auto_age = (datetime.datetime.now() - last_auto["at"]).days if last_auto else 9999
+        check("overnight auto-planner alive", [None] * (1 if auto_age > 3 else 0),
+              lambda _: "no autoPlan entry in the last 3 days" if last_auto
+              else "no autoPlan entry has EVER been logged", warn=True)
+        tail = dated_log[-5:]
+        streak = all(g["outcome"] in ("offlineFallback", "abandoned", "pending") for g in tail)
+        check("no failure streak in plan generation", [None] * (1 if streak and len(tail) == 5 else 0),
+              lambda _: "last 5 generations all failed/offline/abandoned: "
+              + ", ".join(g["outcome"] for g in tail))
+    bad = [g for g in genlog if g["outcome"] == "pending"]
+    check("no generations still 'pending'", bad,
+          lambda g: f"{fmt(g['at'])} ({g['trigger']}) never resolved", warn=True)
 
     n, w = len(findings), len(warnings)
     if n == 0 and w == 0:

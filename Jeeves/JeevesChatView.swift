@@ -392,6 +392,10 @@ struct JeevesChatView: View {
     @MainActor
     private func runTool(_ call: JeevesChatService.ToolCall) async -> JeevesChatService.ToolResult {
         switch call.name {
+        // NOTE: every case here must appear in handledToolNames below — the
+        // parity test pins that list against the schemas the model is shown,
+        // so a tool added to one side and not the other fails the suite
+        // instead of failing at runtime.
         case "add_event":      return toolAddEvent(call.input)
         case "set_gym":        return toolSetGym(call.input)
         case "fetch_calendar": return await toolFetchCalendar(call.input)
@@ -416,6 +420,18 @@ struct JeevesChatView: View {
         default:               return .init(text: "Unknown tool \(call.name).")
         }
     }
+
+    /// Every tool name the switch above dispatches. ChatToolParityTests pins
+    /// this against JeevesChatService.toolSchemas, so schema and dispatch
+    /// can't drift apart silently — the failure mode where a tool exists on
+    /// one side only surfaces as "Unknown tool" at runtime.
+    static let handledToolNames: Set<String> = [
+        "add_event", "set_gym", "fetch_calendar", "plan_day", "replan_today",
+        "fetch_app_data", "add_todo", "add_reminder", "edit_event", "delete_event",
+        "commute_estimate", "log_walk", "mark_block_done", "complete_todo",
+        "delete_todo", "delete_reminder", "fetch_chat_history", "remember_preference",
+        "add_trip", "add_journey", "clean_travel_data",
+    ]
 
     // MARK: Event editing (eval finding: the Bhadra venue struggle)
 
