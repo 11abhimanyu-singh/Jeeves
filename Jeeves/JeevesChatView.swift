@@ -869,14 +869,30 @@ struct JeevesChatView: View {
         let fire = JeevesChatService.resolveFireDate(dateRaw: input["date"] as? String,
                                                     timeRaw: time, relativeTo: Date())
         let recurrence = ReminderRecurrence(rawValue: input["recurrence"] as? String ?? "") ?? .once
+        let dtf = DateFormatter()
+        dtf.dateFormat = "EEE d MMM, HH:mm"
+
+        // Asking twice must not nag twice (eval finding: a repeated "pack
+        // binoculars" minted a second identical reminder). Same title on an
+        // active reminder → move it to the new time instead of duplicating.
+        let all = (try? modelContext.fetch(FetchDescriptor<Reminder>())) ?? []
+        if let existing = all.first(where: {
+            $0.isActive && $0.title.lowercased() == title.lowercased()
+        }) {
+            let moved = existing.fireAt != fire
+            existing.fireAt = fire
+            existing.recurrence = recurrence
+            modelContext.saveOrLog()
+            ReminderScheduler.reschedule(all.filter(\.isActive))
+            return .init(text: moved
+                ? "That reminder already existed — moved '\(title)' to \(dtf.string(from: fire))."
+                : "'\(title)' is already set for \(dtf.string(from: fire)) — nothing to add.")
+        }
+
         let reminder = Reminder(title: title, fireAt: fire, recurrence: recurrence)
         modelContext.insert(reminder)
         modelContext.saveOrLog()
-        let active = ((try? modelContext.fetch(FetchDescriptor<Reminder>())) ?? [])
-            .filter(\.isActive)
-        ReminderScheduler.reschedule(active)
-        let dtf = DateFormatter()
-        dtf.dateFormat = "EEE d MMM, HH:mm"
+        ReminderScheduler.reschedule((all + [reminder]).filter(\.isActive))
         return .init(text: "Reminder set: '\(title)' at \(dtf.string(from: fire)) (\(recurrence.rawValue)).")
     }
 
