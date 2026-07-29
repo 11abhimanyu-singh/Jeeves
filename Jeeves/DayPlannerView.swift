@@ -243,6 +243,8 @@ struct DayPlannerView: View {
                 departAt: noon))
         }
         modelContext.saveOrLog("DayPlanner.acceptTravel")
+        // The trip now owns these days — stale plans and their notifications go.
+        Task { await TravelGuard.sweep(context: modelContext) }
         editingTrip = trip
     }
 
@@ -433,6 +435,12 @@ struct DayPlannerView: View {
     }
 
     private func planMyDay() {
+        // A trip owns its days: the button is hidden on travel days, but the
+        // rule is enforced here too so no path around the UI can plan one.
+        if let trip = tripCovering(selectedDate) {
+            planError = TravelGuard.refusalMessage(for: selectedDate, trip: trip)
+            return
+        }
         planError = nil
         isPlanning = true
         let date = selectedDate

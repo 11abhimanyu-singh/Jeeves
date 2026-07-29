@@ -22,8 +22,13 @@ struct JeevesApp: App {
         // and old lift/run logs get wrapped into Workouts once.
         WatchLink.shared.configure(container: sharedModelContainer)
         Workout.migrateIfNeeded(context: sharedModelContainer.mainContext)
-        // Collapse duplicate calendar rows from the pre-idempotent sync era.
+        // Collapse duplicate calendar rows from the pre-idempotent sync era,
+        // and repair rows whose times got corrupted (end before start).
         DailyEvent.dedupeExternal(context: sharedModelContainer.mainContext)
+        DailyEvent.repairInvalidTimes(context: sharedModelContainer.mainContext)
+        // A trip owns its days: clear any plans lingering under travel mode.
+        let context = sharedModelContainer.mainContext
+        Task { await TravelGuard.sweep(context: context) }
     }
 
     var sharedModelContainer: ModelContainer = {

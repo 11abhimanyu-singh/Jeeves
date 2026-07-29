@@ -95,13 +95,22 @@ final class TravelClockTests: XCTestCase {
     // MARK: A segment's day is reckoned where it starts
 
     func testSegmentDayUsesTheOriginZone() {
-        // 00:30 departure from Singapore belongs to that Singapore day — back
-        // home it's still the previous evening.
+        // A 00:30 red-eye from Singapore belongs to the day you LEAVE for the
+        // airport — the evening of the 14th on Singapore's clock (00:30 minus
+        // cut-off, security and buffer lands at 20:40 the night before). The
+        // day is expressed as a DEVICE-calendar date so the planner's own day
+        // cards can match it.
         let dep = wall(2026, 9, 15, 0, 30, in: sgt)
         let s = TravelSegment(tripID: UUID(), mode: .flight, label: "6E 1606",
                               departAt: dep, fromTimeZoneID: "Asia/Singapore")
+        let expected = Calendar.current.date(from: DateComponents(year: 2026, month: 9, day: 14))!
+        XCTAssertEqual(s.day, expected)
+
+        // And the nominal leave moment really is the SGT evening before.
+        let leave = LeaveBy.plan(for: s)!.leaveAt
         var sgCal = Calendar(identifier: .gregorian); sgCal.timeZone = sgt
-        XCTAssertEqual(s.day, sgCal.startOfDay(for: dep))
+        XCTAssertEqual(sgCal.dateComponents([.day, .hour, .minute], from: leave),
+                       DateComponents(day: 14, hour: 20, minute: 40))
     }
 
     // MARK: The leave-by chain is zone-agnostic

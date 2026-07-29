@@ -609,6 +609,8 @@ struct JeevesChatView: View {
         let trip = Trip(title: title, startDate: start, endDate: end)
         modelContext.insert(trip)
         modelContext.saveOrLog("chat.addTrip")
+        // The trip now owns these days — stale plans and their notifications go.
+        Task { await TravelGuard.sweep(context: modelContext) }
         return .init(text: "Travel mode on for \(trip.dayCount) day(s): \(title), "
                      + "\(JeevesChatView.dayString(start)) – \(JeevesChatView.dayString(end)). "
                      + "The planner stands down on those days. Add each flight or drive with add_journey.")
@@ -907,6 +909,10 @@ struct JeevesChatView: View {
     @MainActor
     private func toolReplanToday(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
         let note = (input["note"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        // A trip owns its days — no generator may plan one.
+        if let trip = TravelGuard.tripCovering(today, context: modelContext) {
+            return .init(text: TravelGuard.refusalMessage(for: today, trip: trip))
+        }
         let state = planState(on: today)
         guard let committed = state.plan else {
             return .init(text: "There's no plan for today yet, so there's nothing to re-plan. Offer to plan the day first.")
@@ -1039,6 +1045,10 @@ struct JeevesChatView: View {
     @MainActor
     private func toolPlanDay(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
         let date = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
+        // A trip owns its days — no generator may plan one.
+        if let trip = TravelGuard.tripCovering(date, context: modelContext) {
+            return .init(text: TravelGuard.refusalMessage(for: date, trip: trip))
+        }
         let note = (input["note"] as? String) ?? ""
         let state = planState(on: date)
         let result = await PlanCoordinator.generateLogged(.init(

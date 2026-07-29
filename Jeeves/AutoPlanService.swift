@@ -62,7 +62,10 @@ enum AutoPlanService {
     static func ensureUpcomingPlans(context: ModelContext, referenceNow: Date = Date()) async -> Int {
         let plans = (try? context.fetch(FetchDescriptor<DailyPlanState>())) ?? []
         let plannedDays = Set(plans.filter { $0.plan != nil }.map { $0.date.startOfDay })
+        // A trip owns its days: the overnight loop must never refill a travel
+        // day the user deliberately left plan-free.
         let needed = daysNeedingPlans(from: referenceNow, days: windowDays, plannedDays: plannedDays)
+            .filter { !TravelGuard.isTravelDay($0, context: context) }
         guard !needed.isEmpty else {
             // Nothing to do → clear any prior back-off; the window is healthy.
             UserDefaults.standard.removeObject(forKey: cooldownKey)

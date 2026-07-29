@@ -138,11 +138,36 @@ final class TravelSegment {
     /// arrival deadline for a drive — reckoned WHERE THE JOURNEY STARTS. A
     /// 00:30 departure from Singapore belongs to that Singapore day, not to
     /// whatever day it happens to be back home.
+    /// The day this journey belongs to on the planner: the day you LEAVE, on
+    /// the origin's clock. A two-day return drive arriving Tuesday shows on
+    /// Sunday — the day the user must actually act — not on the arrival day
+    /// (which for a long drive can sit outside the trip window entirely,
+    /// making the journey invisible). A red-eye departing 00:30 belongs to
+    /// the evening you leave for the airport, the day before.
     var day: Date {
-        let instant = mode == .drive ? (arriveBy ?? departAt) : departAt
-        var cal = Calendar.current
-        cal.timeZone = fromTimeZone
-        return cal.startOfDay(for: instant)
+        let instant = LeaveBy.plan(for: self)?.leaveAt
+            ?? (mode == .drive ? (arriveBy ?? departAt) : departAt)
+        return Self.deviceDay(of: instant, in: fromTimeZone)
+    }
+
+    /// The day this journey ENDS, on the destination's clock — nil when no
+    /// arrival is known. With `day`, this brackets the journey for trip-window
+    /// checks (a two-day drive can land after the calendar event ends).
+    var arrivalDay: Date? {
+        let instant = mode == .drive ? arriveBy : (arriveAt ?? (departAt == .distantPast ? nil : departAt))
+        return instant.map { Self.deviceDay(of: $0, in: toTimeZone) }
+    }
+
+    /// The DEVICE-calendar date carrying the instant's nominal day in `zone` —
+    /// so "12 Oct in Kathmandu" compares equal to the planner's "12 Oct" even
+    /// though the two midnights are 15 minutes apart. Every day-of-trip
+    /// comparison in the app runs on device days; this keeps foreign journeys
+    /// on the same footing.
+    nonisolated static func deviceDay(of instant: Date, in zone: TimeZone) -> Date {
+        var origin = Calendar.current
+        origin.timeZone = zone
+        let comps = origin.dateComponents([.year, .month, .day], from: instant)
+        return Calendar.current.date(from: comps) ?? Calendar.current.startOfDay(for: instant)
     }
 }
 

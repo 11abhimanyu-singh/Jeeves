@@ -76,6 +76,29 @@ final class DailyEvent {
         if changed { context.saveOrLog("DailyEvent.dedupeExternal") }
     }
 
+    /// One-time repair for rows whose times got corrupted (end before start —
+    /// e.g. the Aug 16/17 rows stored 13:00→12:00, which the planner then
+    /// rendered as a negative-length block). Calendar-sourced rows revert to
+    /// all-day (their true shape — the minutes were never real); manual rows
+    /// get start/end swapped. Idempotent, safe to run on every launch.
+    static func repairInvalidTimes(context: ModelContext) {
+        let all = (try? context.fetch(FetchDescriptor<DailyEvent>())) ?? []
+        var changed = false
+        for e in all where !e.isAllDay && e.endMinute < e.startMinute {
+            if e.source == .calendar {
+                e.isAllDay = true
+                e.startMinute = 0
+                e.endMinute = 0
+            } else {
+                let s = e.startMinute
+                e.startMinute = e.endMinute
+                e.endMinute = s
+            }
+            changed = true
+        }
+        if changed { context.saveOrLog("DailyEvent.repairInvalidTimes") }
+    }
+
     var outboundStart: LocationKind {
         get { LocationKind(rawValue: outboundStartRaw) ?? .home }
         set { outboundStartRaw = newValue.rawValue }

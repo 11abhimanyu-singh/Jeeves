@@ -103,6 +103,11 @@ struct LeaveByCard: View {
                         .font(Font.serif(34, weight: .semibold))
                         .monospacedDigit()
                         .foregroundStyle(Color.travelInk)
+                    if chainIsMultiDay {
+                        Text(dayTag(plan.leaveAt, in: segment.fromTimeZone))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.travelInk)
+                    }
                     if crossesZones {
                         Text(TravelClock.label(segment.fromTimeZone, at: plan.leaveAt))
                             .font(.system(size: 11, weight: .semibold))
@@ -117,11 +122,21 @@ struct LeaveByCard: View {
                                 .fill(step.isLeave ? Color.travelInk : Color.textMuted.opacity(0.4))
                                 .frame(width: step.isLeave ? 8 : 6, height: step.isLeave ? 8 : 6)
                                 .padding(.top, 6)
-                            Text(hhmm(step.time))
-                                .font(.system(size: 13, weight: step.isLeave ? .bold : .regular))
-                                .monospacedDigit()
-                                .foregroundStyle(step.isLeave ? Color.travelInk : Color.textPrimary)
-                                .frame(width: 46, alignment: .leading)
+                            // A long drive's chain spans days — "LEAVE 09:20 …
+                            // arrive 20:00" read as one morning until each row
+                            // carried its date.
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(hhmm(step.time))
+                                    .font(.system(size: 13, weight: step.isLeave ? .bold : .regular))
+                                    .monospacedDigit()
+                                    .foregroundStyle(step.isLeave ? Color.travelInk : Color.textPrimary)
+                                if chainIsMultiDay {
+                                    Text(dayTag(step.time, in: segment.fromTimeZone))
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(Color.textMuted)
+                                }
+                            }
+                            .frame(width: 46, alignment: .leading)
                             Text(step.label)
                                 .font(.system(size: 12.5, weight: step.isLeave ? .semibold : .regular))
                                 .foregroundStyle(step.isLeave ? Color.travelInk : Color.textSoft)
@@ -143,11 +158,18 @@ struct LeaveByCard: View {
                                 .fill(Color.sageDeep)
                                 .frame(width: 6, height: 6)
                                 .padding(.top, 6)
-                            Text(TravelClock.hhmm(arriveAt, in: segment.toTimeZone))
-                                .font(.system(size: 13, weight: .semibold))
-                                .monospacedDigit()
-                                .foregroundStyle(Color.sageDeep)
-                                .frame(width: 46, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(TravelClock.hhmm(arriveAt, in: segment.toTimeZone))
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .monospacedDigit()
+                                    .foregroundStyle(Color.sageDeep)
+                                if chainIsMultiDay {
+                                    Text(dayTag(arriveAt, in: segment.toTimeZone))
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(Color.textMuted)
+                                }
+                            }
+                            .frame(width: 46, alignment: .leading)
                             Text("Arrives")
                                 .font(.system(size: 12.5, weight: .semibold))
                                 .foregroundStyle(Color.sageDeep)
@@ -251,6 +273,24 @@ struct LeaveByCard: View {
             != segment.toTimeZone.secondsFromGMT(for: segment.departAt)
             || !segment.fromTimeZoneID.isEmpty
     }
+
+    /// True when the chain doesn't fit in one calendar day (on the origin's
+    /// clock, arrival included) — the trigger for dating every row.
+    private var chainIsMultiDay: Bool {
+        guard let plan, let first = plan.steps.first?.time else { return false }
+        var cal = Calendar.current
+        cal.timeZone = segment.fromTimeZone
+        var times = plan.steps.map(\.time)
+        if let a = segment.arriveAt { times.append(a) }
+        return times.contains { !cal.isDate($0, inSameDayAs: first) }
+    }
+
+    private func dayTag(_ d: Date, in zone: TimeZone) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "EEE d"
+        f.timeZone = zone
+        return f.string(from: d)
+    }
 }
 
 // MARK: - Trip editor
@@ -276,10 +316,33 @@ struct TripEditorView: View {
                         stat("Days", "\(trip.dayCount)")
                         stat("Journeys", "\(segments.count)")
                     }
+
+                    // The dates are editable: a trip's window often has to grow —
+                    // a two-day return drive lands after the calendar event ends.
+                    HStack(spacing: 10) {
+                        dateBox("Starts", get: { trip.startDate }, set: { setDates(start: $0) })
+                        dateBox("Ends", get: { trip.endDate }, set: { setDates(end: $0) })
+                    }
+
                     Text("The planner stands down for every day of this trip. What you get instead are the journeys below.")
                         .font(.system(size: 12))
                         .foregroundStyle(Color.textMuted)
                         .padding(.bottom, 2)
+
+                    // A trip with no journeys silently computes nothing — ask the
+                    // one question that matters instead of showing "Journeys: 0".
+                    if segments.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("How are you getting there — and home?")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.travelInk)
+                            Text("Add the outbound and the return below, and I'll work out when to leave for each — including the way home.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Color.textSoft)
+                        }
+                        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 13).fill(Color.travelInk.opacity(0.08)))
+                    }
 
                     ForEach(segments, id: \.id) { s in
                         Button { editing = s } label: { LeaveByCard(segment: s) }
@@ -318,29 +381,81 @@ struct TripEditorView: View {
 
     private func newSegment(_ mode: TravelMode) -> TravelSegment {
         let cal = Calendar.current
-        let noon = cal.date(bySettingHour: 9, minute: 0, second: 0, of: trip.startDate) ?? trip.startDate
-        // Jeeves usually already knows both ends of this journey from the
-        // calendar: you're leaving wherever you were last, for this trip's
-        // first stay. Pre-fill both instead of asking again — across trips too,
-        // since one trip often ends the day the next begins.
+        // The first journey is the way OUT; once one exists, the next is almost
+        // always the way HOME. Prefill each honestly from what the calendar and
+        // saved locations already know — and never guess what we don't: a
+        // flight's "To" is the departure airport, which no stay can tell us, so
+        // it stays empty rather than pointing the route at a hotel abroad.
+        let isReturn = !segments.isEmpty
         let stays = ((try? modelContext.fetch(FetchDescriptor<TripStay>())) ?? [])
             .sorted { $0.arriveDate < $1.arriveDate }
         let tripStays = stays.filter { $0.tripID == trip.id }
-        let destination = tripStays.first
-        let origin = stays
-            .filter { $0.id != destination?.id && $0.departDate <= trip.startDate }
-            .max { $0.departDate < $1.departDate }
+        let home = homeAddress()
+
+        let fromPlace: String
+        let toPlace: String
+        if isReturn {
+            // Leaving the trip's last stay, headed home.
+            let origin = tripStays.max { $0.departDate < $1.departDate }
+            fromPlace = origin.map { $0.address.isEmpty ? $0.place : $0.address } ?? ""
+            toPlace = home
+        } else {
+            // Leaving wherever you were last — the previous trip's stay if one
+            // ends as this trip begins, otherwise Home.
+            let prior = stays
+                .filter { s in !tripStays.contains { $0.id == s.id } && s.departDate <= trip.startDate }
+                .max { $0.departDate < $1.departDate }
+            fromPlace = prior.map { $0.address.isEmpty ? $0.place : $0.address } ?? home
+            toPlace = mode == .drive
+                ? (tripStays.first.map { $0.address.isEmpty ? $0.place : $0.address } ?? "")
+                : ""
+        }
+
+        // Outbound anchors to the trip's first day, the return to its last.
+        let anchorDay = isReturn ? trip.endDate : trip.startDate
+        let anchorHour = isReturn && mode == .drive ? 18 : 9
+        let anchor = cal.date(bySettingHour: anchorHour, minute: 0, second: 0, of: anchorDay) ?? anchorDay
+
         let s = TravelSegment(tripID: trip.id, mode: mode,
-                              label: mode == .flight ? "" : "Drive",
-                              fromPlace: origin.map { $0.address.isEmpty ? $0.place : $0.address } ?? "",
-                              toPlace: destination.map { $0.address.isEmpty ? $0.place : $0.address } ?? "",
-                              departAt: mode == .flight ? noon : .distantPast,
-                              arriveBy: mode == .drive ? noon : nil,
+                              label: mode == .flight ? "" : (isReturn ? "Drive home" : "Drive"),
+                              fromPlace: fromPlace,
+                              toPlace: toPlace,
+                              departAt: mode == .flight ? anchor : .distantPast,
+                              arriveBy: mode == .drive ? anchor : nil,
                               checkInMinutes: mode == .flight ? 180 : 0,
                               securityMinutes: mode == .flight ? 30 : 0)
         modelContext.insert(s)
         modelContext.saveOrLog("TripEditor.newSegment")
         return s
+    }
+
+    /// The saved Home address, or empty — never an invented place.
+    private func homeAddress() -> String {
+        let saved = (try? modelContext.fetch(FetchDescriptor<SavedLocation>())) ?? []
+        return saved.first { $0.kind == .home }.map(\.address) ?? ""
+    }
+
+    private func setDates(start: Date? = nil, end: Date? = nil) {
+        if let start { trip.startDate = start.startOfDay }
+        if let end { trip.endDate = end.startOfDay }
+        if trip.endDate < trip.startDate {
+            if start != nil { trip.endDate = trip.startDate } else { trip.startDate = trip.endDate }
+        }
+        modelContext.saveOrLog("TripEditor.setDates")
+        // Newly covered days may hold stale plans — the trip owns them now.
+        Task { await TravelGuard.sweep(context: modelContext) }
+    }
+
+    private func dateBox(_ title: String, get: @escaping () -> Date, set: @escaping (Date) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title.uppercased()).font(.system(size: 10, weight: .bold)).kerning(0.8)
+                .foregroundStyle(Color.textMuted)
+            DatePicker("", selection: Binding(get: get, set: set), displayedComponents: [.date])
+                .labelsHidden()
+                .font(.system(size: 13))
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 13).fill(Color.surface))
     }
 
     private func deleteTrip() {
@@ -406,8 +521,13 @@ struct SegmentEditorView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     field("Name", text: $label, placeholder: isFlight ? "6E 1605" : "Drive to Bhadra")
-                    field("From", text: $from, placeholder: "Home — or a hotel address")
-                    field("To", text: $to, placeholder: isFlight ? "BLR airport" : "JLR River Tern Lodge")
+                    // From/To are the two ends of the JOURNEY — for a flight
+                    // that's door to departure airport, and the labels say so,
+                    // because prefilling a hotel abroad once measured a 40-hour
+                    // road route to Kathmandu.
+                    field("From — where you set off", text: $from, placeholder: "Home — or a hotel address")
+                    field(isFlight ? "To — the airport you fly from" : "To — your destination",
+                          text: $to, placeholder: isFlight ? "BLR airport" : "JLR River Tern Lodge")
 
                     DatePicker(isFlight ? "Departs" : "Must arrive by",
                                selection: $when, displayedComponents: [.date, .hourAndMinute])
@@ -516,19 +636,65 @@ struct SegmentEditorView: View {
         segment.travelMinutes = travel
         segment.travelIsEstimated = !travelMeasured
         modelContext.saveOrLog("SegmentEditor.save")
+        extendTripIfNeeded()
         Task { await TravelNotifier.schedule(segment: segment) }
         dismiss()
+    }
+
+    /// A journey that leaves before the trip starts or lands after it ends
+    /// grows the trip to match — days you're on the road are trip days, and
+    /// the planner must stand down on them too. (The Kathmandu case: the trip
+    /// ends 12 Oct with the calendar event, but the return drive arrives the
+    /// 14th; without this the drive was invisible and 13–14 Oct got a routine
+    /// plan.) The trip editor shows the changed dates, so the growth is
+    /// visible and reversible.
+    private func extendTripIfNeeded() {
+        let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
+        guard let trip = trips.first(where: { $0.id == segment.tripID }) else { return }
+        var changed = false
+        let leaveDay = segment.day
+        if leaveDay < trip.startDate { trip.startDate = leaveDay; changed = true }
+        if leaveDay > trip.endDate { trip.endDate = leaveDay; changed = true }
+        if let landing = segment.arrivalDay, landing > trip.endDate {
+            trip.endDate = landing; changed = true
+        }
+        guard changed else { return }
+        modelContext.saveOrLog("SegmentEditor.extendTrip")
+        // Newly covered days may hold stale plans — the trip owns them now.
+        Task { await TravelGuard.sweep(context: modelContext) }
     }
 
     private func field(_ title: String, text: Binding<String>, placeholder: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title.uppercased()).font(.system(size: 10, weight: .bold)).kerning(0.8)
                 .foregroundStyle(Color.textMuted)
-            TextField(placeholder, text: text)
-                .font(.system(size: 15))
-                .padding(11)
-                .background(RoundedRectangle(cornerRadius: 11).fill(Color.surface))
+            HStack(spacing: 6) {
+                TextField(placeholder, text: text)
+                    .font(.system(size: 15))
+                // One tap for the place the app already knows. Only offered
+                // when a Home address is actually saved — never an invented one.
+                if text.wrappedValue.isEmpty, !homeAddress.isEmpty,
+                   title.hasPrefix("From") || title.hasPrefix("To") {
+                    Button { text.wrappedValue = homeAddress } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "house.fill").font(.system(size: 9))
+                            Text("Home").font(.system(size: 11.5, weight: .semibold))
+                        }
+                        .foregroundStyle(Color.travelInk)
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .background(Capsule().fill(Color.travelInk.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(11)
+            .background(RoundedRectangle(cornerRadius: 11).fill(Color.surface))
         }
+    }
+
+    private var homeAddress: String {
+        let saved = (try? modelContext.fetch(FetchDescriptor<SavedLocation>())) ?? []
+        return saved.first { $0.kind == .home }.map(\.address) ?? ""
     }
 
     /// How long the journey takes is Google's job, not the user's. This row

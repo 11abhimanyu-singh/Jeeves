@@ -85,12 +85,27 @@ final class TravelModeTests: XCTestCase {
     }
 
     func testSegmentDayIsTheJourneysDay() {
+        // Same-day journeys keep their day: the leave-by moment falls on the
+        // same date as the departure/deadline.
         let flight = TravelSegment(tripID: UUID(), mode: .flight, label: "6E 1605",
                                    departAt: at(2026, 9, 4, 9, 40))
         XCTAssertEqual(flight.day, cal.startOfDay(for: at(2026, 9, 4, 9, 40)))
         let drive = TravelSegment(tripID: UUID(), mode: .drive, label: "Drive",
                                   arriveBy: at(2026, 8, 15, 13, 0))
         XCTAssertEqual(drive.day, cal.startOfDay(for: at(2026, 8, 15, 13, 0)))
+    }
+
+    func testLongDriveAnchorsToItsLeaveByDay() {
+        // The Kathmandu return: must arrive home 14 Oct 20:00 after ~40 h of
+        // driving plus stops. The journey belongs to the day you LEAVE (the
+        // 12th) — anchored to arrival it fell outside the trip entirely and
+        // the most time-critical day read as a rest day.
+        let drive = TravelSegment(tripID: UUID(), mode: .drive, label: "Drive home",
+                                  arriveBy: at(2026, 10, 14, 20, 0),
+                                  stopMinutes: 600, travelMinutes: 2400)
+        XCTAssertEqual(drive.day, cal.startOfDay(for: at(2026, 10, 12, 0, 0)))
+        XCTAssertEqual(drive.arrivalDay, cal.startOfDay(for: at(2026, 10, 14, 0, 0)),
+                       "arrivalDay brackets the far end for trip-extension checks")
     }
 
     // MARK: Which days go into travel mode
