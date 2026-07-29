@@ -1030,6 +1030,25 @@ enum TravelNotifier {
         UNUserNotificationCenter.current()
             .removePendingNotificationRequests(withIdentifiers: ["travel-\(segment.id.uuidString)"])
     }
+
+    /// Removes pending leave-by nudges whose segment no longer exists —
+    /// deletes on pre-fix builds didn't cancel, so a journey removed weeks ago
+    /// could still ring at dawn. Runs at launch.
+    static func purgeOrphans(context: ModelContext) async {
+        let center = UNUserNotificationCenter.current()
+        let pending = await center.pendingNotificationRequests()
+        let travelIDs = pending.map(\.identifier).filter { $0.hasPrefix("travel-") }
+        guard !travelIDs.isEmpty else { return }
+        // Fail CLOSED: a failed fetch must read as "unknown", not "no
+        // segments" — the ?? [] default would have cancelled every real
+        // leave-by nudge on one transient store error.
+        guard let segments = try? context.fetch(FetchDescriptor<TravelSegment>()) else { return }
+        let live = Set(segments.map { "travel-\($0.id.uuidString)" })
+        let orphans = travelIDs.filter { !live.contains($0) }
+        if !orphans.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: orphans)
+        }
+    }
 }
 
 // MARK: - Travel palette

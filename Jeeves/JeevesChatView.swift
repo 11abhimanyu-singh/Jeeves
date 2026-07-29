@@ -412,6 +412,7 @@ struct JeevesChatView: View {
         case "remember_preference": return toolRememberPreference(call.input)
         case "add_trip":       return toolAddTrip(call.input)
         case "add_journey":    return await toolAddJourney(call.input)
+        case "clean_travel_data": return toolCleanTravelData()
         default:               return .init(text: "Unknown tool \(call.name).")
         }
     }
@@ -614,6 +615,22 @@ struct JeevesChatView: View {
         return .init(text: "Travel mode on for \(trip.dayCount) day(s): \(title), "
                      + "\(JeevesChatView.dayString(start)) – \(JeevesChatView.dayString(end)). "
                      + "The planner stands down on those days. Add each flight or drive with add_journey.")
+    }
+
+    /// Destructive tidying, only ever reached when the user explicitly asked
+    /// for it in chat — never automatic. The receipt lists exactly what
+    /// changed, per the deletion-receipts rule.
+    private func toolCleanTravelData() -> JeevesChatService.ToolResult {
+        let summary = TravelRepair.cleanupLegacy(context: modelContext)
+        if summary.isEmpty {
+            return .init(text: "Travel data is already clean — no overlapping trips, duplicate stays, or orphaned rows.")
+        }
+        var parts: [String] = []
+        if summary.tripsMerged > 0 { parts.append("merged \(summary.tripsMerged) overlapping trip(s)") }
+        if summary.staysCollapsed > 0 { parts.append("collapsed \(summary.staysCollapsed) duplicate stay(s)") }
+        if summary.orphansRemoved > 0 { parts.append("removed \(summary.orphansRemoved) orphaned row(s)") }
+        return .init(text: "Cleaned up travel data: " + parts.joined(separator: ", ")
+                     + ". Back-to-back trips sharing a boundary day were left alone.")
     }
 
     @MainActor

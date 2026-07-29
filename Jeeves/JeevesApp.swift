@@ -26,9 +26,19 @@ struct JeevesApp: App {
         // and repair rows whose times got corrupted (end before start).
         DailyEvent.dedupeExternal(context: sharedModelContainer.mainContext)
         DailyEvent.repairInvalidTimes(context: sharedModelContainer.mainContext)
-        // A trip owns its days: clear any plans lingering under travel mode.
+        // Travel store repairs — launch runs only the provably-safe set
+        // (content-keyed fixes, window GROWTH, plan sweep, fail-closed nudge
+        // purge). Destructive tidying (merges, orphan deletion) is
+        // user-invoked via the clean_travel_data chat tool, never automatic:
+        // a launch mid-CloudKit-sync sees half-imported data, and deletes
+        // propagate to every device.
         let context = sharedModelContainer.mainContext
-        Task { await TravelGuard.sweep(context: context) }
+        Task {
+            TravelRepair.repairSafe(context: context)
+            await TravelRepair.repairWindows(context: context)
+            await TravelGuard.sweep(context: context)
+            await TravelNotifier.purgeOrphans(context: context)
+        }
     }
 
     var sharedModelContainer: ModelContainer = {

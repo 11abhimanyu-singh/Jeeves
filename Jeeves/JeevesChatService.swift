@@ -520,6 +520,14 @@ enum JeevesChatService {
             ],
         ],
         [
+            "name": "clean_travel_data",
+            "description": "One-time tidy-up of travel data, ONLY when the user explicitly asks to clean/fix/merge their trips: merges trips whose dates genuinely overlap (never back-to-back trips), collapses duplicate stays, and removes rows whose trip no longer exists. Destructive — confirm the user wants it before calling. Reports exactly what changed.",
+            "input_schema": [
+                "type": "object",
+                "properties": [:],
+            ],
+        ],
+        [
             "name": "replan_today",
             "description": "Re-plan ONLY the remainder of TODAY from the current time, keeping everything already done, when reality slipped mid-day (an event ran late, a commute overran, the user is behind schedule). Requires an existing plan for today. Use this instead of plan_day for in-progress disruptions.",
             "input_schema": [

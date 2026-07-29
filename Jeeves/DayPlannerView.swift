@@ -236,11 +236,17 @@ struct DayPlannerView: View {
         for t in Itinerary.transitions(resolved)
         where t.from.place != t.to.place && t.from.address != t.to.address {
             let noon = cal.date(bySettingHour: 12, minute: 0, second: 0, of: t.day) ?? t.day
+            // A move between two stays is a DRIVE until the user says
+            // otherwise: both ends are street addresses, and .flight dressed a
+            // 2 h lodge transfer in a 3 h airline cut-off, telling the user to
+            // leave at 05:55 for a noon drive. Drives take an arrive-by, not a
+            // departure.
             modelContext.insert(TravelSegment(
-                tripID: trip.id, mode: .flight,
+                tripID: trip.id, mode: .drive,
                 label: "\(t.from.place) → \(t.to.place)",
                 fromPlace: t.from.address, toPlace: t.to.address,
-                departAt: noon))
+                arriveBy: noon,
+                checkInMinutes: 0, securityMinutes: 0))
         }
         modelContext.saveOrLog("DayPlanner.acceptTravel")
         // The trip now owns these days — stale plans and their notifications go.
