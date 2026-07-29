@@ -30,6 +30,10 @@ struct DayPlannerView: View {
     // Date dial: defaults to today, scrollable through the next 60 days.
     @State private var selectedDate: Date = Date().startOfDay
     @State private var editingTrip: Trip?
+    /// Venue → measured one-way journey minutes. Absent means unmeasured, and
+    /// unmeasured is never treated as "far".
+    @State private var measuredJourneys: [String: Int] = [:]
+    @State private var dismissedTravelDays: Set<Date> = []
     @State private var eventDraft: EventDraft?
     @State private var editingEvent: DailyEvent?
 
@@ -80,8 +84,9 @@ struct DayPlannerView: View {
             }
         }
         .sheet(item: $editingTrip) { TripEditorView(trip: $0) }
-        .onAppear { loadGymState() }
-        .onChange(of: selectedDate) { _, _ in loadGymState() }
+        .onAppear { loadGymState(); measureJourneys() }
+        .onChange(of: selectedDate) { _, _ in loadGymState(); measureJourneys() }
+        .onChange(of: events.count) { _, _ in measureJourneys() }
         .onChange(of: hasGymToday) { _, _ in saveGymState() }
         .onChange(of: gymTime) { _, _ in saveGymState() }
     }
@@ -95,10 +100,107 @@ struct DayPlannerView: View {
                 TravelDayCard(trip: trip, day: selectedDate)
                 eventsSection
             } else {
+                if let s = travelSuggestion { travelSuggestionBanner(s) }
                 eventsSection
                 gymCard
                 planBar
                 planCard
+            }
+        }
+    }
+
+    // MARK: Travel detection
+
+    /// Does the selected day look like travel? Built from the day's events plus
+    /// whatever journey times we've been able to measure.
+    private var travelSuggestion: TravelDetection.Suggestion? {
+        guard tripCovering(selectedDate) == nil else { return nil }
+        guard !dismissedTravelDays.contains(selectedDate.startOfDay) else { return nil }
+        let cal = Calendar.current
+        let dayEvents = events.filter { cal.isDate($0.date, inSameDayAs: selectedDate) }
+        guard !dayEvents.isEmpty else { return nil }
+
+        let candidates = dayEvents.map { e -> TravelDetection.Candidate in
+            // The same title on consecutive days is one multi-day thing.
+            let sameTitle = events.filter { $0.title == e.title }.map(\.date)
+            return TravelDetection.Candidate(
+                title: e.title,
+                day: cal.startOfDay(for: e.date),
+                isAllDay: e.isAllDay,
+                hasLocation: !e.destinationAddress.isEmpty,
+                eventMinutes: max(0, e.endMinute - e.startMinute),
+                journeyMinutes: measuredJourneys[e.destinationAddress],
+                spanDays: TravelDetection.spanDays(title: e.title, days: sameTitle, calendar: cal))
+        }
+        return TravelDetection.suggestion(for: candidates, calendar: cal)
+    }
+
+    private func travelSuggestionBanner(_ s: TravelDetection.Suggestion) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                Image(systemName: "airplane.departure").font(.system(size: 13, weight: .semibold))
+                Text("LOOKS LIKE TRAVEL").font(.system(size: 10.5, weight: .bold)).kerning(1.1)
+                Spacer()
+            }
+            .foregroundStyle(Color.travelInk)
+            Text(s.reason)
+                .font(.system(size: 13))
+                .foregroundStyle(Color.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Travel mode stops me filling these days with your routine. You'd get journeys and leave-by times instead.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Color.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button { acceptTravel(s) } label: {
+                    Text(s.startDay == s.endDay ? "Switch this day" : "Switch these \(dayCount(s)) days")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                        .background(RoundedRectangle(cornerRadius: 11).fill(Color.travelInk))
+                }
+                .buttonStyle(.plain)
+                Button { dismissedTravelDays.insert(selectedDate.startOfDay) } label: {
+                    Text("Not travel")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.textSoft)
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                        .background(RoundedRectangle(cornerRadius: 11).stroke(Color.textPrimary.opacity(0.15), lineWidth: 1.3))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color.travelBg))
+    }
+
+    private func dayCount(_ s: TravelDetection.Suggestion) -> Int {
+        (Calendar.current.dateComponents([.day], from: s.startDay, to: s.endDay).day ?? 0) + 1
+    }
+
+    private func acceptTravel(_ s: TravelDetection.Suggestion) {
+        let trip = Trip(title: s.title, startDate: s.startDay, endDate: s.endDay)
+        modelContext.insert(trip)
+        modelContext.saveOrLog("DayPlanner.acceptTravel")
+        editingTrip = trip
+    }
+
+    /// Measure the journey to each of the day's venues once, so the distance
+    /// rules have something to work with. Unmeasured stays nil — never guessed.
+    private func measureJourneys() {
+        let cal = Calendar.current
+        let venues = Set(events
+            .filter { cal.isDate($0.date, inSameDayAs: selectedDate) && !$0.destinationAddress.isEmpty }
+            .map(\.destinationAddress))
+        let pending = venues.subtracting(measuredJourneys.keys)
+        guard !pending.isEmpty else { return }
+        let home = locations.first { $0.kind == .home }?.address ?? "Home"
+        Task {
+            for v in pending {
+                if let m = await GoogleMapsService.commuteMinutes(from: home, to: v) {
+                    measuredJourneys[v] = m
+                }
             }
         }
     }

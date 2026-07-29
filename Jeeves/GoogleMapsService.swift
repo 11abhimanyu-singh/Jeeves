@@ -187,6 +187,36 @@ enum GoogleMapsService {
                              lat: coord?.lat, lng: coord?.lng)
     }
 
+    /// Forward-geocode a TYPED or SPOKEN place ("JLR River Tern Lodge") into a
+    /// real pin. Until this existed only pasted Maps links resolved, so a venue
+    /// the user typed had no coordinates and no journey could be measured to it
+    /// — which is how a 265 km drive once got planned as a 30-minute commute.
+    /// Uses the Geocoding API's free-text search; nil when nothing matches, so
+    /// callers can say "I couldn't find that" instead of inventing a distance.
+    static func geocodePlace(_ raw: String) async -> ResolvedPlace? {
+        let query = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, !isMapsLink(query),
+              let key = KeychainService.loadGoogleMapsAPIKey(), !key.isEmpty,
+              let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://maps.googleapis.com/maps/api/geocode/json?address=\(encoded)&key=\(key)")
+        else { return nil }
+        guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
+        return parseGeocode(data, fallbackName: query)
+    }
+
+    /// Pure decode of a Geocoding response — extracted so the parse is testable
+    /// without a key or a round-trip.
+    nonisolated static func parseGeocode(_ data: Data, fallbackName: String) -> ResolvedPlace? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (json["status"] as? String) == "OK",
+              let results = json["results"] as? [[String: Any]],
+              let first = results.first else { return nil }
+        let address = first["formatted_address"] as? String
+        let loc = (first["geometry"] as? [String: Any])?["location"] as? [String: Any]
+        return ResolvedPlace(name: fallbackName, address: address,
+                             lat: loc?["lat"] as? Double, lng: loc?["lng"] as? Double)
+    }
+
     /// Reverse-geocodes a pin to a full formatted street address via the
     /// Geocoding API. Nil if there's no key, no network, or no result — callers
     /// fall back to the place name.

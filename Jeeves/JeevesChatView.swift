@@ -962,9 +962,16 @@ struct JeevesChatView: View {
     @MainActor
     private func resolveEventDestinationIfLink(_ event: DailyEvent) {
         let raw = event.destinationAddress
-        guard GoogleMapsService.isMapsLink(raw) else { return }
+        guard !raw.isEmpty, event.destinationLat == nil else { return }
         Task {
-            guard let place = await GoogleMapsService.resolvePlace(raw) else { return }
+            // A pasted Maps link resolves to its pin; anything the user TYPED or
+            // SPOKE is geocoded as free text. Without the second path a venue
+            // name has no coordinates and no journey can be measured to it —
+            // which is how a 265 km drive once got planned as a 30-min commute.
+            let place = GoogleMapsService.isMapsLink(raw)
+                ? await GoogleMapsService.resolvePlace(raw)
+                : await GoogleMapsService.geocodePlace(raw)
+            guard let place, place.lat != nil else { return }
             event.destinationAddress = place.displayAddress
             event.destinationLat = place.lat
             event.destinationLng = place.lng

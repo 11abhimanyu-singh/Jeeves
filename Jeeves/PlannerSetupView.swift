@@ -215,9 +215,14 @@ struct PlannerSetupView: View {
     /// so there's no regression, and routing then geocodes the clean name.
     private func resolveDestinationIfLink(for event: DailyEvent) {
         let raw = event.destinationAddress
-        guard GoogleMapsService.isMapsLink(raw) else { return }
+        guard !raw.isEmpty, event.destinationLat == nil else { return }
         Task {
-            guard let place = await GoogleMapsService.resolvePlace(raw) else { return }
+            // Links resolve to their pin; typed/spoken venues are geocoded as
+            // free text, so every venue ends up with real coordinates.
+            let place = GoogleMapsService.isMapsLink(raw)
+                ? await GoogleMapsService.resolvePlace(raw)
+                : await GoogleMapsService.geocodePlace(raw)
+            guard let place, place.lat != nil else { return }
             event.destinationAddress = place.displayAddress
             event.destinationLat = place.lat
             event.destinationLng = place.lng
