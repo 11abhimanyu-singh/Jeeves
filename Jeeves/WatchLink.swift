@@ -66,6 +66,10 @@ final class WatchLink: NSObject, ObservableObject {
     private func workoutStarted(activity: String) {
         guard let context = container?.mainContext else { return }
         let type = WorkoutType.from(activity: activity)
+        // Every start is a behavioral event, even when no card is minted —
+        // "started three times during gym hour" is exactly what the anomaly
+        // scan needs to see and final states can't show.
+        EventLog.log(.workoutStarted, WorkoutType.title(forActivity: activity), context: context)
         guard matchToday(context, type: type, start: Date()) == nil else { return }
         context.insert(Workout(date: Date(), type: type, state: .live, source: .watch,
                                title: WorkoutType.title(forActivity: activity)))
@@ -94,6 +98,9 @@ final class WatchLink: NSObject, ObservableObject {
                 w.state = (type == .run) ? .done : .needsDetail
             }
             w.receivedWatchSummary = true
+            EventLog.log(.watchSummaryArrived,
+                         "\(w.title) — \(durationMin) min, \(avgBPM) bpm", subject: w.id,
+                         context: context)
         } else {
             let created = Workout(date: start, type: type,
                                   state: (type == .run) ? .done : .needsDetail,
@@ -102,6 +109,9 @@ final class WatchLink: NSObject, ObservableObject {
                                   durationMin: durationMin, avgBPM: avgBPM)
             created.receivedWatchSummary = true
             context.insert(created)
+            EventLog.log(.watchSummaryCreated,
+                         "\(created.title) — \(durationMin) min, nothing live to match",
+                         subject: created.id, context: context)
         }
         context.saveOrLog("WatchLink.workoutEnded")
     }

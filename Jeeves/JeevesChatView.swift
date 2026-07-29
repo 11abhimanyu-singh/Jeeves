@@ -626,6 +626,8 @@ struct JeevesChatView: View {
         let trip = Trip(title: title, startDate: start, endDate: end)
         modelContext.insert(trip)
         modelContext.saveOrLog("chat.addTrip")
+        EventLog.log(.tripCreated, "\(title) \(TravelGuard.dayRange(trip)) via chat",
+                     subject: trip.id, context: modelContext)
         // The trip now owns these days — stale plans and their notifications go.
         Task { await TravelGuard.sweep(context: modelContext) }
         return .init(text: "Travel mode on for \(trip.dayCount) day(s): \(title), "
@@ -638,6 +640,9 @@ struct JeevesChatView: View {
     /// changed, per the deletion-receipts rule.
     private func toolCleanTravelData() -> JeevesChatService.ToolResult {
         let summary = TravelRepair.cleanupLegacy(context: modelContext)
+        EventLog.log(.travelCleanup,
+                     "merged \(summary.tripsMerged), collapsed \(summary.staysCollapsed), removed \(summary.orphansRemoved)",
+                     context: modelContext)
         if summary.isEmpty {
             return .init(text: "Travel data is already clean — no overlapping trips, duplicate stays, or orphaned rows.")
         }
@@ -1106,6 +1111,7 @@ struct JeevesChatView: View {
         let date = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
         // A trip owns its days — no generator may plan one.
         if let trip = TravelGuard.tripCovering(date, context: modelContext) {
+            EventLog.log(.planRefusedTravel, "chat plan_day refused (\(trip.title))", context: modelContext)
             return .init(text: TravelGuard.refusalMessage(for: date, trip: trip))
         }
         let note = (input["note"] as? String) ?? ""

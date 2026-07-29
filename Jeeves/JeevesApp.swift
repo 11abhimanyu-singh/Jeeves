@@ -38,6 +38,11 @@ struct JeevesApp: App {
             await TravelRepair.repairWindows(context: context)
             await TravelGuard.sweep(context: context)
             await TravelNotifier.purgeOrphans(context: context)
+            // Scan for anomalies (behavioral + structural) and mirror the
+            // digest to iCloud Drive for the Mac-side daily summary. Scans
+            // and narrates only — never repairs; the user designs fixes and
+            // UX from what this surfaces.
+            AnomalyScan.writeDigest(context: context)
         }
     }
 
@@ -66,6 +71,7 @@ struct JeevesApp: App {
             Trip.self,
             TravelSegment.self,
             TripStay.self,
+            AppEvent.self,
         ])
         // Sync to the user's private iCloud database so their data backs up and
         // follows them across devices. The iCloud/CloudKit capability is present

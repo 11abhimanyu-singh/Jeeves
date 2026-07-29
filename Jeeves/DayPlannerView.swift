@@ -249,6 +249,8 @@ struct DayPlannerView: View {
                 checkInMinutes: 0, securityMinutes: 0))
         }
         modelContext.saveOrLog("DayPlanner.acceptTravel")
+        EventLog.log(.tripCreated, "\(trip.title) \(TravelGuard.dayRange(trip)) from calendar banner",
+                     subject: trip.id, context: modelContext)
         // The trip now owns these days — stale plans and their notifications go.
         Task { await TravelGuard.sweep(context: modelContext) }
         editingTrip = trip
@@ -444,6 +446,8 @@ struct DayPlannerView: View {
         // A trip owns its days: the button is hidden on travel days, but the
         // rule is enforced here too so no path around the UI can plan one.
         if let trip = tripCovering(selectedDate) {
+            EventLog.log(.planRefusedTravel, "planner button refused (\(trip.title))",
+                         context: modelContext)
             planError = TravelGuard.refusalMessage(for: selectedDate, trip: trip)
             return
         }
@@ -698,6 +702,8 @@ struct DayPlannerView: View {
             ))
         }
         modelContext.saveOrLog()
+        EventLog.log(.calendarSynced, "\(chosen.count) event(s) confirmed from Google Calendar",
+                     context: modelContext)
         if let day = calendarReview?.date { selectedDate = day }
     }
 

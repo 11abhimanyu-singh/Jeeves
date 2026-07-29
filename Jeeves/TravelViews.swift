@@ -725,6 +725,10 @@ struct SegmentEditorView: View {
         segment.travelMinutes = travel
         segment.travelIsEstimated = !travelMeasured
         modelContext.saveOrLog("SegmentEditor.save")
+        EventLog.log(.journeySaved,
+                     "\(label.isEmpty ? segment.mode.label : label) — \(travel) min journey"
+                     + (travelMeasured ? " (measured)" : " (unmeasured)"),
+                     subject: segment.id, context: modelContext)
         extendTripIfNeeded()
         Task { await TravelNotifier.schedule(segment: segment) }
         dismiss()

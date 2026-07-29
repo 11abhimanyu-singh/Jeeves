@@ -754,6 +754,10 @@ struct RunView: View {
         // Only mark the run logged if it actually persisted; otherwise leave
         // logged == false so the guard above lets the user retry the save.
         logged = modelContext.saveOrLog()
+        if logged {
+            EventLog.log(.workoutSaved, "\(workout.title) — run saved on phone",
+                         subject: workout.id, context: modelContext)
+        }
     }
 
     // MARK: - Timer

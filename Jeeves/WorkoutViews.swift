@@ -688,7 +688,11 @@ struct WorkoutLiftView: View {
         if workout.date == .distantPast { workout.date = base }
         workout.state = .done
         saved = modelContext.saveOrLog("WorkoutLiftView.save")
-        if saved { dismiss() }
+        if saved {
+            EventLog.log(.workoutSaved, "\(workout.title) — lift saved on phone",
+                         subject: workout.id, context: modelContext)
+            dismiss()
+        }
     }
 
     /// A manual workout closed without ever logging anything shouldn't linger
@@ -880,7 +884,11 @@ struct WalkDetailView: View {
         workout.state = .done
         if workout.date == .distantPast { workout.date = Date() }
         saved = modelContext.saveOrLog("WalkDetailView.save")
-        if saved { dismiss() }
+        if saved {
+            EventLog.log(.workoutSaved, "\(workout.title) — walk saved (\(minutes) min)",
+                         subject: workout.id, context: modelContext)
+            dismiss()
+        }
     }
 
     private func trimmed(_ v: Double) -> String {

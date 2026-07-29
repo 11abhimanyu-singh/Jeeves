@@ -28,6 +28,13 @@ enum TravelGuard {
         tripCovering(day, context: context) != nil
     }
 
+    /// "12–18 Aug" for event-log detail lines.
+    static func dayRange(_ trip: Trip) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "d MMM"
+        return "\(f.string(from: trip.startDate))–\(f.string(from: trip.endDate))"
+    }
+
     /// The message every generator returns when refused, so chat and UI speak
     /// with one voice.
     static func refusalMessage(for day: Date, trip: Trip) -> String {
@@ -56,6 +63,9 @@ enum TravelGuard {
         }
         guard changed else { return false }
         context.saveOrLog("TravelGuard.absorb")
+        EventLog.log(.tripExtended,
+                     "\(trip.title.isEmpty ? "Trip" : trip.title) grew to cover a journey",
+                     subject: trip.id, context: context)
         await sweep(context: context)
         return true
     }
@@ -77,6 +87,7 @@ enum TravelGuard {
         }
         guard !swept.isEmpty else { return }
         context.saveOrLog("TravelGuard.sweep")
+        EventLog.log(.plansSwept, "\(swept.count) day-plan(s) deleted under trips", context: context)
         for day in swept {
             await NotificationService.clear(for: day)
         }
