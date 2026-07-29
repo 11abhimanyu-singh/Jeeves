@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
-Jeeves voice-note eval: Whisper as the reference transcriber.
+Jeeves voice-note eval: a cloud transcriber as the reference.
 
 Reads the voice notes Jeeves mirrors to iCloud Drive (state-latest.json for
 the on-device transcripts + VoiceNotes/*.m4a for the audio), re-transcribes
-each recording with OpenAI Whisper, and reports the on-device recognizer's
-word-error rate for THIS user's voice (Indian English). High WER on specific
-words = candidates for the recognizer's contextual-vocabulary list; high WER
-overall = consider promoting Whisper to primary transcription.
+each recording with OpenAI (gpt-4o-transcribe by default), and reports the
+on-device recognizer's word-error rate for THIS user's voice (Indian English).
+High WER on specific words = candidates for the recognizer's contextual-
+vocabulary list; high WER overall = consider moving transcription off-device.
 
 Usage:
     OPENAI_API_KEY=sk-... python3 tools/voice-eval.py [data-dir]
+    VOICE_EVAL_MODEL=whisper-1 ... to compare against the older reference.
 data-dir defaults to the iCloud container; pass a folder holding
 state-latest.json + VoiceNotes/ to eval data pulled over the cable.
 Writes voice-eval.json next to the notes and prints a summary table.
@@ -28,22 +29,33 @@ CONTAINER = Path(sys.argv[1]) if len(sys.argv) > 1 else (
 STATE = CONTAINER / "state-latest.json"
 AUDIO_DIR = CONTAINER / "VoiceNotes"
 OUT = CONTAINER / "voice-eval.json"
-WHISPER_URL = "https://api.openai.com/v1/audio/transcriptions"
+TRANSCRIBE_URL = "https://api.openai.com/v1/audio/transcriptions"
+# The reference transcriber the on-device engine is graded against. It has to be
+# BETTER than what we're measuring or the error rate flatters us — and since the
+# whole question is "does Apple handle this user's Indian English", a reference
+# that's itself weak on accented speech would answer it wrongly. gpt-4o-transcribe
+# supersedes whisper-1 and is stronger there; override to compare.
+REFERENCE_MODEL = os.environ.get("VOICE_EVAL_MODEL", "gpt-4o-transcribe")
 
 
-def whisper(path: Path, key: str) -> str:
+def transcribe(path: Path, key: str, model: str = REFERENCE_MODEL) -> str:
     boundary = uuid.uuid4().hex
     body = b""
     def field(name, value):
         return (f"--{boundary}\r\nContent-Disposition: form-data; "
                 f"name=\"{name}\"\r\n\r\n{value}\r\n").encode()
-    body += field("model", "whisper-1")
+    body += field("model", model)
     body += field("language", "en")
+    # Bias the reference toward the names this user actually says — the same
+    # proper nouns the on-device recognizer keeps missing. Without it the
+    # reference can invent its own spelling and we'd score a real match as an error.
+    body += field("prompt", "Jeeves. JLR River Tern Lodge, Bhadra Tiger Reserve, "
+                            "Bengaluru, Indiranagar, Denpasar, front squat, tonnage.")
     body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; "
              f"filename=\"{path.name}\"\r\nContent-Type: audio/m4a\r\n\r\n").encode()
     body += path.read_bytes() + b"\r\n"
     body += f"--{boundary}--\r\n".encode()
-    req = urllib.request.Request(WHISPER_URL, data=body, headers={
+    req = urllib.request.Request(TRANSCRIBE_URL, data=body, headers={
         "Authorization": f"Bearer {key}",
         "Content-Type": f"multipart/form-data; boundary={boundary}",
     })
@@ -94,7 +106,7 @@ def main() -> None:
             missing += 1
             continue
         try:
-            reference = whisper(audio, key)
+            reference = transcribe(audio, key)
         except Exception as e:  # keep going; report per-note failures
             results.append({"date": n["date"], "error": str(e)[:200]})
             continue
@@ -102,12 +114,13 @@ def main() -> None:
         score = wer(norm(reference), norm(ondevice))
         results.append({
             "date": n["date"], "durationSec": n.get("durationSec"),
-            "onDevice": ondevice, "whisper": reference,
+            "onDevice": ondevice, "reference": reference,
             "wer": round(score, 3),
         })
 
     scored = [r for r in results if "wer" in r]
     summary = {
+        "referenceModel": REFERENCE_MODEL,
         "notes": len(with_audio), "scored": len(scored),
         "audioMissingLocally": missing,
         "meanWER": round(sum(r["wer"] for r in scored) / len(scored), 3) if scored else None,
@@ -116,7 +129,7 @@ def main() -> None:
     }
     OUT.write_text(json.dumps(summary, indent=2))
 
-    print(f"\n{len(scored)} notes scored"
+    print(f"\n{len(scored)} notes scored against {REFERENCE_MODEL}"
           + (f" · mean WER {summary['meanWER']:.1%}" if scored else "")
           + (f" · {missing} audio files not yet synced" if missing else ""))
     for r in scored:
@@ -124,7 +137,7 @@ def main() -> None:
         print(f"{flag}{r['date']}  WER {r['wer']:.1%}")
         if r["wer"] > 0:
             print(f"     on-device: {r['onDevice'][:90]}")
-            print(f"     whisper  : {r['whisper'][:90]}")
+            print(f"     {REFERENCE_MODEL[:9]}: {r['reference'][:90]}")
     print(f"\nFull report: {OUT}")
 
 
