@@ -547,11 +547,12 @@ enum JeevesChatService {
             "input_schema": [
                 "type": "object",
                 "properties": [
-                    "title": ["type": "string", "description": "The trip's title (or part of it)."],
+                    "title": ["type": "string", "description": "The trip's title (or part of it). Omit with date to match every trip covering that day."],
+                    "date": ["type": "string", "description": "YYYY-MM-DD (or 'today') — with NO title, selects every trip covering this day ('delete all trips on Sunday')."],
                     "start_date": ["type": "string", "description": "YYYY-MM-DD start of the trip — pins ONE trip when several share the title."],
-                    "all": ["type": "boolean", "description": "true = delete EVERY matching trip (identical clones the user confirmed all go). Only after explicit confirmation."],
+                    "all": ["type": "boolean", "description": "true = delete EVERY matching trip (identical clones, or all trips on a date, after the user explicitly confirmed they all go)."],
                 ],
-                "required": ["title"],
+                "required": [],
             ],
         ],
         [

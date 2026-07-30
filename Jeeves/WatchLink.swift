@@ -102,6 +102,23 @@ final class WatchLink: NSObject, ObservableObject {
                          "\(w.title) — \(durationMin) min, \(avgBPM) bpm", subject: w.id,
                          context: context)
         } else {
+            // transferUserInfo can deliver the SAME summary twice. The first
+            // delivery claims the live card (receivedWatchSummary = true), so
+            // the second finds nothing live and used to mint a clone workout.
+            // A same-type workout already carrying a summary within minutes of
+            // this start IS this summary — drop the duplicate.
+            let all = (try? context.fetch(FetchDescriptor<Workout>())) ?? []
+            let alreadyFiled = all.contains {
+                $0.type == type && $0.receivedWatchSummary
+                    && abs($0.date.timeIntervalSince(start)) < 30 * 60
+            }
+            if alreadyFiled {
+                EventLog.log(.watchSummaryArrived,
+                             "\(WorkoutType.title(forActivity: activity)) — duplicate delivery ignored",
+                             context: context)
+                context.saveOrLog("WatchLink.duplicateSummary")
+                return
+            }
             let created = Workout(date: start, type: type,
                                   state: (type == .run) ? .done : .needsDetail,
                                   source: .watch,

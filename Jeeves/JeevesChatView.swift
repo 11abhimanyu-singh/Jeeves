@@ -490,7 +490,15 @@ struct JeevesChatView: View {
     private func toolDeleteTrip(_ input: [String: Any]) -> JeevesChatService.ToolResult {
         let query = (input["title"] as? String ?? "").trimmingCharacters(in: .whitespaces)
         let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
-        var candidates = JeevesChatService.bestMatches(trips, title: \.title, query: query)
+        // "Delete all trips on Sunday" is date-shaped: with no title, a date
+        // selects every trip covering that day.
+        var candidates: [Trip]
+        if query.isEmpty, let dateRaw = input["date"] as? String {
+            let day = JeevesChatService.resolveDate(dateRaw, relativeTo: today)
+            candidates = trips.filter { $0.covers(day) }
+        } else {
+            candidates = JeevesChatService.bestMatches(trips, title: \.title, query: query)
+        }
         // Two trips can share a title (the clone era minted several "Bali"s).
         // A date narrows it; without one, deleting "the first match" could
         // take the WRONG trip — ask instead.
