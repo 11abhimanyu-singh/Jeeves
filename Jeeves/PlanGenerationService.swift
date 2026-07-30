@@ -88,9 +88,13 @@ enum PlanGenerationService {
             throw PlanGenerationError.requestFailed("No response from server.")
         }
         guard (200...299).contains(http.statusCode) else {
+            // Always carry the status code — a 401 (bad key), 429 (rate
+            // limit) and 529 (overloaded) each need a different response,
+            // and the diagnostics log is where that difference lives.
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])
                 .flatMap { ($0["error"] as? [String: Any])?["message"] as? String }
-            throw PlanGenerationError.requestFailed(message ?? "Request failed (\(http.statusCode)).")
+            throw PlanGenerationError.requestFailed(
+                "HTTP \(http.statusCode)" + (message.map { ": \($0)" } ?? ""))
         }
 
         guard let text = extractText(from: data) else {

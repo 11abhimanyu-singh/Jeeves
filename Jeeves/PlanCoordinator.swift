@@ -68,7 +68,10 @@ enum PlanCoordinator {
         let commuteMs = Int(Date().timeIntervalSince(t0) * 1000)
 
         let tClaude = Date()
-        guard let first = try? await PlanGenerationService.generate(request) else {
+        let first: GeneratedPlan
+        do {
+            first = try await PlanGenerationService.generate(request)
+        } catch {
             // Offline: even a mid-day re-plan must keep the locked (already-elapsed)
             // morning — merge it with the deterministic remainder from `from`, not
             // rebuild the whole day (which would discard what's already done).
@@ -82,7 +85,13 @@ enum PlanCoordinator {
             } else {
                 offlinePlan = deterministic(inputs)
             }
-            return Result(plan: offlinePlan, isOffline: true, error: "planning service unreachable",
+            // The ACTUAL error, not a generic shrug: "Request failed (429):
+            // rate limited" and "missing API key" need entirely different
+            // responses, and the diagnostics log was recording both as
+            // "planning service unreachable".
+            let detail = (error as? PlanGenerationError)?.errorDescription
+                ?? error.localizedDescription
+            return Result(plan: offlinePlan, isOffline: true, error: detail,
                           commuteMs: commuteMs, claudeMs: Int(Date().timeIntervalSince(tClaude) * 1000))
         }
         // A mid-day re-plan produces only the REMAINDER; stitch the preserved
@@ -238,13 +247,31 @@ enum PlanCoordinator {
 
     // MARK: Deterministic offline fallback
 
-    private static func deterministic(_ i: Inputs) -> GeneratedPlan {
-        let blocks = DayPlanner.generate(
+    static func deterministic(_ i: Inputs) -> GeneratedPlan {
+        var blocks = DayPlanner.generate(
             gymMinute: i.hasGym ? i.gymMinute : nil,
             prepSessions: i.prepSessions,
             leisureLogs: []
         )
-        let generated = blocks.map { b in
+        // The offline engine is event-blind by construction, and it used to
+        // stay that way: a fallback plan cheerfully scheduled interview prep
+        // on top of a 2 PM appointment. Timed events are immovable reality —
+        // carve them in as anchors, drop whatever they overlap (reported,
+        // never silent), and say plainly that commutes are NOT included.
+        let timed = i.events
+            .filter { !$0.isAllDay && $0.endMinute > $0.startMinute }
+            .sorted { $0.startMinute < $1.startMinute }
+        var droppedForEvents: [String] = []
+        if !timed.isEmpty {
+            blocks = blocks.filter { b in
+                let collides = timed.contains { e in
+                    b.startMinute < e.endMinute && e.startMinute < b.endMinute
+                }
+                if collides { droppedForEvents.append(b.title) }
+                return !collides
+            }
+        }
+        var generated = blocks.map { b in
             GeneratedBlock(
                 title: b.title,
                 startTime: String(format: "%02d:%02d", b.startMinute / 60, b.startMinute % 60),
@@ -254,9 +281,23 @@ enum PlanCoordinator {
                 kind: b.isAnchor ? "anchor" : "activity"
             )
         }
+        for e in timed {
+            generated.append(GeneratedBlock(
+                title: e.title,
+                startTime: String(format: "%02d:%02d", e.startMinute / 60, e.startMinute % 60),
+                endTime: String(format: "%02d:%02d", e.endMinute / 60, e.endMinute % 60),
+                note: e.destinationAddress.isEmpty ? nil
+                    : "At \(e.destinationAddress). Offline plan — commute NOT included, leave early.",
+                isAnchor: true,
+                kind: "event"
+            ))
+        }
+        generated.sort { ($0.startMinute ?? 0) < ($1.startMinute ?? 0) }
+        let eventNote = timed.isEmpty ? ""
+            : " Your \(timed.count) timed event(s) are carved in as fixed anchors; commutes could not be measured offline — leave earlier than feels safe."
         return GeneratedPlan(
-            blocks: generated, dropped: [], shrunk: [],
-            summary: "Offline plan from the built-in scheduler.", boundaryTime: nil
+            blocks: generated, dropped: droppedForEvents, shrunk: [],
+            summary: "Offline plan from the built-in scheduler.\(eventNote)", boundaryTime: nil
         )
     }
 
