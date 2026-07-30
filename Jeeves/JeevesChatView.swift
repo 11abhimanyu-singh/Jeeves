@@ -498,9 +498,34 @@ struct JeevesChatView: View {
             let wanted = JeevesChatService.resolveDate(dateRaw, relativeTo: today)
             candidates = candidates.filter { Calendar.current.isDate($0.startDate, inSameDayAs: wanted) }
         }
+        // Identical twins (same title, same dates — the clone era minted
+        // exactly this) can't be pinned by any field. When the user has
+        // confirmed they ALL go, all=true deletes every match with one
+        // combined receipt.
+        if candidates.count > 1, (input["all"] as? Bool) == true {
+            var deletedNames: [String] = []
+            var journeyCount = 0
+            let allSegs = (try? modelContext.fetch(FetchDescriptor<TravelSegment>())) ?? []
+            let allStays = (try? modelContext.fetch(FetchDescriptor<TripStay>())) ?? []
+            for trip in candidates {
+                for s in allSegs where s.tripID == trip.id {
+                    TravelNotifier.cancel(segment: s)
+                    modelContext.delete(s)
+                    journeyCount += 1
+                }
+                for st in allStays where st.tripID == trip.id { modelContext.delete(st) }
+                deletedNames.append("'\(trip.title.isEmpty ? "Trip" : trip.title)' (\(TravelGuard.dayRange(trip)))")
+                modelContext.delete(trip)
+            }
+            modelContext.saveOrLog("chat.deleteTrip.all")
+            EventLog.log(.travelCleanup,
+                         "deleted \(deletedNames.count) matching trips, \(journeyCount) journey(s)",
+                         context: modelContext)
+            return .init(text: "Deleted all \(deletedNames.count) matching trips: \(deletedNames.joined(separator: ", ")) — \(journeyCount) journey(s) went with them, nudges cancelled, planner takes the days back.")
+        }
         if candidates.count > 1 {
             let names = candidates.map { "'\($0.title)' (\(TravelGuard.dayRange($0)))" }.joined(separator: ", ")
-            return .init(text: "\(candidates.count) trips match '\(query)': \(names). Ask the user which one, then call again with start_date to pin it.")
+            return .init(text: "\(candidates.count) trips match '\(query)': \(names). If the user wants ONE, pin it with start_date; if they've confirmed ALL of them go, call again with all=true.")
         }
         guard let trip = candidates.first else {
             let names = trips.map { "'\($0.title)' (\(TravelGuard.dayRange($0)))" }.joined(separator: ", ")

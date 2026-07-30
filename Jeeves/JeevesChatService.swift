@@ -548,7 +548,8 @@ enum JeevesChatService {
                 "type": "object",
                 "properties": [
                     "title": ["type": "string", "description": "The trip's title (or part of it)."],
-                    "start_date": ["type": "string", "description": "YYYY-MM-DD start of the trip — REQUIRED when several trips share the title, to pin which one."],
+                    "start_date": ["type": "string", "description": "YYYY-MM-DD start of the trip — pins ONE trip when several share the title."],
+                    "all": ["type": "boolean", "description": "true = delete EVERY matching trip (identical clones the user confirmed all go). Only after explicit confirmation."],
                 ],
                 "required": ["title"],
             ],
