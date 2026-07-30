@@ -18,6 +18,58 @@ final class ChatDataToolTests: XCTestCase {
         cal.date(from: DateComponents(year: y, month: mo, day: d, hour: h, minute: mi))!
     }
 
+    // MARK: delete_event range matching ("delete everything from Sept 1 onwards")
+
+    private func event(_ title: String, _ y: Int, _ m: Int, _ d: Int,
+                       spanEnd: (Int, Int, Int)? = nil) -> DailyEvent {
+        DailyEvent(date: at(y, m, d, 0), title: title, startMinute: 0, endMinute: 0,
+                   isAllDay: true,
+                   spanEndDate: spanEnd.map { at($0.0, $0.1, $0.2, 0) })
+    }
+
+    @MainActor
+    func testRangeMatchesEverythingTouchingIt() {
+        let events = [
+            event("Bali", 2026, 9, 3, spanEnd: (2026, 9, 13)),
+            event("Travel to Singapore", 2026, 9, 11, spanEnd: (2026, 9, 14)),
+            event("Dentist", 2026, 8, 20),
+            event("Diwali", 2026, 11, 8),
+        ]
+        let hits = JeevesChatService.eventsInRange(events, start: at(2026, 9, 1, 0),
+                                                   end: at(2027, 12, 31, 0), title: nil)
+        XCTAssertEqual(hits.map(\.title), ["Bali", "Travel to Singapore", "Diwali"],
+                       "September 1 onwards takes everything from there, sorted")
+    }
+
+    @MainActor
+    func testSpanStraddlingTheRangeStartStillMatches() {
+        // An event STARTING Aug 30 but spanning into September is in
+        // "September onwards" — the span touches the range.
+        let events = [event("Long stay", 2026, 8, 30, spanEnd: (2026, 9, 2))]
+        let hits = JeevesChatService.eventsInRange(events, start: at(2026, 9, 1, 0),
+                                                   end: at(2026, 9, 30, 0), title: nil)
+        XCTAssertEqual(hits.count, 1)
+    }
+
+    @MainActor
+    func testTitleNarrowsTheRange() {
+        let events = [
+            event("Bali", 2026, 9, 3, spanEnd: (2026, 9, 13)),
+            event("Travel to Singapore", 2026, 9, 11, spanEnd: (2026, 9, 14)),
+        ]
+        let hits = JeevesChatService.eventsInRange(events, start: at(2026, 9, 1, 0),
+                                                   end: at(2026, 9, 30, 0), title: "Singapore")
+        XCTAssertEqual(hits.map(\.title), ["Travel to Singapore"])
+    }
+
+    @MainActor
+    func testSingleDayRangeIsExactlyThatDay() {
+        let events = [event("A", 2026, 9, 3), event("B", 2026, 9, 4)]
+        let hits = JeevesChatService.eventsInRange(events, start: at(2026, 9, 3, 0),
+                                                   end: at(2026, 9, 3, 0), title: nil)
+        XCTAssertEqual(hits.map(\.title), ["A"])
+    }
+
     // MARK: add_reminder fire-date
 
     func testFutureTimeTodayStaysToday() {

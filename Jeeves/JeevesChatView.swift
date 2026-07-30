@@ -550,8 +550,39 @@ struct JeevesChatView: View {
 
     @MainActor
     private func toolDeleteEvent(_ input: [String: Any]) -> JeevesChatService.ToolResult {
-        let title = input["title"] as? String ?? ""
-        let matches = eventsMatching(title, dateRaw: input["date"] as? String)
+        let title = (input["title"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        let dateRaw = input["date"] as? String
+        let endRaw = input["end_date"] as? String
+
+        let matches: [DailyEvent]
+        if let endRaw {
+            // Range mode — how people actually speak ("delete everything from
+            // September 1 onwards"). Title narrows it; without one, EVERY
+            // event whose span touches the range matches.
+            guard let dateRaw else {
+                return .init(text: "A range needs a start: pass date with end_date.")
+            }
+            let start = JeevesChatService.resolveDate(dateRaw, relativeTo: today)
+            let end = JeevesChatService.resolveDate(endRaw, relativeTo: today)
+            let all = (try? modelContext.fetch(FetchDescriptor<DailyEvent>())) ?? []
+            matches = JeevesChatService.eventsInRange(all, start: start, end: end,
+                                                     title: title.isEmpty ? nil : title)
+            // A title-less range delete is a scythe — two-phase it: preview
+            // first, execute only on confirmed=true after the user agreed.
+            if title.isEmpty, (input["confirmed"] as? Bool) != true {
+                guard !matches.isEmpty else {
+                    return .init(text: "No events between \(JeevesChatView.dayString(start)) and \(JeevesChatView.dayString(end)) — nothing to delete.")
+                }
+                let list = matches.map { "\($0.title) (\(JeevesChatView.dayString($0.date)))" }
+                    .joined(separator: ", ")
+                return .init(text: "PREVIEW ONLY — nothing deleted yet. \(matches.count) event(s) in range: \(list). Show the user this list; if they confirm, call delete_event again with the same range and confirmed=true.")
+            }
+        } else {
+            guard !title.isEmpty else {
+                return .init(text: "Need a title, or a date + end_date range.")
+            }
+            matches = eventsMatching(title, dateRaw: dateRaw)
+        }
         guard !matches.isEmpty else {
             return .init(text: "No future event matches '\(title)' — nothing deleted.")
         }

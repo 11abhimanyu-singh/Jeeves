@@ -376,14 +376,16 @@ enum JeevesChatService {
         ],
         [
             "name": "delete_event",
-            "description": "Delete event(s) matched by (partial) title — every future match, or one day's if date is given. CONFIRM with the user before calling this; it is not undoable.",
+            "description": "Delete event(s) by title, by date, or by date RANGE — 'delete all events from September 1 onwards' is date='2026-09-01' + end_date far out, no title. Title-less range deletes are two-phase: the first call returns the matches WITHOUT deleting; show them to the user, and call again with confirmed=true after they agree. Title-based deletes are immediate — CONFIRM with the user before calling; not undoable.",
             "input_schema": [
                 "type": "object",
                 "properties": [
-                    "title": ["type": "string", "description": "Event name (or distinctive part) to delete."],
-                    "date": ["type": "string", "description": "'today', 'tomorrow', or YYYY-MM-DD to limit to one day. Omit to delete all future matches."],
+                    "title": ["type": "string", "description": "Event name (or distinctive part). Omit to match every event in the date range."],
+                    "date": ["type": "string", "description": "'today', 'tomorrow', or YYYY-MM-DD — a single day, or the range start when end_date is given."],
+                    "end_date": ["type": "string", "description": "YYYY-MM-DD inclusive range end. For 'onwards' requests pick a generous end like 2027-12-31."],
+                    "confirmed": ["type": "boolean", "description": "Required true to EXECUTE a title-less range delete (after the user saw the preview list)."],
                 ],
-                "required": ["title"],
+                "required": [],
             ],
         ],
         [
@@ -700,6 +702,25 @@ enum JeevesChatService {
     /// One-directional: the stored title must contain the query. What every
     /// edit/delete/complete tool matches on, so a more specific request can
     /// never sweep up shorter-titled records.
+    /// Events whose SPAN touches [start, end] (inclusive, whole days), the
+    /// shape behind "delete everything from September 1 onwards". A title
+    /// narrows the range; nil matches every event in it. Pure, so the range
+    /// arithmetic (multi-day spans included) is pinned by tests.
+    nonisolated static func eventsInRange(_ events: [DailyEvent], start: Date, end: Date,
+                                          title: String?) -> [DailyEvent] {
+        let cal = Calendar.current
+        let lo = cal.startOfDay(for: start)
+        let hi = cal.startOfDay(for: end)
+        return events.filter { e in
+            let eStart = cal.startOfDay(for: e.date)
+            let eEnd = cal.startOfDay(for: e.spanEndDate ?? e.date)
+            guard eEnd >= lo && eStart <= hi else { return false }
+            guard let title else { return true }
+            return strictMatch(e.title, query: title)
+        }
+        .sorted { $0.date < $1.date }
+    }
+
     nonisolated static func strictMatch(_ text: String, query: String) -> Bool {
         let t = text.lowercased().trimmingCharacters(in: .whitespaces)
         let q = query.lowercased().trimmingCharacters(in: .whitespaces)
