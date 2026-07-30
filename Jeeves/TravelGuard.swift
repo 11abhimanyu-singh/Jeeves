@@ -45,11 +45,27 @@ enum TravelGuard {
     /// the event updated in place but the trip never followed, leaving the
     /// newly covered days planned and nudging.)
     @discardableResult
-    static func absorbStay(externalID: String, newStart: Date, newEnd: Date,
+    static func absorbStay(externalID: String, title: String = "", address: String = "",
+                           newStart: Date, newEnd: Date,
                            context: ModelContext) async -> Bool {
         guard !externalID.isEmpty else { return false }
         let stays = (try? context.fetch(FetchDescriptor<TripStay>())) ?? []
-        guard let stay = stays.first(where: { $0.externalID == externalID }) else { return false }
+        // Legacy stays predate externalID stamping — the Singapore stay
+        // ignored every re-sync because nothing could find it. Fall back to
+        // matching by the event's title/venue against stays overlapping the
+        // event's new range, and HEAL the row by stamping the id, so the next
+        // re-sync matches first time.
+        let matched = stays.first(where: { $0.externalID == externalID })
+            ?? stays
+                .filter { s in
+                    s.externalID.isEmpty
+                        && (s.place == title || (!address.isEmpty && s.address == address))
+                        && s.departDate >= newStart.startOfDay && s.arriveDate <= newEnd.startOfDay
+                }
+                .sorted { ($0.arriveDate, $0.id.uuidString) < ($1.arriveDate, $1.id.uuidString) }
+                .first
+        guard let stay = matched else { return false }
+        if stay.externalID.isEmpty { stay.externalID = externalID }
         var changed = false
         let start = newStart.startOfDay
         let end = newEnd.startOfDay

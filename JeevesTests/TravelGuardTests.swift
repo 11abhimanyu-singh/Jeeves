@@ -163,6 +163,29 @@ final class TravelGuardTests: XCTestCase {
         XCTAssertNil(planned.generatedPlanJSON, "the newly covered day was swept")
     }
 
+    func testAbsorbStayHealsALegacyStayWithoutExternalID() async throws {
+        // The Singapore case: the stay predates externalID stamping, so a
+        // calendar re-sync (event now 11–14 Sep) matched nothing and the trip
+        // never grew. The fallback matches by title/venue, stamps the id, and
+        // follows the edit.
+        let context = try makeContext()
+        let trip = Trip(title: "Bali", startDate: day(2026, 9, 3), endDate: day(2026, 9, 11))
+        context.insert(trip)
+        let stay = TripStay(tripID: trip.id, place: "Travel to Singapore", address: "Singapore",
+                            arriveDate: day(2026, 9, 11), departDate: day(2026, 9, 11))
+        context.insert(stay)
+
+        let moved = await TravelGuard.absorbStay(externalID: "goog-sing-1",
+                                                 title: "Travel to Singapore", address: "Singapore",
+                                                 newStart: day(2026, 9, 11), newEnd: day(2026, 9, 14),
+                                                 context: context)
+
+        XCTAssertTrue(moved)
+        XCTAssertEqual(stay.externalID, "goog-sing-1", "the row is healed for next time")
+        XCTAssertEqual(stay.departDate, day(2026, 9, 14))
+        XCTAssertEqual(trip.endDate, day(2026, 9, 14), "12–14 Sep are travel days now")
+    }
+
     func testAbsorbStayNeverShrinksTheTrip() async throws {
         let context = try makeContext()
         let trip = Trip(title: "Pune week", startDate: day(2026, 10, 9), endDate: day(2026, 10, 13))

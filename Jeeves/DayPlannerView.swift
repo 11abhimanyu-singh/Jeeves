@@ -733,9 +733,12 @@ struct DayPlannerView: View {
                 let extID = c.externalID
                 let newStart = c.startDay ?? existing.date
                 let newEnd = c.endDay ?? existing.spanEndDate ?? existing.date
+                let title = c.title
+                let address = c.location
                 Task {
-                    await TravelGuard.absorbStay(externalID: extID, newStart: newStart,
-                                                 newEnd: newEnd, context: modelContext)
+                    await TravelGuard.absorbStay(externalID: extID, title: title, address: address,
+                                                 newStart: newStart, newEnd: newEnd,
+                                                 context: modelContext)
                 }
                 continue
             }

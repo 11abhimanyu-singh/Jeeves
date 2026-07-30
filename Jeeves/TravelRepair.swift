@@ -120,9 +120,16 @@ enum TravelRepair {
             guard !absorbedRows.contains(ObjectIdentifier(a)) else { continue }
             for j in trips.indices where j > i {
                 let b = trips[j]
-                guard !absorbedRows.contains(ObjectIdentifier(b)),
-                      b.id != a.id,
-                      a.endDate > b.startDate && b.endDate > a.startDate else { continue }
+                guard !absorbedRows.contains(ObjectIdentifier(b)), b.id != a.id else { continue }
+                // Interior overlap always merges. Boundary-touch merges ONLY
+                // for identically-titled trips: "Bali" ending the 11th and
+                // "Bali" starting the 11th are clones from the duplicate-sync
+                // era, not a handover — a real handover changes destination.
+                let interior = a.endDate > b.startDate && b.endDate > a.startDate
+                let sameTitleTouch = a.endDate >= b.startDate && b.endDate >= a.startDate
+                    && !a.title.isEmpty
+                    && a.title.compare(b.title, options: .caseInsensitive) == .orderedSame
+                guard interior || sameTitleTouch else { continue }
                 a.startDate = min(a.startDate, b.startDate)
                 a.endDate = max(a.endDate, b.endDate)
                 for stay in stays where stay.tripID == b.id { stay.tripID = a.id }
@@ -144,6 +151,11 @@ enum TravelRepair {
                 ($0.arriveDate, $0.departDate, $0.id.uuidString) < ($1.arriveDate, $1.departDate, $1.id.uuidString)
             }
             var cluster: [TripStay] = []
+            // The cluster's reach is its MAX depart, not the last row's — a
+            // wide 3–11 stay followed by 4–4 must still absorb 5–5 and 7–7.
+            // (Comparing against the last row let two clones survive and the
+            // receipt say "collapsed 1" when the truth was 3.)
+            var clusterEnd = Date.distantPast
             func collapse() {
                 guard cluster.count > 1, let keeper = cluster.first else { return }
                 keeper.arriveDate = cluster.map(\.arriveDate).min() ?? keeper.arriveDate
@@ -155,11 +167,13 @@ enum TravelRepair {
                 }
             }
             for stay in sorted {
-                if let last = cluster.last, stay.arriveDate <= last.departDate {
+                if !cluster.isEmpty, stay.arriveDate <= clusterEnd {
                     cluster.append(stay)
+                    clusterEnd = max(clusterEnd, stay.departDate)
                 } else {
                     collapse()
                     cluster = [stay]
+                    clusterEnd = stay.departDate
                 }
             }
             collapse()

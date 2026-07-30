@@ -441,7 +441,19 @@ struct JeevesChatView: View {
     private func toolDeleteTrip(_ input: [String: Any]) -> JeevesChatService.ToolResult {
         let query = (input["title"] as? String ?? "").trimmingCharacters(in: .whitespaces)
         let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
-        guard let trip = JeevesChatService.bestMatches(trips, title: \.title, query: query).first else {
+        var candidates = JeevesChatService.bestMatches(trips, title: \.title, query: query)
+        // Two trips can share a title (the clone era minted several "Bali"s).
+        // A date narrows it; without one, deleting "the first match" could
+        // take the WRONG trip — ask instead.
+        if candidates.count > 1, let dateRaw = input["start_date"] as? String {
+            let wanted = JeevesChatService.resolveDate(dateRaw, relativeTo: today)
+            candidates = candidates.filter { Calendar.current.isDate($0.startDate, inSameDayAs: wanted) }
+        }
+        if candidates.count > 1 {
+            let names = candidates.map { "'\($0.title)' (\(TravelGuard.dayRange($0)))" }.joined(separator: ", ")
+            return .init(text: "\(candidates.count) trips match '\(query)': \(names). Ask the user which one, then call again with start_date to pin it.")
+        }
+        guard let trip = candidates.first else {
             let names = trips.map { "'\($0.title)' (\(TravelGuard.dayRange($0)))" }.joined(separator: ", ")
             return .init(text: trips.isEmpty
                          ? "There are no trips to delete."
@@ -544,9 +556,29 @@ struct JeevesChatView: View {
             return .init(text: "No future event matches '\(title)' — nothing deleted.")
         }
         let summary = matches.map { "\($0.title) (\(JeevesChatView.dayString($0.date)))" }.joined(separator: ", ")
+        // Deleting a calendar event does NOT delete a trip built from it —
+        // the receipt must say so, or the reply claims closure while travel
+        // mode quietly survives ("Both are gone from your calendar" while
+        // 18–22 Sep stayed in travel mode).
+        let deletedDays: [ClosedRange<Date>] = matches.map {
+            $0.date.startOfDay...($0.spanEndDate ?? $0.date).startOfDay
+        }
         for e in matches { modelContext.delete(e) }
         modelContext.saveOrLog()
-        return .init(text: "Deleted \(matches.count) event(s): \(summary).")
+        let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
+        let surviving = trips.filter { trip in
+            deletedDays.contains { range in
+                trip.startDate <= range.upperBound && range.lowerBound <= trip.endDate
+            }
+        }
+        var text = "Deleted \(matches.count) event(s): \(summary)."
+        if !surviving.isEmpty {
+            let names = surviving
+                .map { "'\($0.title.isEmpty ? "Trip" : $0.title)' (\(TravelGuard.dayRange($0)))" }
+                .joined(separator: ", ")
+            text += " NOTE: \(names) still exist(s) — travel mode stays on those days until the trip itself is deleted. Tell the user, and offer delete_trip if they want the trip gone too."
+        }
+        return .init(text: text)
     }
 
     // MARK: Commute estimate (eval finding: "when should I leave")

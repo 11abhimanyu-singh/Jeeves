@@ -231,6 +231,57 @@ final class TravelRepairTests: XCTestCase {
         XCTAssertEqual(try context.fetch(FetchDescriptor<TravelSegment>()).count, 0)
     }
 
+    func testCloneChainCollapsesAgainstTheClusterMax() throws {
+        // The device case the receipt exposed: stays 3–11, 4–4, 5–5, 7–7 under
+        // one trip. Comparing against the LAST row's end let 5–5 and 7–7
+        // survive ("collapsed 1" when the truth was 3) — the cluster's reach
+        // is its max end.
+        let context = try makeContext()
+        let trip = Trip(title: "Bali", startDate: day(2026, 9, 3), endDate: day(2026, 9, 12))
+        context.insert(trip)
+        for (a, d) in [(3, 11), (4, 4), (5, 5), (7, 7)] {
+            context.insert(TripStay(tripID: trip.id, place: "Bali", address: "Karma Kandara",
+                                    arriveDate: day(2026, 9, a), departDate: day(2026, 9, d)))
+        }
+
+        let summary = TravelRepair.cleanupLegacy(context: context)
+
+        XCTAssertEqual(summary.staysCollapsed, 3, "all three clones die in one pass")
+        let stays = try context.fetch(FetchDescriptor<TripStay>())
+        XCTAssertEqual(stays.count, 1)
+        XCTAssertEqual(stays[0].arriveDate, day(2026, 9, 3))
+        XCTAssertEqual(stays[0].departDate, day(2026, 9, 11))
+    }
+
+    func testSameTitleBoundaryTripsAreClonesAndMerge() throws {
+        // "Bali" ending the 11th + "Bali" starting the 11th is the clone era,
+        // not a handover — a real handover changes destination.
+        let context = try makeContext()
+        let a = Trip(title: "Bali", startDate: day(2026, 9, 3), endDate: day(2026, 9, 11))
+        let b = Trip(title: "Bali", startDate: day(2026, 9, 11), endDate: day(2026, 9, 12))
+        [a, b].forEach { context.insert($0) }
+
+        let summary = TravelRepair.cleanupLegacy(context: context)
+
+        XCTAssertEqual(summary.tripsMerged, 1)
+        let trips = try context.fetch(FetchDescriptor<Trip>())
+        XCTAssertEqual(trips.count, 1)
+        XCTAssertEqual(trips[0].startDate, day(2026, 9, 3))
+        XCTAssertEqual(trips[0].endDate, day(2026, 9, 12), "union of the clones")
+    }
+
+    func testDifferentTitleBoundaryTripsStillNeverMerge() throws {
+        let context = try makeContext()
+        let a = Trip(title: "Bali", startDate: day(2026, 9, 3), endDate: day(2026, 9, 11))
+        let b = Trip(title: "Singapore", startDate: day(2026, 9, 11), endDate: day(2026, 9, 15))
+        [a, b].forEach { context.insert($0) }
+
+        let summary = TravelRepair.cleanupLegacy(context: context)
+
+        XCTAssertEqual(summary.tripsMerged, 0, "a real handover survives")
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Trip>()).count, 2)
+    }
+
     func testDisjointTripsAreLeftAlone() throws {
         let context = try makeContext()
         let a = Trip(title: "Bhadra", startDate: day(2026, 8, 15), endDate: day(2026, 8, 17))

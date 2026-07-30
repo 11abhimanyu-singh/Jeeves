@@ -528,6 +528,7 @@ enum JeevesChatService {
                 "type": "object",
                 "properties": [
                     "title": ["type": "string", "description": "The trip's title (or part of it)."],
+                    "start_date": ["type": "string", "description": "YYYY-MM-DD start of the trip — REQUIRED when several trips share the title, to pin which one."],
                 ],
                 "required": ["title"],
             ],
