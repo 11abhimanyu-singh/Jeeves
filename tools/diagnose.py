@@ -63,6 +63,8 @@ def main() -> None:
     dump = workdir / "dump.json"
     results["dump"] = run("DUMP (whole state)",
                           [sys.executable, str(TOOLS / "store-dump.py"), str(store), str(dump)])
+    results["trajectory"] = run("TRAJECTORY (story vs state, all sessions)",
+                                [sys.executable, str(TOOLS / "trajectory-audit.py"), str(store)])
 
     key = os.environ.get("OPENAI_API_KEY", "").strip()
     if key:

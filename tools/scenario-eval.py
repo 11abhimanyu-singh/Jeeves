@@ -11,6 +11,11 @@ breaks that loop in two phases:
               AND the edge cases where systems break (three back-to-back
               trips; landing from one trip 3 hours before the next starts;
               zone boundaries; sync-order races). Saved as scenarios.json.
+  dialogues — GPT writes MULTI-TURN user scripts with personas: typos
+              ("hime"), mid-flow corrections, bare "Sure" consents, repeated
+              retries. These probe trajectory bugs — the class where one
+              conversation minted three trips and six journeys — which
+              single-shot scenarios cannot reach. Saved as dialogues.json.
   judge     — For each scenario, the author writes a FAITHFUL walkthrough of
               what the current build does (<scenarios-dir>/<id>.md); this
               phase has GPT verdict each one and writes a combined report
@@ -47,6 +52,30 @@ JSON ONLY:
 {"scenarios": [{"id":"kebab-case-slug","category":"happy|edge",
   "title":"...","setup":"exact starting state, step by step",
   "expected":"what a correct build must do","whyItBreaks":"the failure mode this probes"}]}"""
+
+DIALOGUE_RUBRIC = """You design multi-turn TEST DIALOGUES for "Jeeves", a
+single-user iOS day planner with a chat assistant (Bengaluru/IST user). You
+receive a brief describing a feature. Real users iterate messily — and every
+correction turn has historically been a chance for the assistant to create
+duplicates, drop promised assumptions, or narrate numbers that differ from
+what its tools stored.
+
+Write 6-10 dialogues. Each is a SCRIPT of user turns only (the assistant's
+replies are produced live when the dialogue is executed). Make them messy on
+purpose: typos ("hime" for home), vague openers, mid-flow corrections
+("actually leave at 9 instead"), bare consents ("Sure", "ok"), repeated
+retries of the same request, topic switches mid-task, and requests phrased in
+dates/ranges rather than titles.
+
+For each dialogue also write the POST-CONDITIONS a correct system must
+satisfy when the conversation ends — mechanical, store-checkable statements
+("exactly one trip covers Aug 2", "exactly 2 journeys exist for that trip",
+"every time quoted in the final summary appears in some tool result").
+
+JSON ONLY:
+{"dialogues": [{"id":"kebab-slug","persona":"one line",
+  "turns":["user msg 1","user msg 2","..."],
+  "postConditions":["...","..."]}]}"""
 
 JUDGE_RUBRIC = """You are auditing one test scenario for "Jeeves", a personal
 iOS planner. You get the scenario (setup + expected behavior) and a FAITHFUL
@@ -95,6 +124,20 @@ def main() -> None:
     if len(sys.argv) < 3:
         sys.exit(__doc__)
     mode = sys.argv[1]
+
+    if mode == "dialogues":
+        brief = Path(sys.argv[2]).read_text()
+        outdir = Path(sys.argv[3])
+        outdir.mkdir(parents=True, exist_ok=True)
+        result = call(key, DIALOGUE_RUBRIC, brief)
+        dialogues = result.get("dialogues", [])
+        (outdir / "dialogues.json").write_text(json.dumps(result, indent=2))
+        print(f"{len(dialogues)} dialogues → {outdir/'dialogues.json'}")
+        for d in dialogues:
+            print(f"  {d.get('id','')}: {len(d.get('turns',[]))} turns — {d.get('persona','')}")
+        print("\nExecute each against the real chat (device or harness), export the"
+              "\ntrajectory artifact, then run tools/trajectory-audit.py on it.")
+        return
 
     if mode == "generate":
         brief = Path(sys.argv[2]).read_text()

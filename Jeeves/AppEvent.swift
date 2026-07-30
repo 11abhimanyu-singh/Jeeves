@@ -29,6 +29,7 @@ enum AppEventKind: String, Codable, CaseIterable {
     case nudgeCancelled
     case calendarSynced
     case travelCleanup         // user-invoked clean_travel_data ran
+    case toolCall              // any chat tool invocation, with input + result digest
 }
 
 @Model

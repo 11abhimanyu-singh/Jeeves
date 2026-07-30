@@ -179,6 +179,32 @@ enum TravelRepair {
             collapse()
         }
 
+        // 2b. Clone journeys: iterating in chat used to mint a new segment
+        //    per correction turn (four outbound drives to one waterfall).
+        //    Same trip + mode + label + anchor day is the same leg — keep the
+        //    best-informed one (measured beats unmeasured, then the latest
+        //    time, then a stable id tiebreak) and cancel the losers' nudges.
+        var deletedSegs = Set<ObjectIdentifier>()
+        let liveSegs = segments.filter { s in trips.contains { $0.id == s.tripID } }
+        let segGroups = Dictionary(grouping: liveSegs) { (s: TravelSegment) -> String in
+            let anchor = s.mode == .drive ? (s.arriveBy ?? .distantPast) : s.departAt
+            let day = Calendar.current.startOfDay(for: anchor)
+            return "\(s.tripID)|\(s.modeRaw)|\(s.label.lowercased())|\(day.timeIntervalSinceReferenceDate)"
+        }
+        for (_, rows) in segGroups where rows.count > 1 {
+            let ranked = rows.sorted {
+                let a = ($0.travelMinutes > 0 ? 1 : 0, $0.arriveBy ?? $0.departAt, $0.id.uuidString)
+                let b = ($1.travelMinutes > 0 ? 1 : 0, $1.arriveBy ?? $1.departAt, $1.id.uuidString)
+                return a > b
+            }
+            for extra in ranked.dropFirst() {
+                TravelNotifier.cancel(segment: extra)
+                deletedSegs.insert(ObjectIdentifier(extra))
+                context.delete(extra)
+                summary.orphansRemoved += 1
+            }
+        }
+
         // 3. Rows whose trip is missing. Deliberate invocation means the user
         //    is looking at a synced store, not a mid-import launch.
         let tripIDs = Set(trips.map(\.id))
@@ -187,7 +213,8 @@ enum TravelRepair {
             context.delete(stay)
             summary.orphansRemoved += 1
         }
-        for s in segments where !tripIDs.contains(s.tripID) {
+        for s in segments
+        where !tripIDs.contains(s.tripID) && !deletedSegs.contains(ObjectIdentifier(s)) {
             TravelNotifier.cancel(segment: s)
             context.delete(s)
             summary.orphansRemoved += 1

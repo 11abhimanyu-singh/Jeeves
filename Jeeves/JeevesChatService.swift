@@ -251,7 +251,12 @@ enum JeevesChatService {
     Travel mode stops you planning those days; the journeys give the user the \
     one thing that matters: when to leave. For a drive, `time` is when they \
     must ARRIVE; for a flight it's the DEPARTURE. Ask for stops on a long drive \
-    (fuel, breakfast) — they push the leave time earlier.
+    (fuel, breakfast) — they push the leave time earlier. Corrections UPDATE \
+    the same trip and journey (add_trip reuses an overlapping trip; \
+    add_journey updates the same leg) — never re-create from scratch, and use \
+    delete_journey to prune a leg the user abandoned. QUOTE leave-by and \
+    arrival times ONLY from tool results — never compute times in your head; \
+    if you didn't read it in a result, don't say it.
     - When the user states a STANDING preference ("gym is always 7pm", "never \
     schedule calls before 10"), call remember_preference — it persists across \
     days and appears in your context. If they time-bound it ("for the next 45 \
@@ -521,6 +526,19 @@ enum JeevesChatService {
                     "travel_minutes": ["type": "integer", "description": "Journey time if known; omit and I'll measure it against live traffic."],
                 ],
                 "required": ["trip", "to", "date", "time"],
+            ],
+        ],
+        [
+            "name": "delete_journey",
+            "description": "Delete ONE journey (flight/drive) from a trip and cancel its leave-by notification. Use when the user abandons or replaces a leg. Confirm before calling; report what was deleted.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "trip": ["type": "string", "description": "The trip's title (or part of it)."],
+                    "label": ["type": "string", "description": "The journey's name/label (or part), e.g. 'Drive back home'."],
+                    "date": ["type": "string", "description": "YYYY-MM-DD the journey belongs to — required when labels are ambiguous."],
+                ],
+                "required": ["trip", "label"],
             ],
         ],
         [

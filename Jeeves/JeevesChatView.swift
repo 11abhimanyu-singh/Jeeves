@@ -388,9 +388,23 @@ struct JeevesChatView: View {
 
     // MARK: Chat tools
 
-    /// Dispatches one tool call from the agent to its handler.
+    /// Dispatches one tool call from the agent to its handler — and records
+    /// every call in the event log, so EVERY conversation is a trajectory
+    /// artifact: transcript + tool calls + store changes, cross-checkable by
+    /// the trajectory audit ("does the story told match the state left?").
     @MainActor
     private func runTool(_ call: JeevesChatService.ToolCall) async -> JeevesChatService.ToolResult {
+        let result = await dispatchTool(call)
+        let inputDigest = call.input
+            .map { "\($0.key)=\(String(describing: $0.value).prefix(40))" }
+            .sorted().joined(separator: " ")
+        EventLog.log(.toolCall, "\(call.name)(\(inputDigest.prefix(200))) → \(result.text.prefix(300))",
+                     context: modelContext)
+        return result
+    }
+
+    @MainActor
+    private func dispatchTool(_ call: JeevesChatService.ToolCall) async -> JeevesChatService.ToolResult {
         switch call.name {
         // NOTE: every case here must appear in handledToolNames below — the
         // parity test pins that list against the schemas the model is shown,
@@ -418,6 +432,7 @@ struct JeevesChatView: View {
         case "add_journey":    return await toolAddJourney(call.input)
         case "clean_travel_data": return toolCleanTravelData()
         case "delete_trip":    return toolDeleteTrip(call.input)
+        case "delete_journey": return toolDeleteJourney(call.input)
         default:               return .init(text: "Unknown tool \(call.name).")
         }
     }
@@ -431,8 +446,42 @@ struct JeevesChatView: View {
         "fetch_app_data", "add_todo", "add_reminder", "edit_event", "delete_event",
         "commute_estimate", "log_walk", "mark_block_done", "complete_todo",
         "delete_todo", "delete_reminder", "fetch_chat_history", "remember_preference",
-        "add_trip", "add_journey", "clean_travel_data", "delete_trip",
+        "add_trip", "add_journey", "clean_travel_data", "delete_trip", "delete_journey",
     ]
+
+    /// Removes one journey from a trip, with its nudge and a receipt.
+    private func toolDeleteJourney(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let tripQuery = (input["trip"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        let labelQuery = (input["label"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
+        guard let trip = JeevesChatService.bestMatches(trips, title: \.title, query: tripQuery).first else {
+            return .init(text: "No trip matches '\(tripQuery)'.")
+        }
+        var candidates = ((try? modelContext.fetch(FetchDescriptor<TravelSegment>())) ?? [])
+            .filter { $0.tripID == trip.id }
+            .filter {
+                JeevesChatService.strictMatch($0.label.isEmpty ? $0.mode.label : $0.label,
+                                              query: labelQuery)
+            }
+        if candidates.count > 1, let dateRaw = input["date"] as? String {
+            let wanted = JeevesChatService.resolveDate(dateRaw, relativeTo: today)
+            candidates = candidates.filter { Calendar.current.isDate($0.day, inSameDayAs: wanted) }
+        }
+        if candidates.count > 1 {
+            let list = candidates.map { "\($0.label.isEmpty ? $0.mode.label : $0.label) (\(JeevesChatView.dayString($0.day)))" }
+                .joined(separator: ", ")
+            return .init(text: "\(candidates.count) journeys match '\(labelQuery)': \(list). Pass date to pin one.")
+        }
+        guard let seg = candidates.first else {
+            return .init(text: "No journey in '\(trip.title)' matches '\(labelQuery)'.")
+        }
+        let name = seg.label.isEmpty ? seg.mode.label : seg.label
+        let day = JeevesChatView.dayString(seg.day)
+        TravelNotifier.cancel(segment: seg)
+        modelContext.delete(seg)
+        modelContext.saveOrLog("chat.deleteJourney")
+        return .init(text: "Deleted '\(name)' (\(day)) from \(trip.title) — its leave-by nudge is cancelled. The trip and its other journeys are untouched.")
+    }
 
     /// Deletes a trip and everything under it, with a receipt naming exactly
     /// what went. Exists because the coherence eval caught the assistant
@@ -719,6 +768,16 @@ struct JeevesChatView: View {
         let start = JeevesChatService.resolveDate(input["start_date"] as? String, relativeTo: today)
         let end = JeevesChatService.resolveDate(input["end_date"] as? String, relativeTo: today)
         guard end >= start else { return .init(text: "The trip's end date is before its start.") }
+        // Idempotent, like the UI's accept path: iterating in chat once minted
+        // THREE "Shivanasamudra Falls" trips in three minutes because every
+        // refinement turn called add_trip again. An overlapping trip is
+        // returned, never duplicated.
+        let existing = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
+        if let match = existing.first(where: { !($0.endDate < start || $0.startDate > end) }) {
+            return .init(text: "Trip '\(match.title.isEmpty ? "Trip" : match.title)' already covers "
+                         + "\(TravelGuard.dayRange(match)) — using it, nothing new created. "
+                         + "Add or update journeys with add_journey.")
+        }
         let trip = Trip(title: title, startDate: start, endDate: end)
         modelContext.insert(trip)
         modelContext.saveOrLog("chat.addTrip")
@@ -793,22 +852,60 @@ struct JeevesChatView: View {
             }
         }
 
-        let segment = TravelSegment(
-            tripID: trip.id, mode: mode,
-            label: input["label"] as? String ?? "",
-            fromPlace: input["from"] as? String ?? "",
-            toPlace: input["to"] as? String ?? "",
-            departAt: mode == .drive ? .distantPast : when,
-            arriveBy: mode == .drive ? when : nil,
-            arriveAt: mode == .drive ? nil : arriveAt,
-            fromTimeZoneID: fromZoneID,
-            toTimeZoneID: toZoneID,
-            checkInMinutes: input["check_in_minutes"] as? Int ?? (mode == .drive ? 0 : 180),
-            securityMinutes: input["security_minutes"] as? Int ?? (mode == .drive ? 0 : 30),
-            bufferMinutes: input["buffer_minutes"] as? Int ?? 20,
-            stopMinutes: input["stop_minutes"] as? Int ?? 0,
-            travelMinutes: input["travel_minutes"] as? Int ?? 0)
-        modelContext.insert(segment)
+        let newTo = input["to"] as? String ?? ""
+        let newFrom = input["from"] as? String ?? ""
+        // UPSERT, not insert: "leave at 9 instead" is a correction, and every
+        // correction turn used to mint another journey — one conversation
+        // left four outbound drives to the same waterfall, each with its own
+        // dawn nudge. Same trip + mode + anchor day + same destination means
+        // the same leg: update it.
+        let anchorDay = Calendar.current.startOfDay(for: when)
+        let allSegs = (try? modelContext.fetch(FetchDescriptor<TravelSegment>())) ?? []
+        let sameLeg = allSegs.first { s in
+            s.tripID == trip.id && s.mode == mode
+                && Calendar.current.isDate(mode == .drive ? (s.arriveBy ?? .distantPast) : s.departAt,
+                                           inSameDayAs: anchorDay)
+                && (s.toPlace.localizedCaseInsensitiveContains(newTo)
+                    || newTo.localizedCaseInsensitiveContains(s.toPlace))
+                && !s.toPlace.isEmpty && !newTo.isEmpty
+        }
+        let updating = sameLeg != nil
+        let segment: TravelSegment
+        if let sameLeg {
+            segment = sameLeg
+            segment.label = input["label"] as? String ?? segment.label
+            segment.fromPlace = newFrom.isEmpty ? segment.fromPlace : newFrom
+            segment.toPlace = newTo
+            if mode == .drive { segment.arriveBy = when } else { segment.departAt = when }
+            segment.arriveAt = mode == .drive ? nil : (arriveAt ?? segment.arriveAt)
+            if !fromZoneID.isEmpty { segment.fromTimeZoneID = fromZoneID }
+            if !toZoneID.isEmpty { segment.toTimeZoneID = toZoneID }
+            if let v = input["check_in_minutes"] as? Int { segment.checkInMinutes = v }
+            if let v = input["security_minutes"] as? Int { segment.securityMinutes = v }
+            if let v = input["buffer_minutes"] as? Int { segment.bufferMinutes = v }
+            if let v = input["stop_minutes"] as? Int { segment.stopMinutes = v }
+            if let v = input["travel_minutes"] as? Int {
+                segment.travelMinutes = v
+                segment.travelIsEstimated = true
+            }
+        } else {
+            segment = TravelSegment(
+                tripID: trip.id, mode: mode,
+                label: input["label"] as? String ?? "",
+                fromPlace: newFrom,
+                toPlace: newTo,
+                departAt: mode == .drive ? .distantPast : when,
+                arriveBy: mode == .drive ? when : nil,
+                arriveAt: mode == .drive ? nil : arriveAt,
+                fromTimeZoneID: fromZoneID,
+                toTimeZoneID: toZoneID,
+                checkInMinutes: input["check_in_minutes"] as? Int ?? (mode == .drive ? 0 : 180),
+                securityMinutes: input["security_minutes"] as? Int ?? (mode == .drive ? 0 : 30),
+                bufferMinutes: input["buffer_minutes"] as? Int ?? 20,
+                stopMinutes: input["stop_minutes"] as? Int ?? 0,
+                travelMinutes: input["travel_minutes"] as? Int ?? 0)
+            modelContext.insert(segment)
+        }
 
         // Measure the journey now if we can — a leave-by built on a guess is
         // exactly the failure this feature exists to prevent.
@@ -862,7 +959,8 @@ struct JeevesChatView: View {
         // No nudge is scheduled for a chain with no journey time — don't
         // promise one.
         let nudge = segment.travelMinutes > 0 ? " I'll nudge you 30 minutes before." : ""
-        return .init(text: "Added to \(trip.title): \(segment.label.isEmpty ? mode.label : segment.label). "
+        return .init(text: "\(updating ? "Updated the existing" : "Added to \(trip.title):") "
+                     + "\(segment.label.isEmpty ? mode.label : segment.label). "
                      + "Leave at \(leaveLabel) on \(JeevesChatView.dayString(day)).\(caveat)\(windowNote)\(nudge)")
     }
 

@@ -282,6 +282,40 @@ final class TravelRepairTests: XCTestCase {
         XCTAssertEqual(try context.fetch(FetchDescriptor<Trip>()).count, 2)
     }
 
+    func testCloneJourneysCollapseToTheBestInformed() throws {
+        // The falls fossil record: four outbound drives to one waterfall,
+        // minted one-per-correction-turn. Same trip + mode + label + day is
+        // one leg — keep the measured, latest one; cancel the losers' nudges.
+        let context = try makeContext()
+        let trip = Trip(title: "Shivanasamudra Falls", startDate: day(2026, 8, 2), endDate: day(2026, 8, 2))
+        context.insert(trip)
+        let cal = Calendar.current
+        func drive(_ h: Int, _ m: Int, travel: Int) -> TravelSegment {
+            TravelSegment(tripID: trip.id, mode: .drive, label: "Drive to Shivanasamudra Falls",
+                          fromPlace: "Home", toPlace: "Falls",
+                          arriveBy: cal.date(bySettingHour: h, minute: m, second: 0, of: day(2026, 8, 2))!,
+                          checkInMinutes: 0, securityMinutes: 0, travelMinutes: travel)
+        }
+        let keeper = drive(12, 3, travel: 163)
+        [drive(11, 0, travel: 163), drive(11, 43, travel: 163), keeper,
+         drive(11, 45, travel: 0)].forEach { context.insert($0) }
+        // A DIFFERENT leg on the same day must survive.
+        let ret = TravelSegment(tripID: trip.id, mode: .drive, label: "Drive back home",
+                                fromPlace: "Falls", toPlace: "Home",
+                                arriveBy: cal.date(bySettingHour: 18, minute: 30, second: 0, of: day(2026, 8, 2))!,
+                                checkInMinutes: 0, securityMinutes: 0, travelMinutes: 165)
+        context.insert(ret)
+
+        _ = TravelRepair.cleanupLegacy(context: context)
+
+        let segs = try context.fetch(FetchDescriptor<TravelSegment>())
+        XCTAssertEqual(segs.count, 2, "one outbound, one return")
+        let outbound = segs.first { $0.label.contains("to Shivanasamudra") }
+        XCTAssertEqual(outbound?.travelMinutes, 163)
+        XCTAssertEqual(Calendar.current.component(.minute, from: outbound?.arriveBy ?? .distantPast), 3,
+                       "the latest measured variant (12:03) is the keeper")
+    }
+
     func testDisjointTripsAreLeftAlone() throws {
         let context = try makeContext()
         let a = Trip(title: "Bhadra", startDate: day(2026, 8, 15), endDate: day(2026, 8, 17))

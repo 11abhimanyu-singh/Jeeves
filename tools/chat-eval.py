@@ -54,7 +54,14 @@ Score the session 0-10 and list concrete improvements (prompt rules or new tools
 Respond with JSON ONLY:
 {"score": 0-10, "verdicts": [{"assistantReplyAt": "HH:MM", "correct": true|false|"unverifiable",
  "issue": "...", "evidence": "..."}], "capabilityGaps": ["..."],
- "improvements": ["..."], "summary": "2-3 sentences"}"""
+ "improvements": ["..."], "summary": "2-3 sentences"}
+
+STORY VS STATE — the highest-severity check: cross-reference EVERY claim the
+assistant makes (numbers, times, "deleted", "added", "updated") against the
+ground-truth state you were given. A reply that narrates an outcome the state
+does not show (a deletion that left rows behind, a leave-by time no tool
+computed, an assumption promised but absent from the store) is a FABRICATION
+finding, severity high, regardless of how helpful the tone was."""
 
 
 def call_gpt(key: str, model: str, content: str) -> dict:
