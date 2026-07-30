@@ -17,6 +17,12 @@ same pulled store. This runs the deterministic assertions over a session:
   3. NO DUPLICATE TRIPS — no two trips share a title and overlapping days.
   4. CLAIMED ACTIONS HAPPENED — a turn containing "deleted"/"removed" must be
      preceded by a delete-ish tool call in the same session.
+  5. NO UNANSWERED TURNS — every user turn gets an assistant turn before the
+     next user turn or within 5 minutes; the user answering "20" into twelve
+     minutes of silence is a failure whatever caused it. (Runs on all
+     sessions — silence needs no tool records to be provable.)
+  6. NO SELF-DATE CONFUSION — the assistant calling the current date
+     "yesterday"/"tomorrow" in a recap.
 
 Usage:
     python3 tools/trajectory-audit.py <default.store> [--since "YYYY-MM-DD HH:MM"]
@@ -80,6 +86,27 @@ def main():
             sessions.append([turn])
 
     failures = []
+    # Unanswered turns + self-date confusion need no tool records — they run
+    # on every session, including pre-recorder history.
+    for si, session in enumerate(sessions):
+        for i, turn in enumerate(session):
+            if turn["role"] != "user":
+                continue
+            nxt = session[i + 1] if i + 1 < len(session) else None
+            if nxt is None:
+                continue  # last turn of session; the user may just have left
+            if nxt["role"] == "user":
+                gap = (nxt["t"] - turn["t"]).total_seconds() / 60
+                if gap > 5:
+                    failures.append((si, "unanswered-turn",
+                                     f"user said \"{turn['text'][:40]}\" at {turn['t']:%H:%M} — no reply for {gap:.0f} min until their next message"))
+        for turn in session:
+            if turn["role"] == "assistant":
+                today_str = turn["t"].strftime("%B %-d").lower()
+                low = (turn["text"] or "").lower()
+                if "yesterday" in low and today_str in low:
+                    failures.append((si, "self-date-confusion",
+                                     f"turn {turn['t']:%H:%M} calls today ({today_str}) 'yesterday'"))
     for si, session in enumerate(sessions):
         lo, hi = session[0]["t"], session[-1]["t"] + datetime.timedelta(minutes=2)
         sess_calls = [c for c in calls if lo <= c["t"] <= hi]

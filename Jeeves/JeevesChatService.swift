@@ -256,7 +256,11 @@ enum JeevesChatService {
     add_journey updates the same leg) — never re-create from scratch, and use \
     delete_journey to prune a leg the user abandoned. QUOTE leave-by and \
     arrival times ONLY from tool results — never compute times in your head; \
-    if you didn't read it in a result, don't say it.
+    if you didn't read it in a result, don't say it. When re-planning for \
+    lateness, ELAPSED IS NOT DONE: pass the blocks the delay swallowed in \
+    missed_blocks and the user's stated ETA in resume_at. Today's date is in \
+    your context — never call today "yesterday" or misdate the current \
+    session when recapping.
     - When the user states a STANDING preference ("gym is always 7pm", "never \
     schedule calls before 10"), call remember_preference — it persists across \
     days and appears in your context. If they time-bound it ("for the next 45 \
@@ -570,6 +574,8 @@ enum JeevesChatService {
                 "type": "object",
                 "properties": [
                     "note": ["type": "string", "description": "What happened, in a few words — e.g. 'massage ran 30 min late' or 'running an hour behind'. This drives how the remaining day is re-shaped."],
+                    "missed_blocks": ["type": "array", "items": ["type": "string"], "description": "Titles of plan blocks that did NOT happen even though their time passed — e.g. the user was in traffic through 'Gym — Mobility'. ELAPSED IS NOT DONE: when the user was late, name every block the lateness swallowed."],
+                    "resume_at": ["type": "string", "description": "24-hour HH:MM the user can actually resume — their stated ETA ('20 more minutes' at 7:05pm = '19:25'). The new plan starts here, not at the current clock."],
                 ],
                 "required": ["note"],
             ],

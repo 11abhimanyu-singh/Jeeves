@@ -30,6 +30,7 @@ enum AppEventKind: String, Codable, CaseIterable {
     case calendarSynced
     case travelCleanup         // user-invoked clean_travel_data ran
     case toolCall              // any chat tool invocation, with input + result digest
+    case chatError             // a chat turn failed; an apology turn was stored
 }
 
 @Model

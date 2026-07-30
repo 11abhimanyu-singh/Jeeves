@@ -381,6 +381,14 @@ struct JeevesChatView: View {
                 }
             case .failure(let error):
                 errorText = error.localizedDescription
+                // The failure must live in the TRANSCRIPT, not just a banner:
+                // a user who answered "20" and got twelve minutes of silence
+                // had hit exactly this path — the error flashed and vanished,
+                // the conversation kept a hole, and the model's next turn had
+                // no idea it ever dropped one.
+                addTurn(role: .assistant,
+                        "That one didn't go through (\(error.localizedDescription)) — say \u{201C}try again\u{201D} and I'll pick up where we left off.")
+                EventLog.log(.chatError, error.localizedDescription, context: modelContext)
             }
             isSending = false
         }
@@ -1222,13 +1230,28 @@ struct JeevesChatView: View {
         guard nowMinute < 20 * 60 + 30 else {
             return .init(text: "It's past the 20:30 work boundary, so the work day is done — the rest of the evening is wind-down and sleep. Tell the user there's nothing left to re-plan tonight; offer to sort out tomorrow instead.")
         }
-        // Preserve everything already finished; the planner rebuilds only the
-        // rest, and PlanCoordinator stitches + validates the merged day.
-        let locked = PlanCoordinator.lockedBlocks(committed, endedBy: nowMinute)
+        // Preserve everything already finished — but ELAPSED IS NOT DONE. A
+        // lateness replan locked "Gym — Mobility" as completed while the user
+        // sat in traffic; the model now names the blocks that didn't happen
+        // (missed_blocks) and they're excluded from the locked set and told
+        // to the planner as missed.
+        let missed = (input["missed_blocks"] as? [Any])?.compactMap { $0 as? String } ?? []
+        var locked = PlanCoordinator.lockedBlocks(committed, endedBy: nowMinute)
+        if !missed.isEmpty {
+            locked = locked.filter { block in
+                !missed.contains { JeevesChatService.strictMatch(block.title, query: $0) }
+            }
+        }
         let doneNote = locked.map(\.title).joined(separator: ", ")
+        let missedNote = missed.isEmpty ? "" : " Earlier blocks that did NOT happen (do not count them as done): \(missed.joined(separator: ", "))."
+
+        // The remainder starts at the user's stated ETA when they gave one
+        // ("20 more minutes"), not at the clock — a plan that begins before
+        // the user can act is already behind on arrival.
+        let resumeMinute = minutesFrom(input["resume_at"] as? String).map { max($0, nowMinute) } ?? nowMinute
 
         let result = await PlanCoordinator.generateLogged(.init(
-            userMessage: note,
+            userMessage: note + missedNote,
             hasGym: state.hasGymToday,
             gymMinute: state.gymMinute,
             events: eventsOn(today),
@@ -1236,7 +1259,7 @@ struct JeevesChatView: View {
             prepSessions: prepSessions,
             routine: Baseline.routine(from: routineActivities),
             adherenceNote: AdherenceHistory.planningNote(context: modelContext, for: today),
-            replanFromMinute: nowMinute,
+            replanFromMinute: resumeMinute,
             alreadyDoneNote: doneNote.isEmpty ? nil : doneNote,
             lockedBlocks: locked,
             planDate: today
