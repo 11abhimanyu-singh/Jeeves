@@ -23,6 +23,7 @@ struct DayPlannerView: View {
     @Query private var jobApplications: [JobApplication]
     @Query private var readingLogs: [ReadingLog]
     @Query private var trips: [Trip]
+    @Query private var allTravelSegments: [TravelSegment]
 
     @State private var hasGymToday = true
     @State private var gymTime: Date = Calendar.current.date(bySettingHour: 11, minute: 0, second: 0, of: Date()) ?? Date()
@@ -95,13 +96,23 @@ struct DayPlannerView: View {
     private var scrollContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             if !tripsCoveringSelected.isEmpty {
-                // Travel mode: the planner stands down. No routine, no gym you
-                // can't reach, no commute to nowhere — just the journeys. A
-                // handover day (land from trip A, leave for trip B) renders
-                // EVERY covering trip — showing only the first hid trip B's
-                // leave-by chain on the one day it mattered.
-                ForEach(tripsCoveringSelected, id: \.id) { trip in
+                // Travel mode: the planner stands down. A handover day (land
+                // from trip A, leave for trip B) renders a card PER TRIP THAT
+                // HAS A JOURNEY today — but trips with nothing to show share
+                // ONE quiet card instead of stacking three identical "Nothing
+                // to catch today" boxes (which is exactly what the legacy
+                // overlapping Bali trips did).
+                let withJourneys = tripsCoveringSelected.filter { trip in
+                    allTravelSegments.contains {
+                        $0.tripID == trip.id && Calendar.current.isDate($0.day, inSameDayAs: selectedDate)
+                    }
+                }
+                ForEach(withJourneys, id: \.id) { trip in
                     TravelDayCard(trip: trip, day: selectedDate)
+                }
+                if withJourneys.isEmpty {
+                    TravelQuietDayCard(trips: tripsCoveringSelected,
+                                       onOpen: { editingTrip = $0 })
                 }
                 eventsSection
             } else {

@@ -345,6 +345,77 @@ struct LeaveByCard: View {
     }
 }
 
+// MARK: - Quiet travel day
+
+/// One card for every covering trip that has NO journey today — instead of a
+/// stack of identical "Nothing to catch today" boxes (three, when the legacy
+/// overlapping Bali trips all covered the same day). Trips with journeys get
+/// their own TravelDayCard above this one; this is only the quiet remainder.
+struct TravelQuietDayCard: View {
+    let trips: [Trip]
+    var onOpen: (Trip) -> Void = { _ in }
+
+    /// Two of today's trips genuinely overlapping (more than a shared
+    /// boundary day) means duplicate data, not a handover — say so, and say
+    /// the fix.
+    private var hasInteriorOverlap: Bool {
+        guard trips.count > 1 else { return false }
+        for i in trips.indices {
+            for j in trips.indices where j > i {
+                if trips[i].endDate > trips[j].startDate && trips[j].endDate > trips[i].startDate {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "airplane.departure")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.travelInk)
+                Text("TRAVEL MODE")
+                    .font(.system(size: 12, weight: .bold)).kerning(1.5)
+                    .foregroundStyle(Color.travelInk)
+                Spacer()
+            }
+            Text("Nothing to catch today.")
+                .font(Font.serif(26, weight: .semibold))
+                .foregroundStyle(Color.textPrimary)
+            Text("You're away, so the planner is standing down — no routine, no gym, no commute. Nothing to be late for.")
+                .font(.system(size: 14))
+                .foregroundStyle(Color.textSoft)
+
+            // Every trip owning this day, each a link into its editor.
+            HStack(spacing: 8) {
+                ForEach(trips, id: \.id) { trip in
+                    Button { onOpen(trip) } label: {
+                        Text(trip.title.isEmpty ? "Trip" : trip.title)
+                            .font(.system(size: 12, weight: .semibold))
+                            .underline()
+                            .foregroundStyle(Color.travelInk)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.top, 2)
+
+            if hasInteriorOverlap {
+                Text("These trips overlap — that's duplicate data, not a handover. Say \u{201C}clean up my travel data\u{201D} in Jeeves chat and they'll merge, with a receipt.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Color.accentDeep)
+                    .padding(.top, 4)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color.travelBg))
+    }
+}
+
 // MARK: - Trip editor
 
 struct TripEditorView: View {
