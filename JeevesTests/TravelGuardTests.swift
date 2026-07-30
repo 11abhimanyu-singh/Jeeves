@@ -24,7 +24,7 @@ final class TravelGuardTests: XCTestCase {
     }
 
     private func makeContext() throws -> ModelContext {
-        let schema = Schema([Trip.self, DailyPlanState.self, TravelSegment.self])
+        let schema = Schema([Trip.self, TripStay.self, DailyPlanState.self, TravelSegment.self, AppEvent.self])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true,
                                         cloudKitDatabase: .none)
         container = try ModelContainer(for: schema, configurations: [config])
@@ -122,6 +122,68 @@ final class TravelGuardTests: XCTestCase {
         XCTAssertFalse(widened)
         XCTAssertEqual(trip.startDate, day(2026, 8, 10))
         XCTAssertEqual(trip.endDate, day(2026, 8, 18))
+    }
+
+    func testTripsCoveringReturnsEveryTripOnAHandoverDay() throws {
+        let context = try makeContext()
+        let a = Trip(title: "Bhadra", startDate: day(2026, 11, 22), endDate: day(2026, 11, 25))
+        let b = Trip(title: "Kochi", startDate: day(2026, 11, 25), endDate: day(2026, 11, 28))
+        [a, b].forEach { context.insert($0) }
+
+        let covering = TravelGuard.tripsCovering(day(2026, 11, 25), context: context)
+        XCTAssertEqual(covering.map(\.title), ["Bhadra", "Kochi"],
+                       "both trips own the handover day, oldest first")
+        XCTAssertEqual(TravelGuard.tripsCovering(day(2026, 11, 23), context: context).count, 1)
+    }
+
+    func testAbsorbStayFollowsACalendarResync() async throws {
+        // The FAIL 3/10 scenario: 'Pune week' 10–12 Oct edited in Google
+        // Calendar to 9–13 Oct. The stay must move and the trip must grow.
+        let context = try makeContext()
+        let trip = Trip(title: "Pune week", startDate: day(2026, 10, 10), endDate: day(2026, 10, 12))
+        context.insert(trip)
+        let stay = TripStay(tripID: trip.id, place: "Pune", address: "Hotel, Pune",
+                            arriveDate: day(2026, 10, 10), departDate: day(2026, 10, 12),
+                            externalID: "abc123")
+        context.insert(stay)
+        let planned = DailyPlanState(date: day(2026, 10, 9), hasGymToday: false, gymMinute: nil)
+        planned.generatedPlanJSON = #"{"blocks":[]}"#
+        context.insert(planned)
+
+        let moved = await TravelGuard.absorbStay(externalID: "abc123",
+                                                 newStart: day(2026, 10, 9),
+                                                 newEnd: day(2026, 10, 13),
+                                                 context: context)
+
+        XCTAssertTrue(moved)
+        XCTAssertEqual(stay.arriveDate, day(2026, 10, 9))
+        XCTAssertEqual(stay.departDate, day(2026, 10, 13))
+        XCTAssertEqual(trip.startDate, day(2026, 10, 9), "the trip followed the edit")
+        XCTAssertEqual(trip.endDate, day(2026, 10, 13))
+        XCTAssertNil(planned.generatedPlanJSON, "the newly covered day was swept")
+    }
+
+    func testAbsorbStayNeverShrinksTheTrip() async throws {
+        let context = try makeContext()
+        let trip = Trip(title: "Pune week", startDate: day(2026, 10, 9), endDate: day(2026, 10, 13))
+        context.insert(trip)
+        context.insert(TripStay(tripID: trip.id, place: "Pune",
+                                arriveDate: day(2026, 10, 9), departDate: day(2026, 10, 13),
+                                externalID: "abc123"))
+
+        _ = await TravelGuard.absorbStay(externalID: "abc123",
+                                         newStart: day(2026, 10, 10), newEnd: day(2026, 10, 11),
+                                         context: context)
+
+        XCTAssertEqual(trip.startDate, day(2026, 10, 9), "shrinking stays a deliberate act")
+        XCTAssertEqual(trip.endDate, day(2026, 10, 13))
+    }
+
+    func testFlightJourneyPlausibilityRule() {
+        XCTAssertTrue(LeaveBy.plausibleFlightJourney(90))
+        XCTAssertTrue(LeaveBy.plausibleFlightJourney(360))
+        XCTAssertFalse(LeaveBy.plausibleFlightJourney(361))
+        XCTAssertFalse(LeaveBy.plausibleFlightJourney(2400), "the 40 h road route stays refused")
     }
 
     func testRefusalMessageNamesTheDayAndTrip() {

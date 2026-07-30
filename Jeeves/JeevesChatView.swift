@@ -417,6 +417,7 @@ struct JeevesChatView: View {
         case "add_trip":       return toolAddTrip(call.input)
         case "add_journey":    return await toolAddJourney(call.input)
         case "clean_travel_data": return toolCleanTravelData()
+        case "delete_trip":    return toolDeleteTrip(call.input)
         default:               return .init(text: "Unknown tool \(call.name).")
         }
     }
@@ -430,8 +431,40 @@ struct JeevesChatView: View {
         "fetch_app_data", "add_todo", "add_reminder", "edit_event", "delete_event",
         "commute_estimate", "log_walk", "mark_block_done", "complete_todo",
         "delete_todo", "delete_reminder", "fetch_chat_history", "remember_preference",
-        "add_trip", "add_journey", "clean_travel_data",
+        "add_trip", "add_journey", "clean_travel_data", "delete_trip",
     ]
+
+    /// Deletes a trip and everything under it, with a receipt naming exactly
+    /// what went. Exists because the coherence eval caught the assistant
+    /// CLAIMING a trip deletion it had no tool to perform — the events were
+    /// deleted, the trip stayed, and the reply said "Done".
+    private func toolDeleteTrip(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let query = (input["title"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
+        guard let trip = JeevesChatService.bestMatches(trips, title: \.title, query: query).first else {
+            let names = trips.map { "'\($0.title)' (\(TravelGuard.dayRange($0)))" }.joined(separator: ", ")
+            return .init(text: trips.isEmpty
+                         ? "There are no trips to delete."
+                         : "No trip matches '\(query)'. Trips: \(names). Ask the user which one.")
+        }
+        let segments = ((try? modelContext.fetch(FetchDescriptor<TravelSegment>())) ?? [])
+            .filter { $0.tripID == trip.id }
+        let stays = ((try? modelContext.fetch(FetchDescriptor<TripStay>())) ?? [])
+            .filter { $0.tripID == trip.id }
+        for s in segments {
+            TravelNotifier.cancel(segment: s)
+            modelContext.delete(s)
+        }
+        for st in stays { modelContext.delete(st) }
+        let title = trip.title.isEmpty ? "Trip" : trip.title
+        let range = TravelGuard.dayRange(trip)
+        modelContext.delete(trip)
+        modelContext.saveOrLog("chat.deleteTrip")
+        EventLog.log(.travelCleanup,
+                     "deleted trip '\(title)' with \(segments.count) journey(s), \(stays.count) stay(s)",
+                     context: modelContext)
+        return .init(text: "Deleted '\(title)' (\(range)) — \(segments.count) journey(s) and \(stays.count) stay(s) went with it, their leave-by nudges are cancelled, and the planner takes those days back.")
+    }
 
     // MARK: Event editing (eval finding: the Bhadra venue struggle)
 
@@ -665,6 +698,12 @@ struct JeevesChatView: View {
         let mode = TravelMode(rawValue: input["mode"] as? String ?? "flight") ?? .flight
         guard let minute = minutesFrom(input["time"] as? String) else {
             return .init(text: "Need a 24-hour HH:MM time.")
+        }
+        // Same >6 h rule as the editor: a given travel_minutes can't smuggle a
+        // road trip into a flight's door-to-terminal slot. Nothing is created.
+        if mode != .drive, let given = input["travel_minutes"] as? Int,
+           !LeaveBy.plausibleFlightJourney(given) {
+            return .init(text: "\(given) min (\(LeaveBy.hours(given))) by road isn't a door-to-airport run — I didn't add this. Give me the real airport-run minutes, or add the road leg as a drive and the flight separately.")
         }
         let day = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
         // A flight's time is its departure, read at the ORIGIN airport ("19:40

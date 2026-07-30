@@ -522,6 +522,17 @@ enum JeevesChatService {
             ],
         ],
         [
+            "name": "delete_trip",
+            "description": "Delete a trip and EVERYTHING under it — its stays, its journeys, and their leave-by notifications. Destructive: confirm with the user before calling, and report exactly what was deleted from the tool result. This is the ONLY way to remove a trip; deleting a trip's calendar events does NOT remove the trip.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "title": ["type": "string", "description": "The trip's title (or part of it)."],
+                ],
+                "required": ["title"],
+            ],
+        ],
+        [
             "name": "clean_travel_data",
             "description": "One-time tidy-up of travel data, ONLY when the user explicitly asks to clean/fix/merge their trips: merges trips whose dates genuinely overlap (never back-to-back trips), collapses duplicate stays, and removes rows whose trip no longer exists. Destructive — confirm the user wants it before calling. Reports exactly what changed.",
             "input_schema": [

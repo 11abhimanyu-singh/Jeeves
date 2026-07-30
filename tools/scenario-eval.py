@@ -62,23 +62,30 @@ JSON ONLY:
  "summary":"1-2 sentences"}"""
 
 
-def call(key, system, user, max_tokens=8000):
-    payload = {"model": "gpt-5",
-               "messages": [{"role": "system", "content": system},
-                            {"role": "user", "content": user}],
-               "response_format": {"type": "json_object"},
-               "max_completion_tokens": max_tokens}
-    req = urllib.request.Request(API, data=json.dumps(payload).encode(), headers={
-        "Authorization": f"Bearer {key}", "Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=600) as r:
-            return json.loads(json.load(r)["choices"][0]["message"]["content"])
-    except urllib.error.HTTPError:
-        payload["model"] = "gpt-5-mini"
+def call(key, system, user, max_tokens=24000):
+    # Reasoning models spend from the same completion budget before emitting
+    # content — an empty content string means the budget ran dry, not an
+    # error, so treat it like a failure and fall back.
+    def attempt(model):
+        payload = {"model": model,
+                   "messages": [{"role": "system", "content": system},
+                                {"role": "user", "content": user}],
+                   "response_format": {"type": "json_object"},
+                   "max_completion_tokens": max_tokens}
         req = urllib.request.Request(API, data=json.dumps(payload).encode(), headers={
             "Authorization": f"Bearer {key}", "Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=600) as r:
-            return json.loads(json.load(r)["choices"][0]["message"]["content"])
+            content = json.load(r)["choices"][0]["message"]["content"]
+        return json.loads(content) if content.strip() else None
+
+    for model in ("gpt-5", "gpt-5-mini"):
+        try:
+            result = attempt(model)
+            if result is not None:
+                return result
+        except (urllib.error.HTTPError, json.JSONDecodeError):
+            continue
+    sys.exit("Both models returned empty/invalid JSON — try again or raise max_tokens.")
 
 
 def main() -> None:

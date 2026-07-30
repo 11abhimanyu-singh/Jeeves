@@ -366,6 +366,16 @@ enum JourneyPrefill {
 
 enum LeaveBy {
 
+    /// A flight's door-to-terminal journey longer than this is a road trip
+    /// wearing a boarding pass. Refused EVERYWHERE — measurement, the manual
+    /// override, and chat's travel_minutes — because the scenario eval showed
+    /// the guard leaking through the override and the chat parameter.
+    nonisolated static let maxFlightJourneyMinutes = 360
+
+    nonisolated static func plausibleFlightJourney(_ minutes: Int) -> Bool {
+        minutes <= maxFlightJourneyMinutes
+    }
+
     /// One line of the backward chain, newest (latest) first.
     nonisolated struct Step: Equatable, Sendable {
         var time: Date

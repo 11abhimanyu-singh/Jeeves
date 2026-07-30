@@ -23,7 +23,7 @@ final class TravelEdgeCaseTests: XCTestCase {
     }
 
     private func makeContext() throws -> ModelContext {
-        let schema = Schema([Trip.self, TripStay.self, TravelSegment.self, DailyPlanState.self])
+        let schema = Schema([Trip.self, TripStay.self, TravelSegment.self, DailyPlanState.self, AppEvent.self])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true,
                                         cloudKitDatabase: .none)
         container = try ModelContainer(for: schema, configurations: [config])

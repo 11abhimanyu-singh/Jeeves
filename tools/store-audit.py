@@ -334,6 +334,78 @@ def main():
     check("chat history within bounds", [None] * (1 if chat_count > 5000 else 0),
           lambda _: f"{chat_count} turns stored — consider retention policy", warn=True)
 
+    # ---- Invariants graduated from the coherence eval (2026-07-30) ----
+    checkin_rows = [dict(date=ts(r["ZDATE"]), cardio=r["ZCARDIO"], ctype=r["ZCARDIOTYPE"],
+                         cdur=r["ZCARDIODURATION"])
+                    for r in db.execute("SELECT * FROM ZCHECKIN")]
+    bad = [c for c in checkin_rows if not c["cardio"] and (c["ctype"] or c["cdur"] is not None)]
+    check("no cardio details on a no-cardio check-in", bad,
+          lambda c: f"{day(c['date'])}: cardio=0 but type='{c['ctype']}' dur={c['cdur']}")
+
+    with_sessions = {l["workoutUUID"] for l in lifts if l["workoutUUID"] is not None}
+    bad = [w for w in workouts if w["uuid"] in with_sessions and (w["dur"] or 0) == 0]
+    check("no zero-duration workouts that have logged sets", bad,
+          lambda w: f"'{w['title'][:30]}' on {day(w['date'])} has sessions but 0 min", warn=True)
+
+    bw_rows = [dict(sess=r["ZSESSIONID"], bw=r["ZBODYWEIGHTKG"])
+               for r in db.execute("SELECT ZSESSIONID, ZBODYWEIGHTKG FROM ZLIFTSET")]
+    sess_to_workout = {l["uuid"]: l["workoutUUID"] for l in lifts}
+    by_workout = {}
+    for row in bw_rows:
+        w = sess_to_workout.get(row["sess"])
+        if w is not None and row["bw"]:
+            by_workout.setdefault(w, []).append(row["bw"])
+    bad = [(w, vals) for w, vals in by_workout.items() if max(vals) - min(vals) > 10]
+    check("no implausible bodyweight jumps within one workout", bad,
+          lambda p: f"workout {str(p[0])[:8]}…: bodyweight {min(p[1])}–{max(p[1])} kg", warn=True)
+
+    import json as _json
+    bad = []
+    for r in db.execute("SELECT ZDATE, ZGENERATEDPLANJSON FROM ZDAILYPLANSTATE WHERE ZGENERATEDPLANJSON IS NOT NULL"):
+        try:
+            blocks = _json.loads(r["ZGENERATEDPLANJSON"]).get("blocks", [])
+        except Exception:
+            bad.append((ts(r["ZDATE"]), "unparseable plan JSON"))
+            continue
+        for b in blocks:
+            if b.get("startTime") == b.get("endTime"):
+                bad.append((ts(r["ZDATE"]), f"zero-length block '{b.get('title','?')}' at {b.get('startTime')}"))
+    check("no zero-length blocks in stored plans", bad,
+          lambda p: f"{day(p[0])}: {p[1]}")
+
+    book_rows = [dict(title=r["ZTITLE"] or "", author=r["ZAUTHOR"] or "", isbn=r["ZISBN"],
+                      fiction=r["ZISFICTION"])
+                 for r in db.execute("SELECT * FROM ZBOOK")]
+    by_isbn = {}
+    for b in book_rows:
+        if b["isbn"]:
+            by_isbn.setdefault(b["isbn"], []).append(b)
+    bad = [(i, rows) for i, rows in by_isbn.items()
+           if len({(r["title"].lower(), r["author"].lower()) for r in rows}) > 1]
+    check("no ISBN shared across different books", bad,
+          lambda p: f"ISBN {p[0]}: " + " / ".join(r["title"][:25] for r in p[1]), warn=True)
+    bad = [b for b in book_rows if b["fiction"] is None]
+    check("no books with a null fiction flag", bad, lambda b: f"'{b['title'][:40]}'")
+
+    bad = [dict(at=ts(r["ZSTARTEDAT"]), trigger=r["ZTRIGGERRAW"], ms=r["ZDURATIONMS"])
+           for r in db.execute(
+               "SELECT ZSTARTEDAT, ZTRIGGERRAW, ZDURATIONMS FROM ZPLANGENERATIONLOG"
+               " WHERE ZOUTCOMERAW IN ('success','repaired') AND ZDURATIONMS > 900000")]
+    check("no successful plan generation over 15 minutes", bad,
+          lambda g: f"{fmt(g['at'])} ({g['trigger']}) took {g['ms']//60000} min", warn=True)
+
+    allday = [dict(title=(r["ZTITLE"] or "").strip().lower(), start=ts(r["ZDATE"]),
+                   end=ts(r["ZSPANENDDATE"]) or ts(r["ZDATE"]))
+              for r in db.execute("SELECT * FROM ZDAILYEVENT WHERE ZISALLDAY = 1")]
+    bad = []
+    for i, a in enumerate(allday):
+        for b in allday[i + 1:]:
+            if (a["title"] and a["title"] == b["title"] and a["start"] and b["start"]
+                    and a["end"] >= b["start"] and b["end"] >= a["start"]):
+                bad.append((a, b))
+    check("no same-title all-day events overlapping in time", bad,
+          lambda p: f"'{p[0]['title'][:35]}': {day(p[0]['start'])}–{day(p[0]['end'])} vs {day(p[1]['start'])}–{day(p[1]['end'])}", warn=True)
+
     # Pipeline liveness — inherently recency-based; the only checks allowed
     # to look at 'now'. Everything above scans all history unconditionally.
     dated_log = [g for g in genlog if g["at"]]

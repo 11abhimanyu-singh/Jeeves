@@ -100,7 +100,9 @@ struct LeaveByCard: View {
                     Text("Leave")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Color.textSoft)
-                    Text(hhmm(plan.leaveAt))
+                    // A tilde marks a chain still missing its journey time —
+                    // "Leave ~05:30" reads as the estimate it is, not a fact.
+                    Text((segment.travelMinutes == 0 ? "~" : "") + hhmm(plan.leaveAt))
                         .font(Font.serif(34, weight: .semibold))
                         .monospacedDigit()
                         .foregroundStyle(Color.travelInk)
@@ -352,6 +354,9 @@ struct TripEditorView: View {
     @Query private var allSegments: [TravelSegment]
 
     @State private var editing: TravelSegment?
+    // Segments minted this session by the add buttons: dismissing their
+    // editor without saving discards them.
+    @State private var freshIDs = Set<UUID>()
 
     private var segments: [TravelSegment] {
         allSegments.filter { $0.tripID == trip.id }
@@ -425,7 +430,7 @@ struct TripEditorView: View {
                     Button("Done") { dismiss() }.tint(Color.accentDeep)
                 }
             }
-            .sheet(item: $editing) { SegmentEditorView(segment: $0) }
+            .sheet(item: $editing) { SegmentEditorView(segment: $0, isNew: freshIDs.contains($0.id)) }
         }
     }
 
@@ -465,6 +470,7 @@ struct TripEditorView: View {
                               securityMinutes: mode == .flight ? 30 : 0)
         modelContext.insert(s)
         modelContext.saveOrLog("TripEditor.newSegment")
+        freshIDs.insert(s.id)
         return s
     }
 
@@ -535,6 +541,10 @@ struct TripEditorView: View {
 
 struct SegmentEditorView: View {
     let segment: TravelSegment
+    /// True when the trip editor just minted this segment: dismissing without
+    /// saving then deletes it, so a half-configured shell never lingers in
+    /// the trip (the old behavior persisted every "Add a flight" tap forever).
+    var isNew: Bool = false
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
@@ -569,6 +579,14 @@ struct SegmentEditorView: View {
     // What the main picker held when the sheet opened (or was last re-rendered
     // by an arriving zone) — the marker for "the user hasn't touched this".
     @State private var loadedWhen = Date.distantPast
+    // Where the place fields started, so programmatic assignment in load()
+    // never triggers the edit-driven zone re-lookup.
+    @State private var loadedFrom = ""
+    @State private var loadedTo = ""
+    @State private var zoneRelookup: Task<Void, Never>?
+    @State private var saveError: String?
+    @State private var didSave = false
+    @State private var didDelete = false
 
     private var isFlight: Bool { segment.mode != .drive }
     /// The clock the main time picker is read on: a flight departs on the
@@ -637,6 +655,12 @@ struct SegmentEditorView: View {
                     // Journey time is MEASURED, never asked for. It only turns
                     // into a question when Maps genuinely can't find the place.
                     journeyRow
+
+                    if let saveError {
+                        Text(saveError)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Color.accentDeep)
+                    }
                 }
                 .padding(18)
             }
@@ -648,6 +672,7 @@ struct SegmentEditorView: View {
                     Button(role: .destructive) {
                         // A deleted journey must take its leave-by nudge with
                         // it — a cancelled trip still fired 3 a.m. reminders.
+                        didDelete = true
                         TravelNotifier.cancel(segment: segment)
                         modelContext.delete(segment)
                         modelContext.saveOrLog("SegmentEditor.delete")
@@ -662,6 +687,36 @@ struct SegmentEditorView: View {
                 }
             }
             .onAppear(perform: load)
+            .onDisappear {
+                // Swiping away a freshly minted segment abandons it — take it
+                // back out rather than leaving a shell in the trip.
+                if isNew && !didSave && !didDelete {
+                    TravelNotifier.cancel(segment: segment)
+                    modelContext.delete(segment)
+                    modelContext.saveOrLog("SegmentEditor.discardNew")
+                }
+            }
+            .onChange(of: from) { _, newValue in
+                if newValue != loadedFrom { scheduleZoneRelookup(newValue, into: $fromZoneID) }
+            }
+            .onChange(of: to) { _, newValue in
+                if !isFlight, newValue != loadedTo { scheduleZoneRelookup(newValue, into: $toZoneID) }
+            }
+        }
+    }
+
+    /// A changed place means the old zone may be wrong — re-look it up once
+    /// typing pauses. The Kathmandu scenario showed the chain running 15
+    /// minutes late because editing From never refreshed the zone and the
+    /// user was expected to know to tap Find.
+    private func scheduleZoneRelookup(_ place: String, into binding: Binding<String>) {
+        zoneRelookup?.cancel()
+        let trimmed = place.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        zoneRelookup = Task {
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard !Task.isCancelled else { return }
+            lookUpZone(for: trimmed, into: binding)
         }
     }
 
@@ -669,6 +724,7 @@ struct SegmentEditorView: View {
         guard !loaded else { return }
         loaded = true
         label = segment.label; from = segment.fromPlace; to = segment.toPlace
+        loadedFrom = from; loadedTo = to
         fromZoneID = segment.fromTimeZoneID; toZoneID = segment.toTimeZoneID
         // Show stored instants as the wall-clock they read on their own zone,
         // so opening and saving without edits changes nothing.
@@ -694,6 +750,14 @@ struct SegmentEditorView: View {
     }
 
     private func save() {
+        // The >6 h rule holds at the door too: the measure refusing a road
+        // route means nothing if Save then stores the override anyway.
+        if isFlight && !LeaveBy.plausibleFlightJourney(travel) {
+            saveError = "\(LeaveBy.hours(travel)) by road isn't a door-to-airport run — fix the To field (the airport you fly from), or add this leg as a drive."
+            return
+        }
+        saveError = nil
+        didSave = true
         segment.label = label
         segment.fromPlace = from
         segment.toPlace = to

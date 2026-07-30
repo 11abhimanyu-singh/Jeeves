@@ -94,10 +94,15 @@ struct DayPlannerView: View {
     @ViewBuilder
     private var scrollContent: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if let trip = tripCovering(selectedDate) {
+            if !tripsCoveringSelected.isEmpty {
                 // Travel mode: the planner stands down. No routine, no gym you
-                // can't reach, no commute to nowhere — just the journeys.
-                TravelDayCard(trip: trip, day: selectedDate)
+                // can't reach, no commute to nowhere — just the journeys. A
+                // handover day (land from trip A, leave for trip B) renders
+                // EVERY covering trip — showing only the first hid trip B's
+                // leave-by chain on the one day it mattered.
+                ForEach(tripsCoveringSelected, id: \.id) { trip in
+                    TravelDayCard(trip: trip, day: selectedDate)
+                }
                 eventsSection
             } else {
                 if let s = travelSuggestion { travelSuggestionBanner(s) }
@@ -233,6 +238,7 @@ struct DayPlannerView: View {
         // Each move gets a journey ready for its times — the only days of a
         // trip where anything is time-critical. A "move" between the same
         // place is a data artifact, never a journey.
+        var createdTransitions: [TravelSegment] = []
         for t in Itinerary.transitions(resolved)
         where t.from.place != t.to.place && t.from.address != t.to.address {
             let noon = cal.date(bySettingHour: 12, minute: 0, second: 0, of: t.day) ?? t.day
@@ -241,18 +247,40 @@ struct DayPlannerView: View {
             // 2 h lodge transfer in a 3 h airline cut-off, telling the user to
             // leave at 05:55 for a noon drive. Drives take an arrive-by, not a
             // departure.
-            modelContext.insert(TravelSegment(
+            let seg = TravelSegment(
                 tripID: trip.id, mode: .drive,
                 label: "\(t.from.place) → \(t.to.place)",
                 fromPlace: t.from.address, toPlace: t.to.address,
                 arriveBy: noon,
-                checkInMinutes: 0, securityMinutes: 0))
+                checkInMinutes: 0, securityMinutes: 0)
+            modelContext.insert(seg)
+            createdTransitions.append(seg)
         }
         modelContext.saveOrLog("DayPlanner.acceptTravel")
         EventLog.log(.tripCreated, "\(trip.title) \(TravelGuard.dayRange(trip)) from calendar banner",
                      subject: trip.id, context: modelContext)
         // The trip now owns these days — stale plans and their notifications go.
         Task { await TravelGuard.sweep(context: modelContext) }
+        // Measure the auto-created transfers now: a leave-by of "arrival minus
+        // buffer" with 0 min of driving is not a chain, and no nudge exists
+        // until a real journey time does. (Scenario eval: accepted trips sat
+        // unmeasured until the user found the Measure button.)
+        let toMeasure = createdTransitions
+        Task {
+            for seg in toMeasure where seg.travelMinutes == 0 && !seg.toPlace.isEmpty {
+                if let m = await GoogleMapsService.commuteMinutes(
+                    from: seg.fromPlace, to: seg.toPlace,
+                    departure: max(seg.arriveBy ?? Date(), Date())) {
+                    seg.travelMinutes = m
+                    seg.travelIsEstimated = false
+                    modelContext.saveOrLog("DayPlanner.measureTransition")
+                    EventLog.log(.journeyMeasured, "\(seg.label) — \(m) min at acceptance",
+                                 subject: seg.id, context: modelContext)
+                    await TravelGuard.absorb(seg, context: modelContext)
+                    await TravelNotifier.schedule(segment: seg)
+                }
+            }
+        }
         editingTrip = trip
     }
 
@@ -276,6 +304,10 @@ struct DayPlannerView: View {
     }
 
     /// The trip that puts this day in travel mode, if any.
+    private var tripsCoveringSelected: [Trip] {
+        TravelGuard.tripsCovering(selectedDate, context: modelContext)
+    }
+
     private func tripCovering(_ day: Date) -> Trip? {
         trips.first { $0.covers(day) }
     }
@@ -683,6 +715,16 @@ struct DayPlannerView: View {
                     existing.destinationAddress = c.location
                     existing.destinationLat = nil     // stale pin for the old venue
                     existing.destinationLng = nil
+                }
+                // If this event backs a trip's stay, the trip must follow the
+                // edit: move the stay, grow the window, sweep the newly
+                // covered days.
+                let extID = c.externalID
+                let newStart = c.startDay ?? existing.date
+                let newEnd = c.endDay ?? existing.spanEndDate ?? existing.date
+                Task {
+                    await TravelGuard.absorbStay(externalID: extID, newStart: newStart,
+                                                 newEnd: newEnd, context: modelContext)
                 }
                 continue
             }

@@ -28,6 +28,49 @@ enum TravelGuard {
         tripCovering(day, context: context) != nil
     }
 
+    /// EVERY trip covering this day, oldest start first. A handover day —
+    /// land from trip A in the morning, leave for trip B in the afternoon —
+    /// is legitimately covered by two trips, and rendering only the first
+    /// hid trip B's leave-by chain on its most critical day.
+    static func tripsCovering(_ day: Date, context: ModelContext) -> [Trip] {
+        ((try? context.fetch(FetchDescriptor<Trip>())) ?? [])
+            .filter { $0.covers(day) }
+            .sorted { ($0.startDate, $0.id.uuidString) < ($1.startDate, $1.id.uuidString) }
+    }
+
+    /// A calendar re-sync changed a lodging event's span: move the stay with
+    /// it and grow the trip to cover the new dates, then sweep. Growth only —
+    /// shrinking a trip stays a deliberate act in the trip editor. Returns
+    /// true when anything moved. (The scenario eval scored this flow 3/10:
+    /// the event updated in place but the trip never followed, leaving the
+    /// newly covered days planned and nudging.)
+    @discardableResult
+    static func absorbStay(externalID: String, newStart: Date, newEnd: Date,
+                           context: ModelContext) async -> Bool {
+        guard !externalID.isEmpty else { return false }
+        let stays = (try? context.fetch(FetchDescriptor<TripStay>())) ?? []
+        guard let stay = stays.first(where: { $0.externalID == externalID }) else { return false }
+        var changed = false
+        let start = newStart.startOfDay
+        let end = newEnd.startOfDay
+        if stay.arriveDate != start { stay.arriveDate = start; changed = true }
+        if stay.departDate != end { stay.departDate = end; changed = true }
+        let trips = (try? context.fetch(FetchDescriptor<Trip>())) ?? []
+        if let trip = trips.first(where: { $0.id == stay.tripID }) {
+            if start < trip.startDate { trip.startDate = start; changed = true }
+            if end > trip.endDate { trip.endDate = end; changed = true }
+            if changed {
+                EventLog.log(.tripExtended,
+                             "\(trip.title.isEmpty ? "Trip" : trip.title) followed a calendar re-sync",
+                             subject: trip.id, context: context)
+            }
+        }
+        guard changed else { return false }
+        context.saveOrLog("TravelGuard.absorbStay")
+        await sweep(context: context)
+        return true
+    }
+
     /// "12–18 Aug" for event-log detail lines.
     static func dayRange(_ trip: Trip) -> String {
         let f = DateFormatter()
