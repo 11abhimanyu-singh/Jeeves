@@ -351,12 +351,64 @@ enum SyncOutbox {
     }
 
     /// File-coordinate + atomic-write pre-encoded bytes into the iCloud folder.
-    nonisolated private static func writeData(_ data: Data, fileName: String) {
-        guard let docs = documentsURL() else { return }
+    @discardableResult
+    nonisolated private static func writeData(_ data: Data, fileName: String) -> Bool {
+        guard let docs = documentsURL() else {
+            // The single most important failure to surface: iOS handed back no
+            // ubiquity URL, so NOTHING can ever reach the Mac. Silently
+            // returning here is what let the export channel look healthy for
+            // days while delivering nothing.
+            record(failure: "iCloud Drive unavailable to the app (no ubiquity container URL)")
+            return false
+        }
         let url = docs.appendingPathComponent(fileName)
         var coordinationError: NSError?
+        var wrote = false
         NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing, error: &coordinationError) { target in
-            try? data.write(to: target, options: .atomic)
+            do {
+                try data.write(to: target, options: .atomic)
+                wrote = true
+            } catch {
+                record(failure: "write failed for \(fileName): \(error.localizedDescription)")
+            }
         }
+        if let coordinationError {
+            record(failure: "file coordination failed for \(fileName): \(coordinationError.localizedDescription)")
+        }
+        if wrote { record(success: fileName) }
+        return wrote
+    }
+
+    // MARK: Channel health
+    //
+    // An export that fails silently is indistinguishable from an app that is
+    // simply healthy and quiet. These few lines are what let the daily
+    // diagnosis say "the phone can't reach iCloud" instead of guessing.
+
+    private static let successKey = "jeeves.sync.lastSuccessAt"
+    private static let failureKey = "jeeves.sync.lastFailure"
+    private static let failureAtKey = "jeeves.sync.lastFailureAt"
+
+    nonisolated static func record(success fileName: String) {
+        let d = UserDefaults.standard
+        d.set(Date(), forKey: successKey)
+        d.removeObject(forKey: failureKey)
+        d.removeObject(forKey: failureAtKey)
+    }
+
+    nonisolated static func record(failure reason: String) {
+        let d = UserDefaults.standard
+        d.set(reason, forKey: failureKey)
+        d.set(Date(), forKey: failureAtKey)
+    }
+
+    /// What the last export attempt actually did — read by the anomaly scan so
+    /// a dead channel reports itself on the next cable pull even when iCloud
+    /// itself is the thing that's broken.
+    nonisolated static var health: (lastSuccess: Date?, failure: String?, failedAt: Date?) {
+        let d = UserDefaults.standard
+        return (d.object(forKey: successKey) as? Date,
+                d.string(forKey: failureKey),
+                d.object(forKey: failureAtKey) as? Date)
     }
 }

@@ -69,6 +69,31 @@ enum AnomalyScan {
             }
         }
 
+        // ---- The export channel itself ----
+        // Zero-touch diagnosis depends on iCloud delivering; when it doesn't,
+        // the failure must travel by the OTHER route (a cable pull) rather
+        // than leaving both sides silent.
+        let health = SyncOutbox.health
+        if let failure = health.failure {
+            out.append(Anomaly(
+                severity: "high", day: dayFmt.string(from: health.failedAt ?? now),
+                rule: "export-channel-failing",
+                title: "iCloud export is failing",
+                detail: "Last attempt failed: \(failure). Nothing reaches the Mac while this persists, so the daily zero-touch diagnosis is blind — it reports staleness rather than health."))
+        } else if let last = health.lastSuccess, now.timeIntervalSince(last) > 48 * 3600 {
+            out.append(Anomaly(
+                severity: "medium", day: dayFmt.string(from: last),
+                rule: "export-channel-stale",
+                title: "No successful iCloud export in \(Int(now.timeIntervalSince(last) / 3600)) h",
+                detail: "The app hasn't managed a successful export since \(dayFmt.string(from: last)). Either it hasn't been opened or iCloud is refusing writes."))
+        } else if health.lastSuccess == nil {
+            out.append(Anomaly(
+                severity: "high", day: dayFmt.string(from: now),
+                rule: "export-channel-never-ran",
+                title: "The iCloud export has never succeeded",
+                detail: "No export attempt has ever completed on this device. Everything downstream (daily digest, zero-touch audits) is running on nothing."))
+        }
+
         // ---- Behavioral: sequences in the event stream ----
         let starts = events.filter { $0.kind == .workoutStarted }
         let startsByDay = Dictionary(grouping: starts) { cal.startOfDay(for: $0.date) }
@@ -107,14 +132,19 @@ enum AnomalyScan {
         var count: Int
         var anomalies: [Anomaly]
         var eventCount: Int
+        /// "Nothing is broken" and "it's doing its job well" are different
+        /// questions — the digest now carries both.
+        var metrics: ProductMetricsSnapshot?
     }
 
     /// Scan and mirror to iCloud Drive for the Mac-side daily digest.
     static func writeDigest(context: ModelContext, now: Date = Date()) {
         let anomalies = scan(context: context, now: now)
         let eventCount = (try? context.fetchCount(FetchDescriptor<AppEvent>())) ?? 0
+        let metrics = ProductMetrics.snapshot(context: context, now: now)
         let digest = Digest(exportedAt: now, count: anomalies.count,
-                            anomalies: anomalies, eventCount: eventCount)
+                            anomalies: anomalies, eventCount: eventCount,
+                            metrics: metrics)
         Task.detached(priority: .utility) {
             guard let docs = DiagnosticsSync.documentsURL() else { return }
             guard let data = try? DiagnosticsSync.encoder.encode(digest) else { return }

@@ -180,7 +180,46 @@ enum JeevesChatService {
     struct AgenticReply {
         let text: String
         var plans: [(plan: GeneratedPlan, isOffline: Bool)] = []
+        /// The reply asserted a completed action while no tool ran this turn,
+        /// and it still did so after being challenged. Surfaced, never hidden.
+        var unverifiedClaim: Bool = false
     }
+
+    /// Does this reply assert that something WAS changed? Pure and testable —
+    /// the structural half of the no-tool-no-change rule. Deliberately biased
+    /// toward false negatives: a missed claim costs a log line, a false alarm
+    /// costs the user an extra round trip on a perfectly good answer.
+    nonisolated static func claimsCompletedAction(_ text: String) -> Bool {
+        // Past-tense completions and present-tense state assertions. Both are
+        // claims about stored data ("deleted the stay", "now runs 8–10").
+        let claims = [" done", "added", "deleted", "removed", "updated", "extended",
+                      "created", "moved", "shifted", "pushed", "cancelled", "canceled",
+                      "saved", "swapped", "renamed", "shortened", "lengthened",
+                      "now runs", "now ends", "now starts", "is now", "are now",
+                      "back to", "all set"]
+        // Anything that makes the sentence a question, an offer, a refusal or a
+        // future promise is NOT a claim that something already happened.
+        let notAClaim = ["want me", "shall i", "should i", "do you want", "would you like",
+                         "i'll ", "i will ", "let me know", "if you", "once you",
+                         "couldn't", "could not", "can't", "cannot", "unable",
+                         "didn't", "did not", "haven't", "have not", "not yet",
+                         "need ", "which ", "what ", "when ", "tell me", "confirm"]
+        for raw in text.lowercased().split(whereSeparator: { ".!?\n;".contains($0) }) {
+            let sentence = " " + raw.trimmingCharacters(in: .whitespaces) + " "
+            guard claims.contains(where: { sentence.contains($0) }) else { continue }
+            if notAClaim.contains(where: { sentence.contains($0) }) { continue }
+            return true
+        }
+        return false
+    }
+
+    private static let claimChallenge = """
+    SYSTEM CHECK: your reply describes a change ("done", "added", "deleted", \
+    "now runs", "that pushes…"), but you called NO tool this turn, so nothing \
+    was actually changed. Either call the tool that makes it true now, or \
+    rewrite your reply to say plainly what still needs doing. Do not repeat the \
+    claim.
+    """
 
     private static let agenticSystemPrompt = """
     You are Jeeves, a personal day-planning assistant inside the user's own iOS \
@@ -277,7 +316,15 @@ enum JeevesChatService {
     - NO TOOL, NO CHANGE: if you did not call a tool THIS turn, nothing \
     changed — never say "done", "removed", "updated", "extended", and never \
     describe anything as auto-added unless a tool result in this conversation \
-    says so. Call the tool, or say what you WOULD do and ask.
+    says so. Call the tool, or say what you WOULD do and ask. This applies to \
+    CONSEQUENCES too: "that pushes your check-in to the 14th" is a claim about \
+    stored data — either make that change with a tool or say it still needs \
+    doing.
+    - NEVER do clock arithmetic on stored times. "Running an hour long" is \
+    edit_event with extend_by_minutes: 60; "push it 30 minutes" is \
+    shift_by_minutes: 30. You do not know an event's stored end time unless a \
+    tool result told you — and add_event ASSUMES a 3-hour end when none was \
+    given, so guessing has already shortened a dinner it was asked to extend.
     - RECEIPTS ARE VERBATIM: name trips, stays and records EXACTLY as the \
     tool result names them. If a result says the stay went to 'Colombo' and \
     the user meant the Mysore trip, that is the WRONG trip — say so and move \
@@ -393,15 +440,17 @@ enum JeevesChatService {
         ],
         [
             "name": "edit_event",
-            "description": "Edit an existing event — change its venue, times, or title. Matches by (partial) title; all matching future events change together (a multi-day event's days all update). Use this instead of re-adding.",
+            "description": "Edit an existing event — change its venue, times, or title. Matches by (partial) title; all matching future events change together (a multi-day event's days all update). Use this instead of re-adding. To make it longer or move it, use extend_by_minutes / shift_by_minutes — the app does the arithmetic from what is STORED, so you never need to know the current times.",
             "input_schema": [
                 "type": "object",
                 "properties": [
                     "title": ["type": "string", "description": "Existing event's name, or a distinctive part of it."],
                     "date": ["type": "string", "description": "'today', 'tomorrow', or YYYY-MM-DD — limit the edit to that day. Omit to edit every future match."],
                     "new_venue": ["type": "string", "description": "New place/address."],
-                    "new_start": ["type": "string", "description": "New 24-hour HH:MM start."],
-                    "new_end": ["type": "string", "description": "New 24-hour HH:MM end."],
+                    "extend_by_minutes": ["type": "integer", "description": "PREFERRED for 'running long' / 'make it an hour longer': lengthen by this many minutes (negative shortens). Computed from the stored end — never work out a new clock time yourself."],
+                    "shift_by_minutes": ["type": "integer", "description": "PREFERRED for 'push it 30 minutes' / 'start an hour earlier': move the whole event, keeping its duration (negative moves earlier)."],
+                    "new_start": ["type": "string", "description": "Absolute new 24-hour HH:MM start. Only when the user names an exact time."],
+                    "new_end": ["type": "string", "description": "Absolute new 24-hour HH:MM end. Only when the user names an exact time."],
                     "new_title": ["type": "string", "description": "Rename the event."],
                 ],
                 "required": ["title"],
@@ -689,8 +738,14 @@ enum JeevesChatService {
 
         var plans: [(plan: GeneratedPlan, isOffline: Bool)] = []
         var finalText = ""
+        // The no-tool-no-change rule, enforced structurally instead of hoped
+        // for: a prompt rule alone still let "Back to 2 nights — Radisson now
+        // ends Aug 13" ship with no tool call behind it.
+        var toolsRan = 0
+        var challenged = false
+        var unverifiedClaim = false
 
-        for _ in 0..<6 {
+        for _ in 0..<7 {
             let body: [String: Any] = [
                 "model": model,
                 "max_tokens": 1536,
@@ -713,7 +768,21 @@ enum JeevesChatService {
                 .joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty { finalText = text }
 
-            guard response.stopReason == "tool_use" else { break }
+            guard response.stopReason == "tool_use" else {
+                // Nothing was called this turn — if the reply nonetheless says
+                // something changed, challenge it ONCE and let it either do the
+                // work or correct itself.
+                if toolsRan == 0, Self.claimsCompletedAction(finalText) {
+                    if challenged {
+                        unverifiedClaim = true
+                    } else {
+                        challenged = true
+                        messages.append(["role": "user", "content": Self.claimChallenge])
+                        continue
+                    }
+                }
+                break
+            }
 
             // Execute each tool call, then send ALL results back in one user turn
             // (splitting them trains the model to stop making parallel calls).
@@ -721,6 +790,7 @@ enum JeevesChatService {
             for block in response.blocks where block.type == "tool_use" {
                 let call = ToolCall(id: block.id ?? "", name: block.name ?? "", input: block.input ?? [:])
                 let result = await execute(call)
+                toolsRan += 1
                 if let plan = result.plan { plans.append((plan, result.isOfflinePlan)) }
                 toolResults.append([
                     "type": "tool_result",
@@ -731,7 +801,14 @@ enum JeevesChatService {
             messages.append(["role": "user", "content": toolResults])
         }
 
-        return AgenticReply(text: finalText, plans: plans)
+        // Still claiming after the challenge: say so in the reply itself. The
+        // user reads the claim, so the correction belongs where they'll see it
+        // — the event log alone would surface it a day late, in a digest.
+        if unverifiedClaim {
+            finalText += "\n\n⚠️ I said that was done, but no change was actually "
+                + "recorded — please re-check before relying on it."
+        }
+        return AgenticReply(text: finalText, plans: plans, unverifiedClaim: unverifiedClaim)
     }
 
     // MARK: - Date argument parsing (pure, testable)

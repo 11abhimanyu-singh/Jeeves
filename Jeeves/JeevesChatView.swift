@@ -371,6 +371,13 @@ struct JeevesChatView: View {
             switch outcome {
             case .success(let reply):
                 if !reply.text.isEmpty { addTurn(role: .assistant, reply.text) }
+                // A claim that survived the challenge is a real incident — the
+                // digest must see it, not just the user who read the reply.
+                if reply.unverifiedClaim {
+                    EventLog.log(.chatUnverifiedClaim,
+                                 "reply claimed a change with no tool call: \(reply.text.prefix(160))",
+                                 context: modelContext)
+                }
                 // Any plans the agent built, as timeline cards after the reply.
                 for made in reply.plans {
                     addTurn(role: .assistant, "", plan: made.plan, isOfflinePlan: made.isOffline)

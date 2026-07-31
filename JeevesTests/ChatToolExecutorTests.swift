@@ -191,6 +191,67 @@ final class ChatToolExecutorTests: XCTestCase {
                       "time change on today must carry the replan hint: \(result.text)")
     }
 
+    // MARK: relative time edits (no head-math)
+
+    func testExtendByMinutesLengthensFromTheStoredEnd() async {
+        let context = container.mainContext
+        // Exactly the shape that broke: add_event's 3 h default, then "extend
+        // it by an hour". The old absolute-only path SHRANK this to 22:00.
+        _ = await executor.run(.init(
+            id: "e0", name: "add_event",
+            input: ["title": "Dinner with Arvind", "date": "today", "start_time": "20:00"]))
+        var events = (try? context.fetch(FetchDescriptor<DailyEvent>())) ?? []
+        XCTAssertEqual(events.first?.endMinute, 23 * 60, "3 h default applies")
+
+        let result = await executor.run(.init(
+            id: "e1", name: "edit_event",
+            input: ["title": "Dinner with Arvind", "extend_by_minutes": 60]))
+
+        events = (try? context.fetch(FetchDescriptor<DailyEvent>())) ?? []
+        XCTAssertEqual(events.count, 1, "no duplicate")
+        XCTAssertEqual(events.first?.startMinute, 20 * 60)
+        XCTAssertEqual(events.first?.endMinute, 24 * 60, "23:00 + 60 = 24:00, never a shrink")
+        XCTAssertTrue(result.text.contains("20:00–23:00 → 20:00–24:00"),
+                      "receipt quotes old AND new: \(result.text)")
+    }
+
+    func testAddEventAnnouncesAnAssumedEndTime() async {
+        let result = await executor.run(.init(
+            id: "e2", name: "add_event",
+            input: ["title": "Lunch", "date": "today", "start_time": "13:00"]))
+        XCTAssertTrue(result.text.contains("assumed"),
+                      "an invented end time must announce itself: \(result.text)")
+    }
+
+    func testShiftByMinutesMovesBothEndsAndKeepsDuration() async {
+        let context = container.mainContext
+        context.insert(DailyEvent(date: Date().startOfDay, title: "Movie with Karan",
+                                  startMinute: 21 * 60, endMinute: 23 * 60))
+        try? context.save()
+
+        _ = await executor.run(.init(
+            id: "e3", name: "edit_event",
+            input: ["title": "Movie", "shift_by_minutes": 30]))
+
+        let events = (try? context.fetch(FetchDescriptor<DailyEvent>())) ?? []
+        XCTAssertEqual(events.first?.startMinute, 21 * 60 + 30)
+        XCTAssertEqual(events.first?.endMinute, 23 * 60 + 30, "duration preserved, not stretched")
+    }
+
+    func testExtendNeverEndsBeforeItStarts() async {
+        let context = container.mainContext
+        context.insert(DailyEvent(date: Date().startOfDay, title: "Standup",
+                                  startMinute: 600, endMinute: 660))
+        try? context.save()
+
+        _ = await executor.run(.init(
+            id: "e4", name: "edit_event",
+            input: ["title": "Standup", "extend_by_minutes": -600]))
+
+        let events = (try? context.fetch(FetchDescriptor<DailyEvent>())) ?? []
+        XCTAssertEqual(events.first?.endMinute, 600, "clamped to the start, never inverted")
+    }
+
     // MARK: calendar tombstones
 
     func testDeletedSyncedEventIsTombstoned() async {

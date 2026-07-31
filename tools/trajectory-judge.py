@@ -103,6 +103,47 @@ def judge_claude(key: str, artifact: str) -> dict:
     return parse_json(text)
 
 
+TIEBREAK_RUBRIC = """You are the TIEBREAKER on one disputed test scenario for
+"Jeeves", a single-user iOS day planner. Two judges scored the same artifact
+and disagreed. You receive the artifact (transcript, every tool call with its
+result, end state, expectations) and both judges' deductions.
+
+Decide which judge the EVIDENCE supports, using the same rules they did:
+- Claims something happened that didn't, or a change with no tool behind it
+  -> score 0 (this is the most severe finding; do not soften it)
+- Silently ignoring part of the request, or a wrong number      -> -3
+- Wrong clock, elapsed-treated-as-done, destructive without preview -> -2
+- Vague receipt, needless question, no replan offer, verbosity  -> -1
+Quote the exact transcript line, tool call, or end-state row behind your call.
+A judge who scored a scenario well while nothing was actually created is
+wrong, however polite the reply was.
+
+JSON ONLY:
+{"agreesWith": "claude|gpt|neither", "score": 0-10,
+ "reasoning": "2-3 sentences citing the decisive evidence"}"""
+
+
+def judge_tiebreak(key: str, artifact: str, scenario_id: str, deductions: dict) -> dict:
+    body = (f"DISPUTED SCENARIO: {scenario_id}\n\n"
+            f"JUDGE DEDUCTIONS\n{json.dumps(deductions, indent=1)}\n\n"
+            f"ARTIFACT\n{artifact}")
+    payload = {
+        "model": "claude-fable-5",  # most capable — used only where judges split
+        "max_tokens": 16000,
+        "system": TIEBREAK_RUBRIC,
+        "messages": [{"role": "user", "content": body}],
+    }
+    req = urllib.request.Request(ANTHROPIC_API, data=json.dumps(payload).encode(), headers={
+        "x-api-key": key, "anthropic-version": "2023-06-01",
+        "content-type": "application/json"})
+    with urllib.request.urlopen(req, timeout=600) as r:
+        response = json.load(r)
+    if response.get("stop_reason") == "max_tokens":
+        raise RuntimeError("tiebreak verdict truncated at max_tokens")
+    return parse_json("".join(b.get("text", "") for b in response.get("content", [])
+                              if b.get("type") == "text"))
+
+
 def judge_gpt(key: str, artifact: str) -> dict:
     def attempt(model):
         payload = {"model": model,
@@ -184,10 +225,27 @@ def main() -> None:
         rows.append({"id": sid, "scores": scores, "pass": passed, "zeroTolerance": zero,
                      "deductions": {n: (s or {}).get("deductions", []) for n, s in per.items()}})
 
+    # ---- Tiebreaker: the most capable model, only where the two split ----
+    # Advisory by design: it explains WHICH judge the evidence supports, so the
+    # human review is cheap. It never overrides a zero-tolerance finding —
+    # weakening the suite's guarantees is not a tiebreaker's job.
+    tiebreaks = {}
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if disagreements and key:
+        print(f"\nBreaking {len(disagreements)} tie(s) with fable…")
+        for sid in disagreements:
+            row = next(r for r in rows if r["id"] == sid)
+            try:
+                tiebreaks[sid] = judge_tiebreak(key, artifact, sid, row["deductions"])
+            except Exception as e:
+                tiebreaks[sid] = {"error": f"{type(e).__name__}: {e}"}
+    elif disagreements:
+        print("\n!! ANTHROPIC_API_KEY not set — ties left unbroken.")
+
     report = {"judges": sorted(verdicts), "fullPanel": len(verdicts) == 2,
               "judgeErrors": judge_errors,
               "scenarios": rows, "suiteFailedOnZeroTolerance": suite_fail,
-              "disagreements": disagreements,
+              "disagreements": disagreements, "tiebreaks": tiebreaks,
               "notes": {n: v.get("suiteNotes", "") for n, v in verdicts.items()}}
     out = path.with_suffix(".judged.json")
     out.write_text(json.dumps(report, indent=2))
@@ -204,7 +262,16 @@ def main() -> None:
         print("\nSUITE FAILED: a zero-tolerance finding (fabrication or silent "
               "failure) was raised — one occurrence fails the whole run.")
     if disagreements:
-        print(f"\nDISAGREEMENTS to review by hand: {', '.join(disagreements)}")
+        print(f"\nDISAGREEMENTS ({len(disagreements)}):")
+        for sid in disagreements:
+            t = tiebreaks.get(sid) or {}
+            if t.get("error"):
+                print(f"  {sid}: tiebreak FAILED ({t['error']})")
+            elif t:
+                print(f"  {sid}: fable sides with {t.get('agreesWith', '?').upper()}"
+                      f" (score {t.get('score', '?')}) — {t.get('reasoning', '')[:160]}")
+            else:
+                print(f"  {sid}: review by hand")
     if len(verdicts) < 2:
         print("\nNOTE: one-judge run — do NOT record this as a full-panel verdict.")
     print(f"\nFull report: {out}")

@@ -268,7 +268,14 @@ final class ChatToolExecutor {
         // event ending before it starts.
         let newStart = minutesFrom(input["new_start"] as? String)
         let newEnd = minutesFrom(input["new_end"] as? String)
+        // Relative deltas: the model must NEVER compute a new clock time from a
+        // duration it assumed. "Extend it by an hour" once SHRANK a dinner —
+        // the event was stored 20:00–23:00 (a 3 h default), the model believed
+        // it ran 20:00–21:00 and set the end to 22:00. Code does this maths.
+        let extendBy = input["extend_by_minutes"] as? Int
+        let shiftBy = input["shift_by_minutes"] as? Int
         for e in matches {
+            let oldStart = e.startMinute, oldEnd = e.endMinute
             if let venue = input["new_venue"] as? String, !venue.isEmpty {
                 e.destinationAddress = venue
                 // Old coordinates would contradict the new venue.
@@ -283,11 +290,23 @@ final class ChatToolExecutor {
                 e.endMinute = newEnd ?? min(24 * 60, start + duration)
                 // Giving an all-day event real times makes it a timed event.
                 if e.isAllDay { e.isAllDay = false; changes.append("now timed") }
-                changes.append("start → \(hhmm(start))")
             } else if let end = newEnd {
                 e.endMinute = max(end, e.startMinute)
                 if e.isAllDay { e.isAllDay = false; changes.append("now timed") }
-                changes.append("end → \(hhmm(end))")
+            }
+            if let shift = shiftBy, shift != 0 {
+                let span = max(0, e.endMinute - e.startMinute)
+                e.startMinute = max(0, min(24 * 60, e.startMinute + shift))
+                e.endMinute = max(e.startMinute, min(24 * 60, e.startMinute + span))
+                if e.isAllDay { e.isAllDay = false; changes.append("now timed") }
+            }
+            if let extend = extendBy, extend != 0 {
+                e.endMinute = max(e.startMinute, min(24 * 60, e.endMinute + extend))
+                if e.isAllDay { e.isAllDay = false; changes.append("now timed") }
+            }
+            // Receipts quote the OLD and the NEW range, never just the new one.
+            if e.startMinute != oldStart || e.endMinute != oldEnd {
+                changes.append("\(hhmm(oldStart))–\(hhmm(oldEnd)) → \(hhmm(e.startMinute))–\(hhmm(e.endMinute))")
             }
             if let newTitle = input["new_title"] as? String, !newTitle.isEmpty {
                 e.title = newTitle
@@ -1242,7 +1261,8 @@ final class ChatToolExecutor {
               let start = GeneratedBlock.minutes(from: startStr) else {
             return .init(text: "Couldn't add it — I need a title and a start time. Ask the user for whatever's missing.")
         }
-        let end = (input["end_time"] as? String).flatMap(GeneratedBlock.minutes(from:)) ?? (start + 180)
+        let givenEnd = (input["end_time"] as? String).flatMap(GeneratedBlock.minutes(from:))
+        let end = givenEnd ?? (start + 180)
         let venue = (input["venue"] as? String) ?? ""
         let from = LocationKind(rawValue: (input["leaving_from"] as? String) ?? "Home") ?? .home
         if eventsOn(date).contains(where: { $0.title.lowercased() == title.lowercased() }) {
@@ -1259,7 +1279,13 @@ final class ChatToolExecutor {
         if venue.isEmpty { venueSuffix = "" }
         else if GoogleMapsService.isMapsLink(venue) { venueSuffix = " — identifying the location…" }
         else { venueSuffix = " at \(venue)" }
-        return .init(text: "Added \"\(title)\" \(hhmm(start))–\(hhmm(end)) on \(dayLabel(date))\(venueSuffix).")
+        // An ASSUMED end time must announce itself: the model later "extended"
+        // a dinner by an hour and shortened it, because it never knew the 3 h
+        // default had been applied.
+        let assumed = givenEnd == nil
+            ? " (no end time given — I assumed 3 h, so it ends \(hhmm(end)); change it with edit_event's extend_by_minutes)"
+            : ""
+        return .init(text: "Added \"\(title)\" \(hhmm(start))–\(hhmm(end)) on \(dayLabel(date))\(venueSuffix).\(assumed)")
     }
 
     /// If an event's venue was pasted as a Google Maps link, identify the place

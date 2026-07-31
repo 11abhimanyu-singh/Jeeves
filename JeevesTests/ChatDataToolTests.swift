@@ -12,6 +12,53 @@ import XCTest
 
 final class ChatDataToolTests: XCTestCase {
 
+    // MARK: The no-tool-no-change detector
+    //
+    // A prompt rule alone let "Back to 2 nights — Radisson now ends Aug 13"
+    // ship with no tool call behind it. This is the structural half: it decides
+    // whether a reply ASSERTS a change, so the loop can challenge it.
+
+    func testClaimsDetectedForCompletedActions() {
+        let claims = [
+            "Done — removed the Bhadra Tiger Reserve Tour on Aug 15, 16 and 17.",
+            "Back to 2 nights — Radisson Mysore now ends Aug 13 again, same as before.",
+            "Extended — tomorrow's dinner now runs 8–10 PM.",
+            "Deleted the Western Valley stay.",
+            "That pushed your Wayanad check-in to Aug 14.",
+            "All set for the Colombo trip.",
+        ]
+        for text in claims {
+            XCTAssertTrue(JeevesChatService.claimsCompletedAction(text),
+                          "should read as a completed-action claim: \(text)")
+        }
+    }
+
+    func testQuestionsOffersAndRefusalsAreNotClaims() {
+        let notClaims = [
+            "Want me to add the return drive as well?",
+            "I'll add that once you tell me the checkout date.",
+            "I couldn't add the stay — which trip is it part of?",
+            "Which date is the drive home on?",
+            "Shall I delete the Radisson stay?",
+            "That would move your check-in to Aug 14 — should I?",
+            "Your longest walk this month was 6.2 km.",
+            "You have two events tomorrow.",
+        ]
+        for text in notClaims {
+            XCTAssertFalse(JeevesChatService.claimsCompletedAction(text),
+                           "should NOT read as a claim: \(text)")
+        }
+    }
+
+    func testClaimDetectionIsPerSentence() {
+        // A genuine claim buried after an offer still counts.
+        XCTAssertTrue(JeevesChatService.claimsCompletedAction(
+            "Want me to add the drive home? I already deleted the old Wayanad stay."))
+        // And an offer following honest inaction does not.
+        XCTAssertFalse(JeevesChatService.claimsCompletedAction(
+            "I haven't changed anything yet. Shall I go ahead?"))
+    }
+
     private var cal: Calendar { Calendar.current }
 
     private func at(_ y: Int, _ mo: Int, _ d: Int, _ h: Int, _ mi: Int = 0) -> Date {

@@ -30,7 +30,9 @@ final class TrajectoryTests: XCTestCase {
 
     private struct Dialogue: Decodable {
         let id: String
+        let setup: [String]?
         let turns: [String]
+        let answers: [String]?
         let expect: String
     }
     private struct PlanFile: Decodable { let tier1: [Dialogue] }
@@ -91,30 +93,51 @@ final class TrajectoryTests: XCTestCase {
         var failures: [String] = []
 
         for dialogue in plan.tier1 {
-            for turn in dialogue.turns {
-                transcript.append(RecordedTurn(dialogue: dialogue.id, role: "user", text: turn))
-                do {
-                    let reply = try await JeevesChatService.sendAgentic(
-                        history: history, newMessage: turn,
-                        stateNote: executor.stateNote(),
-                        execute: { call in
-                            let result = await executor.run(call)
-                            calls.append(RecordedCall(
-                                dialogue: dialogue.id, name: call.name,
-                                input: String(describing: call.input).prefix(400).description,
-                                result: String(result.text.prefix(400))))
-                            return result
-                        })
-                    history.append(ChatMessage(role: .user, content: turn))
-                    if !reply.text.isEmpty {
-                        history.append(ChatMessage(role: .assistant, content: reply.text))
-                        transcript.append(RecordedTurn(dialogue: dialogue.id, role: "assistant",
-                                                       text: reply.text))
+            var answers = dialogue.answers ?? []
+            // Setup turns first (they create the scenario's preconditions —
+            // "I'm at the dinner" only means something if the dinner is TODAY),
+            // then the scenario's own turns, verbatim.
+            for turn in (dialogue.setup ?? []) + dialogue.turns {
+                var pending = [turn]
+                var answersThisTurn = 0
+                while !pending.isEmpty {
+                    let message = pending.removeFirst()
+                    transcript.append(RecordedTurn(dialogue: dialogue.id, role: "user", text: message))
+                    do {
+                        let reply = try await JeevesChatService.sendAgentic(
+                            history: history, newMessage: message,
+                            stateNote: executor.stateNote(),
+                            execute: { call in
+                                let result = await executor.run(call)
+                                calls.append(RecordedCall(
+                                    dialogue: dialogue.id, name: call.name,
+                                    input: String(describing: call.input).prefix(400).description,
+                                    result: String(result.text.prefix(400))))
+                                return result
+                            })
+                        history.append(ChatMessage(role: .user, content: message))
+                        if !reply.text.isEmpty {
+                            history.append(ChatMessage(role: .assistant, content: reply.text))
+                            transcript.append(RecordedTurn(dialogue: dialogue.id, role: "assistant",
+                                                           text: reply.text))
+                        }
+                        // A claim the model refused to withdraw is a failure of
+                        // the run, not just a judged opinion.
+                        if reply.unverifiedClaim {
+                            failures.append("\(dialogue.id): reply claimed a change with no tool call: \(reply.text.prefix(120))")
+                        }
+                        // Real users answer questions. A one-way script made the
+                        // app's (correct) request for a missing checkout date
+                        // look like a failure to act.
+                        if reply.text.contains("?"), !answers.isEmpty, answersThisTurn < 2 {
+                            pending.append(answers.removeFirst())
+                            answersThisTurn += 1
+                        }
+                    } catch {
+                        failures.append("\(dialogue.id): turn '\(message.prefix(40))' errored: \(error.localizedDescription)")
+                        transcript.append(RecordedTurn(dialogue: dialogue.id, role: "error",
+                                                       text: error.localizedDescription))
                     }
-                } catch {
-                    failures.append("\(dialogue.id): turn '\(turn.prefix(40))' errored: \(error.localizedDescription)")
-                    transcript.append(RecordedTurn(dialogue: dialogue.id, role: "error",
-                                                   text: error.localizedDescription))
                 }
             }
         }
