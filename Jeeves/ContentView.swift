@@ -260,6 +260,11 @@ struct ContentView: View {
             // Refresh the full iCloud Drive mirror on launch: JSON state +
             // heartbeat + logs, plus the raw-SQLite fallback (launch has time).
             SyncOutbox.exportAll(context: modelContext, includeRawBackup: true)
+            // Notification actions need a context to write through.
+            NotificationDelegate.modelContext = modelContext
+            // A workout can go stale while the app is closed, so the watchdog
+            // sweeps on launch as well as on every foreground.
+            Task { await WorkoutWatchdog.sweep(context: modelContext) }
         }
         .onChange(of: selectedDate) { _, newDate in loadFields(for: newDate) }
         .onChange(of: scenePhase) { _, phase in
@@ -276,6 +281,7 @@ struct ContentView: View {
                     // app. A no-op once the window is already planned.
                     await AutoPlanService.ensureUpcomingPlans(context: modelContext)
                     AutoPlanService.scheduleNext(context: modelContext)
+                    await WorkoutWatchdog.sweep(context: modelContext)
                 }
             }
             if phase == .background {

@@ -150,6 +150,21 @@ final class TravelSegment {
         return Self.deviceDay(of: instant, in: fromTimeZone)
     }
 
+    /// "UL 174" / "ul-174" / "UL174" all normalise to "UL174". A flight number
+    /// identifies a leg on its own, which destination text does not: the same
+    /// flight described once as "Colombo" and once as "Bandaranaike Airport"
+    /// used to slip past dedup and land twice. Empty for anything that isn't
+    /// shaped like a flight number (drives carry prose labels).
+    nonisolated static func normalizedFlightNumber(_ label: String) -> String {
+        let squashed = label.uppercased().filter { $0.isLetter || $0.isNumber }
+        // A flight number is 1-3 letters then 1-4 digits, nothing else.
+        let letters = squashed.prefix { $0.isLetter }
+        let digits = squashed.dropFirst(letters.count)
+        guard (1...3).contains(letters.count), (1...4).contains(digits.count),
+              digits.allSatisfy({ $0.isNumber }) else { return "" }
+        return String(squashed)
+    }
+
     /// The day this journey ENDS, on the destination's clock — nil when no
     /// arrival is known. With `day`, this brackets the journey for trip-window
     /// checks (a two-day drive can land after the calendar event ends).

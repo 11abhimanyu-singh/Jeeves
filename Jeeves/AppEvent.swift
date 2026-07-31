@@ -32,6 +32,7 @@ enum AppEventKind: String, Codable, CaseIterable {
     case toolCall              // any chat tool invocation, with input + result digest
     case chatError             // a chat turn failed; an apology turn was stored
     case chatUnverifiedClaim   // reply claimed a change with no tool behind it
+    case workoutAutoClosed     // left live too long; closed for the user
     case stayAdded
     case stayUpdated
     case stayDeleted

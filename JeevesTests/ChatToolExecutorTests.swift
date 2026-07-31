@@ -269,6 +269,49 @@ final class ChatToolExecutorTests: XCTestCase {
         XCTAssertEqual(coorg?.checkoutMinute, StayWindow.defaultCheckout)
     }
 
+    // MARK: flight-number dedup
+
+    func testSameFlightWithADifferentDestinationStringUpdatesInsteadOfDuplicating() async {
+        let context = container.mainContext
+        context.insert(Trip(title: "Colombo",
+                            startDate: Calendar.current.date(byAdding: .day, value: 20, to: Date())!.startOfDay,
+                            endDate: Calendar.current.date(byAdding: .day, value: 23, to: Date())!.startOfDay))
+        try? context.save()
+
+        _ = await executor.run(.init(
+            id: "d1", name: "add_journey",
+            input: ["trip": "Colombo", "mode": "flight", "label": "UL 174",
+                    "to": "Colombo", "date": day(20), "time": "09:45"]))
+        // Same aircraft, described differently — used to slip past dedup.
+        _ = await executor.run(.init(
+            id: "d2", name: "add_journey",
+            input: ["trip": "Colombo", "mode": "flight", "label": "UL174",
+                    "to": "Bandaranaike Airport", "date": day(20), "time": "09:45"]))
+
+        let segs = (try? context.fetch(FetchDescriptor<TravelSegment>())) ?? []
+        XCTAssertEqual(segs.count, 1, "a flight number identifies the leg on its own")
+    }
+
+    func testDifferentFlightNumbersStayTwoLegs() async {
+        let context = container.mainContext
+        context.insert(Trip(title: "Colombo",
+                            startDate: Calendar.current.date(byAdding: .day, value: 20, to: Date())!.startOfDay,
+                            endDate: Calendar.current.date(byAdding: .day, value: 23, to: Date())!.startOfDay))
+        try? context.save()
+
+        _ = await executor.run(.init(
+            id: "d3", name: "add_journey",
+            input: ["trip": "Colombo", "mode": "flight", "label": "UL 174",
+                    "to": "Colombo", "date": day(20), "time": "09:45"]))
+        _ = await executor.run(.init(
+            id: "d4", name: "add_journey",
+            input: ["trip": "Colombo", "mode": "flight", "label": "UL 173",
+                    "to": "Bengaluru", "date": day(23), "time": "20:30"]))
+
+        let segs = (try? context.fetch(FetchDescriptor<TravelSegment>())) ?? []
+        XCTAssertEqual(segs.count, 2, "outbound and return are two different flights")
+    }
+
     // MARK: delete_stay two-phase
 
     func testDeleteStayPreviewsThenDeletesOnConfirm() async {

@@ -1102,7 +1102,17 @@ final class ChatToolExecutor {
         // the same leg: update it.
         let anchorDay = Calendar.current.startOfDay(for: when)
         let allSegs = (try? modelContext.fetch(FetchDescriptor<TravelSegment>())) ?? []
-        let sameLeg = allSegs.first { s in
+        // A FLIGHT NUMBER identifies the leg on its own. Matching on
+        // destination text let the same flight land twice — "UL 174 to
+        // Colombo" and "UL 174 to Bandaranaike Airport" are one aircraft, but
+        // the strings don't overlap, so a restatement minted a second leg that
+        // both the upsert and the trajectory duplicate-check missed.
+        let newLabel = TravelSegment.normalizedFlightNumber(input["label"] as? String ?? "")
+        let sameFlight = allSegs.first { s in
+            s.tripID == trip.id && s.mode == mode && mode != .drive && !newLabel.isEmpty
+                && TravelSegment.normalizedFlightNumber(s.label) == newLabel
+        }
+        let sameLeg = sameFlight ?? allSegs.first { s in
             s.tripID == trip.id && s.mode == mode
                 && Calendar.current.isDate(mode == .drive ? (s.arriveBy ?? .distantPast) : s.departAt,
                                            inSameDayAs: anchorDay)

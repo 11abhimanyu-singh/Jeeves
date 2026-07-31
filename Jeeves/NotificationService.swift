@@ -12,6 +12,7 @@
 //
 
 import Foundation
+import SwiftData
 import UserNotifications
 import UIKit
 
@@ -19,10 +20,36 @@ import UIKit
 /// in-foreground by default). Set once at launch.
 final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationDelegate()
+
+    /// Set at launch so notification actions can reach SwiftData. Without it
+    /// the "Close it" button on a stuck-workout banner has nothing to write to.
+    @MainActor static var modelContext: ModelContext?
+
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound, .list])
+    }
+
+    /// Handles the buttons on a stuck-workout nudge. "Close it" ends the
+    /// session there and then; "Still going" simply lets the 4-hour
+    /// auto-close stand as the backstop.
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        let info = response.notification.request.content.userInfo
+        let action = response.actionIdentifier
+        if action == WorkoutWatchdog.closeAction,
+           let raw = info["workoutID"] as? String, let id = UUID(uuidString: raw) {
+            Task { @MainActor in
+                if let context = NotificationDelegate.modelContext {
+                    WorkoutWatchdog.close(workoutID: id, context: context)
+                }
+                completionHandler()
+            }
+            return
+        }
+        completionHandler()
     }
 }
 
@@ -32,6 +59,9 @@ enum NotificationService {
     /// Call once at app launch so reminders show while the app is in the foreground.
     static func configure() {
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
+        // Register the stuck-workout actions so "Close it" works from the
+        // banner without opening the app.
+        WorkoutWatchdog.registerCategory()
     }
 
     /// Fires a reminder ~5s from now so the user can see reminders actually work
