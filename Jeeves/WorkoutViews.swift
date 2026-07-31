@@ -33,6 +33,8 @@ struct WorkoutTodaySection: View {
     @State private var editing: Workout?
     @State private var showHistory = false
     @State private var showNew = false
+    /// What the chooser picked, acted on once it has finished dismissing.
+    @State private var pendingNew: WorkoutType?
 
     private var today: [Workout] {
         workouts.filter { Calendar.current.isDateInToday($0.date) }
@@ -89,13 +91,34 @@ struct WorkoutTodaySection: View {
             }
         }
         .sheet(isPresented: $showHistory) { WorkoutHistoryView() }
-        .confirmationDialog("Start without the watch", isPresented: $showNew, titleVisibility: .visible) {
-            Button("Go for the run") { onRun() }
-            Button("Weightlifting") { editing = newManual(.lift, title: "Lift") }
-            Button("Walk") { editing = newManual(.walk, title: "Walk") }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Runs use the full run tool. Lifts and walks are logged manually \u{2014} no heart rate or auto-duration.")
+        // A bottom sheet, not a confirmationDialog: the dialog rendered as a
+        // popover anchored to the button, which read worse than the sheet it
+        // replaced — smaller targets, and the choices floated over the feed.
+        //
+        // The choice is recorded and acted on in onDismiss, never inside the
+        // button: presenting the detail sheet while this one is still
+        // dismissing makes SwiftUI silently drop the second presentation.
+        .sheet(isPresented: $showNew, onDismiss: startPendingWorkout) {
+            NewWorkoutSheet(
+                onRun: { pendingNew = .run; showNew = false },
+                onLift: { pendingNew = .lift; showNew = false },
+                onWalk: { pendingNew = .walk; showNew = false }
+            )
+            .presentationDetents([.height(340)])
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    /// Runs after the chooser sheet is fully gone, so the next presentation
+    /// isn't swallowed. A cancelled sheet leaves pendingNew nil and does
+    /// nothing.
+    private func startPendingWorkout() {
+        guard let type = pendingNew else { return }
+        pendingNew = nil
+        switch type {
+        case .run:  onRun()
+        case .lift: editing = newManual(.lift, title: "Lift")
+        case .walk: editing = newManual(.walk, title: "Walk")
         }
     }
 
@@ -1190,5 +1213,70 @@ struct WorkoutHistoryDetail: View {
 
     private func trimmed(_ v: Double) -> String {
         v == v.rounded() ? String(format: "%.0f", v) : String(format: "%.1f", v)
+    }
+}
+
+// MARK: - New workout sheet
+
+/// The "start without the watch" chooser, as a bottom sheet. Each option is a
+/// full-width row with its own subtitle, so the trade-off (a real run tool vs
+/// manual logging) is readable at the point of choosing rather than buried in
+/// a dialog's message line.
+struct NewWorkoutSheet: View {
+    var onRun: () -> Void
+    var onLift: () -> Void
+    var onWalk: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Start without the watch")
+                .font(.heading(19))
+                .foregroundStyle(Color.textPrimary)
+                .padding(.top, 22).padding(.bottom, 4)
+            Text("Runs use the full run tool. Lifts and walks are logged manually — no heart rate or auto-duration.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(Color.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 18)
+
+            VStack(spacing: 10) {
+                row("Go for the run", "Live tracking, splits and heart rate",
+                    "figure.run", action: onRun)
+                row("Weightlifting", "Log sets and weights by hand",
+                    "figure.strengthtraining.traditional", action: onLift)
+                row("Walk", "Log distance and duration by hand",
+                    "figure.walk", action: onWalk)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.bg)
+    }
+
+    private func row(_ title: String, _ subtitle: String, _ icon: String,
+                     action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 13) {
+                Image(systemName: icon)
+                    .font(.system(size: 18))
+                    .foregroundStyle(Color.accent)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(Font.serif(15, weight: .semibold))
+                        .foregroundStyle(Color.textPrimary)
+                    Text(subtitle).font(.system(size: 11.5))
+                        .foregroundStyle(Color.textMuted)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.textMuted)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity)
+            .background(RoundedRectangle(cornerRadius: 15).fill(Color.surface))
+        }
+        .buttonStyle(.plain)
     }
 }

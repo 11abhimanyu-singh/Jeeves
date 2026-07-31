@@ -18,6 +18,11 @@ import PhotosUI
 import UIKit
 
 struct JeevesChatView: View {
+    /// Set when chat is presented as a modal from the floating bubble — it
+    /// renders a minimise control that drops back to the bubble. Nil when the
+    /// view is embedded somewhere that owns its own dismissal.
+    var onMinimise: (() -> Void)? = nil
+
     @Environment(\.modelContext) private var modelContext
     @Query private var dailyPlans: [DailyPlanState]
     @Query private var events: [DailyEvent]
@@ -130,6 +135,17 @@ struct JeevesChatView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
+            if let onMinimise {
+                Button(action: onMinimise) {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.textSoft)
+                        .frame(width: 30, height: 30)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Minimise chat")
+            }
             Circle()
                 .fill(Color.accent)
                 .frame(width: 30, height: 30)

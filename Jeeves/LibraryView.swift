@@ -330,6 +330,7 @@ struct LibraryView: View {
     private var header: some View {
         HStack {
             HStack(spacing: 8) {
+                AppMenuButton()
                 Circle()
                     .fill(Color.accent)
                     .frame(width: 30, height: 30)

@@ -856,6 +856,7 @@ struct DayPlannerView: View {
 
     private var header: some View {
         HStack(alignment: .center) {
+            AppMenuButton()
             VStack(alignment: .leading, spacing: 1) {
                 Text(selectedDate.formatted(.dateTime.month(.wide).year()).uppercased())
                     .font(.system(size: 11, weight: .semibold))

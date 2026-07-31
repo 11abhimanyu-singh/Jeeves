@@ -80,23 +80,14 @@ struct ContentView: View {
     @Query private var allWorkouts: [Workout]
     @Query private var allStretchLogs: [StretchLog]
 
-    enum Tab { case jeeves, planner, tasks, fitness, library, stats }
+    // Progress became the landing screen; Stats moved into the hamburger and
+    // Jeeves became a floating bubble, so neither is a tab any more.
+    enum Tab { case home, planner, tasks, fitness, library }
     enum FitnessSheet: String, Identifiable { case run, lift, stretch; var id: String { rawValue } }
-    enum StatsSub: CaseIterable {
-        case health, progress, history
-        var label: String {
-            switch self {
-            case .health:   return "Health"
-            case .progress: return "Progress"
-            case .history:  return "History"
-            }
-        }
-    }
 
-    @State private var tab: Tab = .planner
-    @State private var showSettings = false
+    @State private var tab: Tab = .home
     @State private var fitnessSheet: FitnessSheet?
-    @State private var statsSub: StatsSub = .progress
+    @State private var navigator = AppNavigator()
     @State private var selectedDate: Date = Calendar.current.date(byAdding: .day, value: -1, to: Date())!.startOfDay
     @State private var showDatePicker = false
 
@@ -153,25 +144,43 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Group {
-                switch tab {
-                case .jeeves: JeevesChatView()
-                case .planner: DayPlannerView()
-                case .fitness: fitnessTab
-                case .library: LibraryView()
-                case .tasks: tasksTab
-                case .stats: statsTab
+        ZStack(alignment: .bottomTrailing) {
+            VStack(spacing: 0) {
+                Group {
+                    switch tab {
+                    case .home: homeTab
+                    case .planner: DayPlannerView()
+                    case .fitness: fitnessTab
+                    case .library: LibraryView()
+                    case .tasks: tasksTab
+                    }
                 }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
-            Divider().overlay(Color.textPrimary.opacity(0.14))
-            tabBar
+                Divider().overlay(Color.textPrimary.opacity(0.14))
+                tabBar
+            }
+
+            // Jeeves follows every screen instead of owning a tab.
+            ChatBubble()
+                .padding(.trailing, 18)
+                .padding(.bottom, 82)
         }
         .background(Color.bg)
-        .sheet(isPresented: $showSettings) {
+        .environment(navigator)
+        .sheet(isPresented: Binding(get: { navigator.showSettings },
+                                    set: { navigator.showSettings = $0 })) {
             NavigationStack { SettingsView() }
+        }
+        .sheet(item: Binding(get: { navigator.statsScreen },
+                             set: { navigator.statsScreen = $0 })) { screen in
+            StatsScreenView(screen: screen) { navigator.statsScreen = nil }
+                .environment(navigator)
+        }
+        .sheet(isPresented: Binding(get: { navigator.chatPresented },
+                                    set: { navigator.chatPresented = $0 })) {
+            JeevesChatView(onMinimise: { navigator.chatPresented = false })
+                .environment(navigator)
         }
         .onAppear {
             loadFields(for: selectedDate)
@@ -218,7 +227,7 @@ struct ContentView: View {
     private func moduleHeader(_ title: String, _ icon: String, @ViewBuilder trailing: () -> some View) -> some View {
         HStack {
             HStack(spacing: 8) {
-                appMenu
+                AppMenuButton()
                 Circle()
                     .fill(Color.accent)
                     .frame(width: 30, height: 30)
@@ -229,26 +238,6 @@ struct ContentView: View {
             trailing()
         }
         .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 10)
-    }
-
-    /// App-level navigation. Settings used to live only inside Library and
-    /// chat — findable if you already knew where it was.
-    private var appMenu: some View {
-        Menu {
-            Button { tab = .stats; statsSub = .health } label: {
-                Label("Daily health", systemImage: "stethoscope")
-            }
-            Button { showSettings = true } label: {
-                Label("Settings", systemImage: "gearshape")
-            }
-        } label: {
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Color.textSoft)
-                .frame(width: 30, height: 30)
-                .contentShape(Rectangle())
-        }
-        .accessibilityLabel("Menu")
     }
 
     private var streakChip: some View {
@@ -318,36 +307,15 @@ struct ContentView: View {
         }
     }
 
-    /// Progress + History merged under one tab (frees the slot for Tasks), split
-    /// by a lightweight sub-toggle so both keep their full screen.
-    private var statsTab: some View {
+    /// The welcome screen. Progress used to be buried as a sub-tab of Stats —
+    /// it is the thing worth seeing on open, so it opens.
+    private var homeTab: some View {
         VStack(spacing: 0) {
-            moduleHeader("Stats", "chart.bar.fill") {
+            moduleHeader("Progress", "chart.line.uptrend.xyaxis") {
                 if streak > 0 { streakChip }
             }
             Divider().overlay(Color.textPrimary.opacity(0.14))
-            HStack(spacing: 4) {
-                ForEach(StatsSub.allCases, id: \.self) { s in
-                    Button { statsSub = s } label: {
-                        Text(s.label)
-                            .font(.system(size: 12.5, weight: .bold))
-                            .foregroundStyle(statsSub == s ? .white : Color.textSoft)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .background(RoundedRectangle(cornerRadius: 9).fill(statsSub == s ? Color.accent : Color.clear))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(4)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.textPrimary.opacity(0.05)))
-            .padding(.horizontal, 16).padding(.vertical, 8)
-
-            switch statsSub {
-            case .health:   DailyDigestView()
-            case .progress: ScrollView { progressView.padding(20) }
-            case .history:  historyView
-            }
+            ScrollView { progressView.padding(20) }
         }
     }
 
@@ -748,13 +716,6 @@ struct ContentView: View {
 
     // MARK: History tab
 
-    /// The ONE history: day rows (check-in verdict + merged summary) that
-    /// expand into the day's workout cards. Fitness's History button opens the
-    /// same list as a sheet.
-    private var historyView: some View {
-        UnifiedHistoryList()
-    }
-
     /// One line for cardio that came from a logged workout.
     private func autoCardioLine(_ auto: CheckInAutoFill.Derived) -> String {
         var s = auto.cardioIsRun ? "Run" : "Walk"
@@ -767,12 +728,11 @@ struct ContentView: View {
 
     private var tabBar: some View {
         HStack(spacing: 0) {
-            tabButton(.jeeves, "sparkles", "Jeeves")
+            tabButton(.home, "chart.line.uptrend.xyaxis", "Progress")
             tabButton(.planner, "calendar", "Planner")
             tabButton(.tasks, "checklist", "Tasks")
             tabButton(.fitness, "figure.strengthtraining.traditional", "Fitness")
             tabButton(.library, "books.vertical.fill", "Library")
-            tabButton(.stats, "chart.bar.fill", "Stats")
         }
         .padding(.horizontal, 8).padding(.vertical, 10)
     }
