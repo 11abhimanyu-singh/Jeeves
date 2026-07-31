@@ -17,7 +17,14 @@
 	     (shows as "Jeeves" in the iPhone Files app AND syncs to iCloud-for-Windows
 	     on the PC). This surfaces the diagnostics + DB backup the daily health
 	     task reads, so that task can run on an always-on machine instead of only
-	     the Mac that mirrors the private container. -->
+	     the Mac that mirrors the private container.
+
+	     TRAP: iCloud reads this dict ONLY at first install, and re-reads it only
+	     when CFBundleVersion increments. Shipping a change here without bumping
+	     CURRENT_PROJECT_VERSION is a silent no-op — the container stays private,
+	     the phone keeps reporting successful uploads, and the Mac's
+	     ~/Library/Mobile Documents/iCloud~abhimanyusingh~me~Jeeves/Documents
+	     stays empty forever. That cost days. Bump the version. -->
 	<key>NSUbiquitousContainers</key>
 	<dict>
 		<key>iCloud.abhimanyusingh.me.Jeeves</key>
