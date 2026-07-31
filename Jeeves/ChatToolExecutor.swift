@@ -301,6 +301,13 @@ final class ChatToolExecutor {
                 e.startMinute = max(0, min(24 * 60, e.startMinute + shift))
                 e.endMinute = max(e.startMinute, min(24 * 60, e.startMinute + span))
                 if e.isAllDay { e.isAllDay = false; changes.append("now timed") }
+                // The day has edges here too: pushing an event that runs to
+                // midnight squeezes its duration silently unless we say so.
+                let newSpan = e.endMinute - e.startMinute
+                if newSpan < span {
+                    clampedNote = " NOTE: it now runs \(span - newSpan) min shorter — it hit the end"
+                        + " of the day. Say the real new end rather than the requested shift."
+                }
             }
             if let extend = extendBy, extend != 0 {
                 e.endMinute = max(e.startMinute, min(24 * 60, e.endMinute + extend))
