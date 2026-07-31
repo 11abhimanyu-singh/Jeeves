@@ -50,6 +50,40 @@ OPENAI_API_KEY=... python3 tools/scenario-eval.py judge <outdir>   # story vs st
 
 A scenario passes only when BOTH agree.
 
+## Autonomous execution (no human)
+
+The Tier 1 dialogues also run WITHOUT the device or a human typist:
+`JeevesTests/TrajectoryTests` plays every dialogue against the real chat
+model + the real tool executor (`ChatToolExecutor`) on an in-memory store,
+asserts the deterministic invariants at end state, and exports a full
+artifact (transcript + every tool call + end state + expectations) for
+judging.
+
+```bash
+tools/run-trajectories.sh /path/to/.anthropic_key   # key from a user stash file, env-only
+ANTHROPIC_API_KEY=... OPENAI_API_KEY=... \
+  python3 tools/trajectory-judge.py <artifact>.json  # the judged half
+```
+
+`trajectory-judge.py` runs TWO independent judges — Claude (opus, not the
+model that runs chat) and GPT — on the same artifact, blind to each other.
+Strictest verdict wins: a scenario passes only if both score ≥ 8; one
+zero-tolerance finding (fabrication or silent failure) from either judge
+fails the whole suite; disagreements are escalated for human review, never
+averaged. Real device logs are judged the same way — `tools/logs-to-artifact.py
+<store> <out.json>` packages real sessions into the same artifact shape
+(no scripted expectations; judges grade against the universal rubric).
+
+## Acceptance criteria layer
+
+`docs/acceptance-regression.md` (third-party authored) holds explicit pass
+criteria per scenario plus meta-criteria — idempotent replay, audits green
+after each scenario, honest incomplete state, relaunch survival — and five
+additional suites (conversation safety, planner failure injection,
+tasks/preferences, fitness/Watch sync, voice/library/resilience). Judges use
+it as a rubric source; known-fails it exposes go to the backlog, never
+silently dropped.
+
 ## 3. Judged quality (needs OPENAI_API_KEY)
 
 - `coherence-eval.py` over the full dump — hunts unknown unknowns, proposes

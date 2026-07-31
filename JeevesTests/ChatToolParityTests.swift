@@ -20,13 +20,13 @@ final class ChatToolParityTests: XCTestCase {
     }
 
     func testEveryAdvertisedToolIsDispatched() {
-        let missing = schemaNames.subtracting(JeevesChatView.handledToolNames)
+        let missing = schemaNames.subtracting(ChatToolExecutor.handledToolNames)
         XCTAssertTrue(missing.isEmpty,
                       "advertised to the model but not dispatched: \(missing.sorted())")
     }
 
     func testEveryDispatchedToolIsAdvertised() {
-        let phantom = JeevesChatView.handledToolNames.subtracting(schemaNames)
+        let phantom = ChatToolExecutor.handledToolNames.subtracting(schemaNames)
         XCTAssertTrue(phantom.isEmpty,
                       "dispatched but never advertised to the model: \(phantom.sorted())")
     }

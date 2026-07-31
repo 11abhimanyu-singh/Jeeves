@@ -138,7 +138,7 @@ enum JeevesChatService {
     /// `history` is every prior turn in the session (stateless API — the app is
     /// responsible for resending context each call, per PRD §5.6).
     static func send(history: [ChatMessage], newMessage: String) async throws -> String {
-        guard let apiKey = KeychainService.loadAPIKey(), !apiKey.isEmpty else {
+        guard let apiKey = Self.resolveAPIKey() else {
             throw JeevesChatError.missingAPIKey
         }
 
@@ -655,7 +655,7 @@ enum JeevesChatService {
         stateNote: String,
         execute: (ToolCall) async -> ToolResult
     ) async throws -> AgenticReply {
-        guard let apiKey = KeychainService.loadAPIKey(), !apiKey.isEmpty else {
+        guard let apiKey = Self.resolveAPIKey() else {
             throw JeevesChatError.missingAPIKey
         }
 
@@ -849,6 +849,18 @@ enum JeevesChatService {
         let blocks: [Block]
         /// First text block, for the plain-chat path.
         var text: String? { blocks.first { $0.type == "text" }?.text }
+    }
+
+    /// The user's key from Keychain — or, in DEBUG only, from the process
+    /// environment, which is how headless trajectory tests run the REAL model
+    /// against an in-memory store (the simulator keychain has no key and
+    /// never should).
+    private static func resolveAPIKey() -> String? {
+        if let k = KeychainService.loadAPIKey(), !k.isEmpty { return k }
+        #if DEBUG
+        if let k = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"], !k.isEmpty { return k }
+        #endif
+        return nil
     }
 
     private static func post(body: [String: Any], apiKey: String) async throws -> Response {
