@@ -47,6 +47,7 @@ struct DayPlannerView: View {
     @State private var isImportingCalendar = false
     @State private var calendarError: String?
     @State private var showPlanEditor = false
+    @State private var showDateJump = false
 
     private var today: Date { Date().startOfDay }
     private var isToday: Bool { selectedDate == today }
@@ -87,6 +88,11 @@ struct DayPlannerView: View {
             }
         }
         .sheet(item: $editingTrip) { TripEditorView(trip: $0) }
+        .sheet(isPresented: $showDateJump) {
+            DateJumpSheet(selectedDate: $selectedDate, today: today)
+                .presentationDetents([.height(460)])
+                .presentationDragIndicator(.visible)
+        }
         .onAppear { loadGymState(); measureJourneys() }
         .onChange(of: selectedDate) { _, _ in loadGymState(); measureJourneys() }
         .onChange(of: events.count) { _, _ in measureJourneys() }
@@ -875,14 +881,20 @@ struct DayPlannerView: View {
                         .font(.system(size: 15)))
             }
             .buttonStyle(.plain)
-            // Tap to jump back to today.
-            Button { withAnimation { selectedDate = today } } label: {
+            // A calendar glyph means "pick a date" — it used to jump to today,
+            // which does nothing visible on the day you are already on (the
+            // default), so the button read as broken. The date dial handles
+            // nearby days; this reaches the rest of the year.
+            Button { showDateJump = true } label: {
                 Circle()
-                    .fill(Color.surface)
+                    .fill(isToday ? Color.surface : Color.travelBg)
                     .frame(width: 38, height: 38)
-                    .overlay(Image(systemName: "calendar").foregroundStyle(Color.textSoft).font(.system(size: 15)))
+                    .overlay(Image(systemName: "calendar")
+                        .foregroundStyle(isToday ? Color.textSoft : Color.travelInk)
+                        .font(.system(size: 15)))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Jump to a date")
         }
         .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 10)
     }
@@ -1004,4 +1016,58 @@ private struct CalendarImportSheet: View {
 #Preview {
     DayPlannerView()
         .modelContainer(for: [CheckIn.self, JobApplication.self, PrepSession.self, LeisureLog.self, DailyPlanState.self, Book.self, ReadingLog.self], inMemory: true)
+}
+
+// MARK: - Date jump
+
+/// Reaches any day, which the date dial cannot: it only carries the nearby
+/// week. Opened by the header's calendar glyph — the glyph now means what it
+/// looks like, instead of silently jumping to a day you were already on.
+struct DateJumpSheet: View {
+    @Binding var selectedDate: Date
+    let today: Date
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var draft: Date = Date()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Jump to a date").font(.heading(19)).foregroundStyle(Color.textPrimary)
+                Spacer()
+                Button("Today") {
+                    selectedDate = today
+                    dismiss()
+                }
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color.accentDeep)
+            }
+            .padding(.top, 20).padding(.bottom, 6)
+
+            DatePicker("", selection: $draft, displayedComponents: .date)
+                .datePickerStyle(.graphical)
+                .tint(Color.accent)
+                .labelsHidden()
+
+            Button {
+                selectedDate = draft.startOfDay
+                dismiss()
+            } label: {
+                Text("Go to \(draft.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))")
+                    .font(.system(size: 14.5, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 13)
+                    .background(RoundedRectangle(cornerRadius: 16).fill(Color.accent))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 4)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.bg)
+        .onAppear { draft = selectedDate }
+    }
 }

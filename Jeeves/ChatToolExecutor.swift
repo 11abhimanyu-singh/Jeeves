@@ -638,6 +638,8 @@ final class ChatToolExecutor {
             if let address = input["address"] as? String, !address.isEmpty {
                 existing.address = address
             }
+            if let m = minutesFrom(input["checkin_time"] as? String) { existing.checkinMinute = m }
+            if let m = minutesFrom(input["checkout_time"] as? String) { existing.checkoutMinute = m }
             if arrive.startOfDay < trip.startDate { trip.startDate = arrive.startOfDay }
             if depart.startOfDay > trip.endDate { trip.endDate = depart.startOfDay }
             modelContext.saveOrLog("chat.addStay.upsert")
@@ -648,7 +650,11 @@ final class ChatToolExecutor {
 
         let stay = TripStay(tripID: trip.id, place: place,
                             address: input["address"] as? String ?? "",
-                            arriveDate: arrive, departDate: depart)
+                            arriveDate: arrive, departDate: depart,
+                            checkinMinute: minutesFrom(input["checkin_time"] as? String)
+                                ?? StayWindow.defaultCheckin,
+                            checkoutMinute: minutesFrom(input["checkout_time"] as? String)
+                                ?? StayWindow.defaultCheckout)
         modelContext.insert(stay)
 
         // The trip covers its stays — grow (never shrink) and sweep.
@@ -667,22 +673,45 @@ final class ChatToolExecutor {
             .filter { $0.tripID == trip.id && $0.id != stay.id }
         if let prev = stays.filter({ $0.departDate <= arrive.startOfDay && $0.place != place })
             .max(by: { $0.departDate < $1.departDate }) {
-            let noon = Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: arrive) ?? arrive
+            // Aim at the new hotel's CHECK-IN, not a hardcoded noon: noon is
+            // after most checkouts and before most check-ins, so it was wrong
+            // at both ends of every transition it created.
+            let target = Calendar.current.date(bySettingHour: stay.checkinMinute / 60,
+                                               minute: stay.checkinMinute % 60,
+                                               second: 0, of: arrive) ?? arrive
             let seg = TravelSegment(tripID: trip.id, mode: .drive,
                                     label: "\(prev.place) → \(place)",
                                     fromPlace: prev.address.isEmpty ? prev.place : prev.address,
                                     toPlace: stay.address.isEmpty ? place : stay.address,
-                                    arriveBy: noon, checkInMinutes: 0, securityMinutes: 0)
+                                    arriveBy: target, checkInMinutes: 0, securityMinutes: 0)
             modelContext.insert(seg)
             modelContext.saveOrLog("chat.addStay.transition")
-            transitionNote = " Added the \(prev.place) → \(place) drive (arrive by noon — measuring the route now; adjust the deadline if needed)."
+            transitionNote = " Added the \(prev.place) → \(place) drive, aiming at the "
+                + "\(StayWindow.clock(stay.checkinMinute)) check-in (checkout from \(prev.place) is "
+                + "\(StayWindow.clock(prev.checkoutMinute))) — measuring the route now."
+            let checkout = prev.checkoutMinute
+            let checkin = stay.checkinMinute
+            let day = arrive
             Task {
-                if let m = await self.commuteMinutes(seg.fromPlace, seg.toPlace, max(noon, Date())) {
+                if let m = await self.commuteMinutes(seg.fromPlace, seg.toPlace, max(target, Date())) {
                     seg.travelMinutes = m
                     seg.travelIsEstimated = false
+                    // Real travel time turns the two hotel policies into an
+                    // actual schedule: leave at checkout, and either land after
+                    // check-in or wait — the wait is recorded, never hidden.
+                    let window = StayWindow.transition(checkoutMinute: checkout,
+                                                       checkinMinute: checkin,
+                                                       travelMinutes: m)
+                    if let deadline = Calendar.current.date(bySettingHour: window.arriveByMinute / 60,
+                                                            minute: window.arriveByMinute % 60,
+                                                            second: 0, of: day) {
+                        seg.arriveBy = deadline
+                    }
                     modelContext.saveOrLog("chat.addStay.measure")
-                    EventLog.log(.journeyMeasured, "\(seg.label) — \(m) min", subject: seg.id,
-                                 context: modelContext)
+                    EventLog.log(.journeyMeasured,
+                                 "\(seg.label) — \(m) min, leave \(StayWindow.clock(window.leaveMinute))"
+                                 + (window.waitMinutes > 0 ? ", waits \(StayWindow.hhmm(window.waitMinutes))" : ""),
+                                 subject: seg.id, context: modelContext)
                     await TravelGuard.absorb(seg, context: modelContext)
                     if self.scheduleNudges { await TravelNotifier.schedule(segment: seg) }
                 }
@@ -731,8 +760,13 @@ final class ChatToolExecutor {
         EventLog.log(.tripUpdated, "'\(trip.title)' \(oldRange) → \(TravelGuard.dayRange(trip))",
                      subject: trip.id, context: modelContext)
         if grew { await TravelGuard.sweep(context: modelContext) }
+        // Every nudge in this trip is re-armed, not just the ones the changed
+        // days happened to touch: a leg whose day fell outside the new window
+        // kept a live notification that would fire for travel that no longer
+        // exists.
+        let renudged = await rescheduleNudges(for: trip)
         let shrinkNote = grew ? "" : " Days no longer covered go back to the planner — it will fill them again."
-        return .init(text: "'\(trip.title)' is now \(TravelGuard.dayRange(trip)) (was \(oldRange)).\(shrinkNote)")
+        return .init(text: "'\(trip.title)' is now \(TravelGuard.dayRange(trip)) (was \(oldRange)).\(shrinkNote)\(renudged)")
     }
 
     private func toolUpdateStay(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
@@ -755,12 +789,19 @@ final class ChatToolExecutor {
         }
         if let h = input["new_hotel"] as? String, !h.isEmpty { stay.place = h }
         if let a = input["new_address"] as? String, !a.isEmpty { stay.address = a }
+        var datesChanged = false
         if let raw = input["new_arrive_date"] as? String {
-            stay.arriveDate = JeevesChatService.resolveDate(raw, relativeTo: today).startOfDay
+            let d = JeevesChatService.resolveDate(raw, relativeTo: today).startOfDay
+            if d != stay.arriveDate { datesChanged = true }
+            stay.arriveDate = d
         }
         if let raw = input["new_depart_date"] as? String {
-            stay.departDate = JeevesChatService.resolveDate(raw, relativeTo: today).startOfDay
+            let d = JeevesChatService.resolveDate(raw, relativeTo: today).startOfDay
+            if d != stay.departDate { datesChanged = true }
+            stay.departDate = d
         }
+        if let m = minutesFrom(input["checkin_time"] as? String) { stay.checkinMinute = m }
+        if let m = minutesFrom(input["checkout_time"] as? String) { stay.checkoutMinute = m }
         guard stay.departDate >= stay.arriveDate else {
             return .init(text: "That checkout is before check-in — nothing changed.")
         }
@@ -775,8 +816,13 @@ final class ChatToolExecutor {
         EventLog.log(.stayUpdated, "\(stay.place) now \(fmtRange(stay))", subject: stay.id,
                      context: modelContext)
         if grew { await TravelGuard.sweep(context: modelContext) }
+        // Moving a stay moves the drives either side of it. Without this the
+        // receipt said the stay changed while its journeys silently kept the
+        // old days, times and measured minutes — two records disagreeing about
+        // the same trip.
+        let touched = await resyncJourneys(around: stay, movedDates: datesChanged)
         return .init(text: "\(stay.place): \(fmtRange(stay))."
-                     + (grew ? " The trip grew to cover it." : ""))
+                     + (grew ? " The trip grew to cover it." : "") + touched)
     }
 
     private func toolDeleteStay(_ input: [String: Any]) -> JeevesChatService.ToolResult {
@@ -809,6 +855,92 @@ final class ChatToolExecutor {
         modelContext.saveOrLog("chat.deleteStay")
         EventLog.log(.stayDeleted, "\(name) \(range)", context: modelContext)
         return .init(text: "Deleted the \(name) stay (\(range)). The trip's dates are unchanged — shrink them with update_trip if the trip is shorter now, and check its journeys still make sense.")
+    }
+
+    /// Cancel and re-arm the leave-by nudge for every journey in a trip whose
+    /// window just moved. A leg now outside the trip loses its nudge entirely
+    /// rather than firing for travel that isn't happening.
+    @MainActor
+    private func rescheduleNudges(for trip: Trip) async -> String {
+        guard scheduleNudges else { return "" }
+        let segments = ((try? modelContext.fetch(FetchDescriptor<TravelSegment>())) ?? [])
+            .filter { $0.tripID == trip.id }
+        guard !segments.isEmpty else { return "" }
+        var live = 0, dropped = 0
+        for seg in segments {
+            TravelNotifier.cancel(segment: seg)
+            let day = Calendar.current.startOfDay(for: seg.day)
+            if day >= trip.startDate && day <= trip.endDate {
+                await TravelNotifier.schedule(segment: seg)
+                live += 1
+            } else {
+                EventLog.log(.nudgeCancelled,
+                             "\(seg.label) on \(Self.dayString(day)) falls outside '\(trip.title)' \(TravelGuard.dayRange(trip))",
+                             subject: seg.id, context: modelContext)
+                dropped += 1
+            }
+        }
+        var note = " Leave-by reminders re-armed for \(live) journey(s)."
+        if dropped > 0 {
+            note += " \(dropped) now fall outside the trip — their reminders were cancelled; tell the user."
+        }
+        return note
+    }
+
+    /// Re-anchor, re-measure and re-nudge the drives that touch a stay whose
+    /// dates just moved. A drive INTO the stay lands on its new check-in day;
+    /// a drive OUT of it leaves on the new checkout day. Returns the receipt
+    /// fragment naming what moved — silence here is how the store ends up
+    /// disagreeing with itself.
+    @MainActor
+    private func resyncJourneys(around stay: TripStay, movedDates: Bool) async -> String {
+        guard movedDates else { return "" }
+        let name = stay.address.isEmpty ? stay.place : stay.address
+        let segments = ((try? modelContext.fetch(FetchDescriptor<TravelSegment>())) ?? [])
+            .filter { $0.tripID == stay.tripID }
+
+        func matches(_ a: String) -> Bool {
+            guard !a.isEmpty else { return false }
+            return a.localizedCaseInsensitiveContains(stay.place)
+                || stay.place.localizedCaseInsensitiveContains(a)
+                || a.localizedCaseInsensitiveContains(name)
+        }
+
+        var moved: [String] = []
+        for seg in segments {
+            let arriving = matches(seg.toPlace)
+            let leaving = matches(seg.fromPlace)
+            guard arriving || leaving else { continue }
+
+            // Arrivals aim at check-in on the new first day; departures leave
+            // on the new last day.
+            let day = arriving ? stay.arriveDate : stay.departDate
+            let minute = arriving ? stay.checkinMinute : stay.checkoutMinute
+            guard let anchor = Calendar.current.date(bySettingHour: minute / 60,
+                                                     minute: minute % 60,
+                                                     second: 0, of: day) else { continue }
+            if seg.mode == .drive { seg.arriveBy = anchor } else { seg.departAt = anchor }
+
+            // The old measurement was for a different day's traffic.
+            if !seg.toPlace.isEmpty,
+               let m = await commuteMinutes(seg.fromPlace, seg.toPlace, max(anchor, Date())) {
+                seg.travelMinutes = m
+                seg.travelIsEstimated = false
+            }
+            modelContext.saveOrLog("chat.updateStay.resync")
+            EventLog.log(.journeyMeasured,
+                         "\(seg.label) re-anchored to \(Self.dayString(day)) after \(stay.place) moved",
+                         subject: seg.id, context: modelContext)
+            await TravelGuard.absorb(seg, context: modelContext)
+            if scheduleNudges {
+                TravelNotifier.cancel(segment: seg)
+                await TravelNotifier.schedule(segment: seg)
+            }
+            moved.append(seg.label.isEmpty ? seg.mode.label : seg.label)
+        }
+        guard !moved.isEmpty else { return "" }
+        return " Re-measured and re-scheduled \(moved.count) journey(s) around it: "
+            + moved.joined(separator: ", ") + "."
     }
 
     private func fmtRange(_ stay: TripStay) -> String {

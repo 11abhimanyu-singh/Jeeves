@@ -187,10 +187,18 @@ final class TripStay {
     var arriveDate: Date = Date.distantPast   // first day here (startOfDay)
     var departDate: Date = Date.distantPast   // LAST day here, inclusive
     var externalID: String = ""       // the calendar event it came from
+    // Hotel policy, in minutes past midnight on the stay's own clock. A stay
+    // used to be whole days only, so a transition drive had nothing to aim at
+    // and guessed noon — which is both before most check-ins and after most
+    // checkouts. Defaults are the common Indian hotel windows.
+    var checkinMinute: Int = StayWindow.defaultCheckin    // 14:00
+    var checkoutMinute: Int = StayWindow.defaultCheckout  // 11:30
 
     init(id: UUID = UUID(), tripID: UUID, place: String, address: String = "",
          lat: Double? = nil, lng: Double? = nil, timeZoneID: String = "",
-         arriveDate: Date, departDate: Date, externalID: String = "") {
+         arriveDate: Date, departDate: Date, externalID: String = "",
+         checkinMinute: Int = StayWindow.defaultCheckin,
+         checkoutMinute: Int = StayWindow.defaultCheckout) {
         self.id = id
         self.tripID = tripID
         self.place = place
@@ -201,6 +209,8 @@ final class TripStay {
         self.arriveDate = arriveDate.startOfDay
         self.departDate = departDate.startOfDay
         self.externalID = externalID
+        self.checkinMinute = checkinMinute
+        self.checkoutMinute = checkoutMinute
     }
 
     var timeZone: TimeZone { TimeZone(identifier: timeZoneID) ?? .current }

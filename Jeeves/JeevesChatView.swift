@@ -159,10 +159,13 @@ struct JeevesChatView: View {
                     Image(systemName: "square.and.pencil").font(.system(size: 16)).foregroundStyle(Color.textSoft)
                 }
             }
-            // Calendar = today's anchors (gym + events, changes daily).
+            // Today's anchors (gym + events). NOT a calendar glyph: that one
+            // means "pick a date" everywhere else, and wearing it here made
+            // three screens promise three different things with one icon.
             Button { showSetup = true } label: {
-                Image(systemName: "calendar").font(.system(size: 16)).foregroundStyle(Color.textSoft)
+                Image(systemName: "slider.horizontal.3").font(.system(size: 16)).foregroundStyle(Color.textSoft)
             }
+            .accessibilityLabel("Today's anchors")
             // Gear = standing configuration (keys, integrations, locations).
             Button { showSettings = true } label: {
                 Image(systemName: "gearshape.fill").font(.system(size: 16)).foregroundStyle(Color.textSoft)

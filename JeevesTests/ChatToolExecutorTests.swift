@@ -119,6 +119,76 @@ final class ChatToolExecutorTests: XCTestCase {
         XCTAssertEqual(stays.count, 2, "first and last night at the same hotel are two bookings")
     }
 
+    // MARK: stale travel data after an edit
+
+    func testMovingAStayReAnchorsAndReMeasuresItsDrives() async throws {
+        let context = container.mainContext
+        _ = await executor.run(.init(
+            id: "v1", name: "add_stay",
+            input: ["trip": "Mysore", "hotel": "Radisson Mysore",
+                    "arrive_date": day(10), "depart_date": day(12)]))
+        _ = await executor.run(.init(
+            id: "v2", name: "add_stay",
+            input: ["trip": "Mysore", "hotel": "CGH Earth Wayanad",
+                    "arrive_date": day(12), "depart_date": day(14)]))
+
+        // Wait for the background measure so there is a drive to re-anchor.
+        var seg: TravelSegment?
+        for _ in 0..<40 {
+            try await Task.sleep(nanoseconds: 50_000_000)
+            let segs = (try? context.fetch(FetchDescriptor<TravelSegment>())) ?? []
+            if let s = segs.first(where: { $0.travelMinutes > 0 }) { seg = s; break }
+        }
+        let before = try XCTUnwrap(seg?.arriveBy)
+
+        let result = await executor.run(.init(
+            id: "v3", name: "update_stay",
+            input: ["hotel": "CGH Earth Wayanad", "new_arrive_date": day(13),
+                    "new_depart_date": day(15)]))
+
+        let after = try XCTUnwrap(seg?.arriveBy)
+        XCTAssertGreaterThan(after, before,
+                             "the drive INTO the stay must follow it to the new day")
+        XCTAssertTrue(result.text.contains("Re-measured"),
+                      "the receipt must name what moved with it: \(result.text)")
+    }
+
+    func testMovingAStayWithoutChangingDatesTouchesNoJourneys() async {
+        let context = container.mainContext
+        context.insert(TripStay(tripID: UUID(), place: "Radisson Mysore",
+                                arriveDate: Date().startOfDay, departDate: Date().startOfDay))
+        try? context.save()
+
+        let result = await executor.run(.init(
+            id: "v4", name: "update_stay",
+            input: ["hotel": "Radisson", "new_address": "Mysuru"]))
+
+        XCTAssertFalse(result.text.contains("Re-measured"),
+                       "an address-only edit must not churn journeys: \(result.text)")
+    }
+
+    func testCheckInAndCheckOutTimesAreStoredAndDefaulted() async {
+        let context = container.mainContext
+        _ = await executor.run(.init(
+            id: "w1", name: "add_stay",
+            input: ["trip": "Ooty", "hotel": "Western Valley Resort",
+                    "arrive_date": day(3), "depart_date": day(5),
+                    "checkin_time": "15:00", "checkout_time": "10:00"]))
+        _ = await executor.run(.init(
+            id: "w2", name: "add_stay",
+            input: ["trip": "Coorg", "hotel": "Evolve Back",
+                    "arrive_date": day(20), "depart_date": day(22)]))
+
+        let stays = (try? context.fetch(FetchDescriptor<TripStay>())) ?? []
+        let ooty = stays.first { $0.place.contains("Western Valley") }
+        let coorg = stays.first { $0.place.contains("Evolve") }
+        XCTAssertEqual(ooty?.checkinMinute, 15 * 60)
+        XCTAssertEqual(ooty?.checkoutMinute, 10 * 60)
+        XCTAssertEqual(coorg?.checkinMinute, StayWindow.defaultCheckin,
+                       "unstated policy falls back to the common window")
+        XCTAssertEqual(coorg?.checkoutMinute, StayWindow.defaultCheckout)
+    }
+
     // MARK: delete_stay two-phase
 
     func testDeleteStayPreviewsThenDeletesOnConfirm() async {
