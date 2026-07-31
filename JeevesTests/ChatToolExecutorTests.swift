@@ -153,6 +153,86 @@ final class ChatToolExecutorTests: XCTestCase {
                       "the receipt must name what moved with it: \(result.text)")
     }
 
+    func testMovingAStayNeverRewritesAFlightsDeparture() async {
+        let context = container.mainContext
+        let trip = Trip(title: "Bali", startDate: Date().startOfDay,
+                        endDate: Calendar.current.date(byAdding: .day, value: 8, to: Date())!.startOfDay)
+        context.insert(trip)
+        let stay = TripStay(tripID: trip.id, place: "Karma Kandara",
+                            address: "Karma Kandara, Uluwatu",
+                            arriveDate: Date().startOfDay,
+                            departDate: Calendar.current.date(byAdding: .day, value: 7, to: Date())!.startOfDay)
+        context.insert(stay)
+        // The return leg: JourneyPrefill sets its fromPlace to the last stay,
+        // so it MATCHES the stay by name — and its 21:15 departure is airline
+        // data, not something a hotel checkout may overwrite.
+        let departure = Calendar.current.date(bySettingHour: 21, minute: 15, second: 0,
+                                              of: Calendar.current.date(byAdding: .day, value: 7, to: Date())!)!
+        let flight = TravelSegment(tripID: trip.id, mode: .flight, label: "SQ 947",
+                                   fromPlace: "Karma Kandara, Uluwatu", toPlace: "",
+                                   departAt: departure)
+        context.insert(flight)
+        try? context.save()
+
+        let result = await executor.run(.init(
+            id: "f1", name: "update_stay",
+            input: ["hotel": "Karma Kandara",
+                    "new_depart_date": day(8)]))
+
+        XCTAssertEqual(flight.departAt, departure,
+                       "a flight's booked departure must survive a stay's dates moving")
+        XCTAssertTrue(result.text.contains("NOT changed"),
+                      "and the receipt must say the flight was left alone: \(result.text)")
+        XCTAssertTrue(result.text.contains("SQ 947"), "naming which leg to check")
+    }
+
+    func testInvertedDatesAreRejectedBeforeAnythingIsWritten() async {
+        let context = container.mainContext
+        let trip = Trip(title: "Coorg", startDate: Date().startOfDay,
+                        endDate: Calendar.current.date(byAdding: .day, value: 5, to: Date())!.startOfDay)
+        context.insert(trip)
+        let arrive = Calendar.current.date(byAdding: .day, value: 2, to: Date())!.startOfDay
+        let depart = Calendar.current.date(byAdding: .day, value: 4, to: Date())!.startOfDay
+        let stay = TripStay(tripID: trip.id, place: "Evolve Back",
+                            arriveDate: arrive, departDate: depart)
+        context.insert(stay)
+        try? context.save()
+
+        let result = await executor.run(.init(
+            id: "b1", name: "update_stay",
+            input: ["hotel": "Evolve Back", "new_depart_date": day(1)]))
+
+        XCTAssertTrue(result.text.contains("nothing changed"))
+        XCTAssertEqual(stay.arriveDate, arrive, "the refusal must not have written anything")
+        XCTAssertEqual(stay.departDate, depart)
+    }
+
+    func testMovingOneStayLeavesAnotherHotelsDrivesAlone() async {
+        let context = container.mainContext
+        let trip = Trip(title: "Mysore", startDate: Date().startOfDay,
+                        endDate: Calendar.current.date(byAdding: .day, value: 9, to: Date())!.startOfDay)
+        context.insert(trip)
+        context.insert(TripStay(tripID: trip.id, place: "Radisson Mysore",
+                                arriveDate: Calendar.current.date(byAdding: .day, value: 2, to: Date())!.startOfDay,
+                                departDate: Calendar.current.date(byAdding: .day, value: 4, to: Date())!.startOfDay))
+        // A different hotel in the same city — its drive must not be dragged
+        // along just because both names contain "Mysore".
+        let otherArrival = Calendar.current.date(byAdding: .day, value: 6, to: Date())!
+        let otherDrive = TravelSegment(tripID: trip.id, mode: .drive, label: "Drive to Grand Mysore",
+                                       fromPlace: "Home", toPlace: "Grand Mysore",
+                                       arriveBy: otherArrival)
+        context.insert(otherDrive)
+        try? context.save()
+
+        _ = await executor.run(.init(
+            id: "b2", name: "update_stay",
+            input: ["hotel": "Radisson Mysore", "new_arrive_date": day(3),
+                    "new_depart_date": day(5)]))
+
+        XCTAssertEqual(otherDrive.arriveBy, otherArrival,
+                       "sharing a city name is not sharing a booking")
+    }
+
     func testMovingAStayWithoutChangingDatesTouchesNoJourneys() async {
         let context = container.mainContext
         context.insert(TripStay(tripID: UUID(), place: "Radisson Mysore",

@@ -686,9 +686,17 @@ final class ChatToolExecutor {
                                     arriveBy: target, checkInMinutes: 0, securityMinutes: 0)
             modelContext.insert(seg)
             modelContext.saveOrLog("chat.addStay.transition")
-            transitionNote = " Added the \(prev.place) → \(place) drive, aiming at the "
-                + "\(StayWindow.clock(stay.checkinMinute)) check-in (checkout from \(prev.place) is "
-                + "\(StayWindow.clock(prev.checkoutMinute))) — measuring the route now."
+            // Say which of these the user actually told us and which we
+            // assumed — quoting a default back as though the hotel stated it
+            // is the same class of lie as quoting an unmeasured travel time.
+            let statedCheckin = minutesFrom(input["checkin_time"] as? String) != nil
+            let checkinPhrase = statedCheckin
+                ? "the \(StayWindow.clock(stay.checkinMinute)) check-in"
+                : "an ASSUMED \(StayWindow.clock(stay.checkinMinute)) check-in"
+            transitionNote = " Added the \(prev.place) → \(place) drive, aiming at \(checkinPhrase)"
+                + " (checkout from \(prev.place) taken as \(StayWindow.clock(prev.checkoutMinute)))"
+                + " — measuring the route now. Tell the user these are the assumed windows unless"
+                + " they gave them, and offer to correct them."
             let checkout = prev.checkoutMinute
             let checkin = stay.checkinMinute
             let day = arrive
@@ -702,9 +710,10 @@ final class ChatToolExecutor {
                     let window = StayWindow.transition(checkoutMinute: checkout,
                                                        checkinMinute: checkin,
                                                        travelMinutes: m)
-                    if let deadline = Calendar.current.date(bySettingHour: window.arriveByMinute / 60,
-                                                            minute: window.arriveByMinute % 60,
-                                                            second: 0, of: day) {
+                    // A long drive can land past midnight; date(bySettingHour:)
+                    // returns nil for hour 24+, which silently dropped the
+                    // deadline entirely on exactly the journeys that need it.
+                    if let deadline = self.at(window.arriveByMinute, on: day) {
                         seg.arriveBy = deadline
                     }
                     modelContext.saveOrLog("chat.addStay.measure")
@@ -789,22 +798,26 @@ final class ChatToolExecutor {
         }
         if let h = input["new_hotel"] as? String, !h.isEmpty { stay.place = h }
         if let a = input["new_address"] as? String, !a.isEmpty { stay.address = a }
-        var datesChanged = false
-        if let raw = input["new_arrive_date"] as? String {
-            let d = JeevesChatService.resolveDate(raw, relativeTo: today).startOfDay
-            if d != stay.arriveDate { datesChanged = true }
-            stay.arriveDate = d
+        // Validate BEFORE writing: the guard used to run after the assignments,
+        // so an inverted range was already persisted by the time the reply
+        // said "nothing changed" — a false receipt on top of corrupt dates.
+        let cal = Calendar.current
+        let oldArrive = stay.arriveDate, oldDepart = stay.departDate
+        let wantArrive = (input["new_arrive_date"] as? String)
+            .map { JeevesChatService.resolveDate($0, relativeTo: today).startOfDay } ?? oldArrive
+        let wantDepart = (input["new_depart_date"] as? String)
+            .map { JeevesChatService.resolveDate($0, relativeTo: today).startOfDay } ?? oldDepart
+        guard wantDepart >= wantArrive else {
+            return .init(text: "That checkout (\(Self.dayString(wantDepart))) is before check-in (\(Self.dayString(wantArrive))) — nothing changed.")
         }
-        if let raw = input["new_depart_date"] as? String {
-            let d = JeevesChatService.resolveDate(raw, relativeTo: today).startOfDay
-            if d != stay.departDate { datesChanged = true }
-            stay.departDate = d
-        }
+        stay.arriveDate = wantArrive
+        stay.departDate = wantDepart
         if let m = minutesFrom(input["checkin_time"] as? String) { stay.checkinMinute = m }
         if let m = minutesFrom(input["checkout_time"] as? String) { stay.checkoutMinute = m }
-        guard stay.departDate >= stay.arriveDate else {
-            return .init(text: "That checkout is before check-in — nothing changed.")
-        }
+        let dayShift = (
+            arriveDelta: cal.dateComponents([.day], from: oldArrive, to: wantArrive).day ?? 0,
+            departDelta: cal.dateComponents([.day], from: oldDepart, to: wantDepart).day ?? 0
+        )
         // The trip still covers its stays.
         var grew = false
         let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
@@ -820,7 +833,7 @@ final class ChatToolExecutor {
         // receipt said the stay changed while its journeys silently kept the
         // old days, times and measured minutes — two records disagreeing about
         // the same trip.
-        let touched = await resyncJourneys(around: stay, movedDates: datesChanged)
+        let touched = await resyncJourneys(around: stay, dayShift: dayShift)
         return .init(text: "\(stay.place): \(fmtRange(stay))."
                      + (grew ? " The trip grew to cover it." : "") + touched)
     }
@@ -893,54 +906,114 @@ final class ChatToolExecutor {
     /// fragment naming what moved — silence here is how the store ends up
     /// disagreeing with itself.
     @MainActor
-    private func resyncJourneys(around stay: TripStay, movedDates: Bool) async -> String {
-        guard movedDates else { return "" }
-        let name = stay.address.isEmpty ? stay.place : stay.address
+    private func resyncJourneys(around stay: TripStay,
+                                dayShift: (arriveDelta: Int, departDelta: Int)) async -> String {
+        guard dayShift.arriveDelta != 0 || dayShift.departDelta != 0 else { return "" }
         let segments = ((try? modelContext.fetch(FetchDescriptor<TravelSegment>())) ?? [])
             .filter { $0.tripID == stay.tripID }
 
-        func matches(_ a: String) -> Bool {
-            guard !a.isEmpty else { return false }
-            return a.localizedCaseInsensitiveContains(stay.place)
-                || stay.place.localizedCaseInsensitiveContains(a)
-                || a.localizedCaseInsensitiveContains(name)
+        // One-directional on purpose. Matching BOTH ways meant a segment
+        // endpoint of "Mysore" matched the stay "Radisson Mysore" — and so did
+        // every other Mysore hotel's legs, so moving one stay dragged another
+        // stay's drives with it. The endpoint must name this stay, not merely
+        // share a city with it.
+        func matches(_ endpoint: String) -> Bool {
+            let e = endpoint.trimmingCharacters(in: .whitespaces)
+            guard e.count >= 3 else { return false }
+            if e.localizedCaseInsensitiveCompare(stay.place) == .orderedSame { return true }
+            if e.localizedCaseInsensitiveContains(stay.place), stay.place.count >= 3 { return true }
+            if !stay.address.isEmpty, e.localizedCaseInsensitiveContains(stay.address) { return true }
+            return false
         }
 
         var moved: [String] = []
+        var measured: [String] = []
+        var untouched: [String] = []
         for seg in segments {
             let arriving = matches(seg.toPlace)
             let leaving = matches(seg.fromPlace)
             guard arriving || leaving else { continue }
 
-            // Arrivals aim at check-in on the new first day; departures leave
-            // on the new last day.
-            let day = arriving ? stay.arriveDate : stay.departDate
-            let minute = arriving ? stay.checkinMinute : stay.checkoutMinute
-            guard let anchor = Calendar.current.date(bySettingHour: minute / 60,
-                                                     minute: minute % 60,
-                                                     second: 0, of: day) else { continue }
-            if seg.mode == .drive { seg.arriveBy = anchor } else { seg.departAt = anchor }
+            // DRIVES ONLY. A flight's departAt is airline data read on the
+            // ORIGIN clock, not something to derive from a hotel policy —
+            // and JourneyPrefill deliberately sets a return flight's fromPlace
+            // to the last stay's address, so every return leg matches here.
+            // Re-anchoring one would have replaced a real 21:15 departure with
+            // a fabricated 11:30 and handed back a leave-by ten hours early.
+            guard seg.mode == .drive else {
+                untouched.append(seg.label.isEmpty ? seg.mode.label : seg.label)
+                continue
+            }
 
-            // The old measurement was for a different day's traffic.
+            let newAnchor: Date?
+            if arriving {
+                // A drive INTO this stay lands at its check-in.
+                newAnchor = at(stay.checkinMinute, on: stay.arriveDate)
+            } else {
+                // A drive OUT of it keeps its own deadline — arriveBy is when
+                // you must reach the NEXT place ("home by 6 pm"), which this
+                // hotel's checkout has no business overwriting. Only the DAY
+                // follows the stay; the time of day is the user's.
+                let shift = dayShift.departDelta
+                guard shift != 0, let old = seg.arriveBy else { newAnchor = nil
+                    if shift != 0 { untouched.append(seg.label.isEmpty ? seg.mode.label : seg.label) }
+                    continue
+                }
+                newAnchor = Calendar.current.date(byAdding: .day, value: shift, to: old)
+            }
+            guard let anchor = newAnchor else { continue }
+            seg.arriveBy = anchor
+
+            // The old measurement was for a different day's traffic. Only
+            // claim a re-measure when one actually came back.
+            var didMeasure = false
             if !seg.toPlace.isEmpty,
                let m = await commuteMinutes(seg.fromPlace, seg.toPlace, max(anchor, Date())) {
                 seg.travelMinutes = m
                 seg.travelIsEstimated = false
+                didMeasure = true
             }
             modelContext.saveOrLog("chat.updateStay.resync")
-            EventLog.log(.journeyMeasured,
-                         "\(seg.label) re-anchored to \(Self.dayString(day)) after \(stay.place) moved",
+            EventLog.log(.journeySaved,
+                         "\(seg.label) re-anchored to \(Self.dayString(anchor)) after \(stay.place) moved"
+                         + (didMeasure ? ", re-measured" : ", measurement unchanged"),
                          subject: seg.id, context: modelContext)
             await TravelGuard.absorb(seg, context: modelContext)
             if scheduleNudges {
                 TravelNotifier.cancel(segment: seg)
                 await TravelNotifier.schedule(segment: seg)
             }
-            moved.append(seg.label.isEmpty ? seg.mode.label : seg.label)
+            let label = seg.label.isEmpty ? seg.mode.label : seg.label
+            moved.append(label)
+            if didMeasure { measured.append(label) }
         }
-        guard !moved.isEmpty else { return "" }
-        return " Re-measured and re-scheduled \(moved.count) journey(s) around it: "
-            + moved.joined(separator: ", ") + "."
+
+        var note = ""
+        if !moved.isEmpty {
+            note += " Moved \(moved.count) drive(s) with it: " + moved.joined(separator: ", ") + "."
+            note += measured.isEmpty
+                ? " I couldn't re-measure them — the times shown are the old ones."
+                : " Re-measured: \(measured.joined(separator: ", "))."
+        }
+        // Surfaced, never silently adjusted: the user has to re-book a flight,
+        // so say the dates moved underneath it.
+        if !untouched.isEmpty {
+            note += " NOT changed — these have booked times only the airline can move, so check them: "
+                + untouched.joined(separator: ", ") + "."
+        }
+        return note
+    }
+
+    /// A Date at `minute` past midnight on `day`, carrying past midnight
+    /// correctly. date(bySettingHour:) returns nil for hour 24+, which silently
+    /// dropped the deadline on any drive long enough to land the next day.
+    private func at(_ minute: Int, on day: Date) -> Date? {
+        let cal = Calendar.current
+        let extraDays = minute / (24 * 60)
+        let within = minute % (24 * 60)
+        guard let base = cal.date(bySettingHour: within / 60, minute: within % 60,
+                                  second: 0, of: day) else { return nil }
+        return extraDays == 0 ? base : cal.date(byAdding: .day, value: extraDays, to: base)
     }
 
     private func fmtRange(_ stay: TripStay) -> String {

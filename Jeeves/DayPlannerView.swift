@@ -906,10 +906,10 @@ struct DayPlannerView: View {
             // nearby days; this reaches the rest of the year.
             Button { showDateJump = true } label: {
                 Circle()
-                    .fill(isToday ? Color.surface : Color.travelBg)
+                    .fill(Color.surface)
                     .frame(width: 38, height: 38)
-                    .overlay(Image(systemName: "calendar")
-                        .foregroundStyle(isToday ? Color.textSoft : Color.travelInk)
+                    .overlay(Image(systemName: isToday ? "calendar" : "calendar.badge.clock")
+                        .foregroundStyle(Color.textSoft)
                         .font(.ui(15)))
             }
             .buttonStyle(.plain)
