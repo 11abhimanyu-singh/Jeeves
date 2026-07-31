@@ -45,16 +45,25 @@ def openai_key():
     plaintext in the repo, a dotfile, or a transcript.
     """
     env = os.environ.get("OPENAI_API_KEY", "").strip()
-    if env:
-        return env
-    try:
-        r = subprocess.run(
-            ["security", "find-generic-password", "-a", os.environ.get("USER", ""),
-             "-s", "jeeves-openai", "-w"],
-            capture_output=True, text=True, timeout=20)
-        return r.stdout.strip() if r.returncode == 0 else ""
-    except Exception:
+    candidate = env
+    if not candidate:
+        try:
+            r = subprocess.run(
+                ["security", "find-generic-password", "-a", os.environ.get("USER", ""),
+                 "-s", "jeeves-openai", "-w"],
+                capture_output=True, text=True, timeout=20)
+            candidate = r.stdout.strip() if r.returncode == 0 else ""
+        except Exception:
+            candidate = ""
+    # An Anthropic key under the OpenAI name would be SENT to OpenAI on every
+    # run — a credential leak to a third party, repeated nightly. Refuse it.
+    if candidate.startswith("sk-ant-"):
+        print("REFUSING to use the stored key: it is an Anthropic key (sk-ant-…), "
+              "not an OpenAI key. Sending it to OpenAI would leak it. "
+              "Store the OpenAI key under the 'jeeves-openai' Keychain service.",
+              file=sys.stderr)
         return ""
+    return candidate
 
 
 def read_json(path):

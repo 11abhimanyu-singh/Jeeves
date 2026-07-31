@@ -274,6 +274,8 @@ final class ChatToolExecutor {
         // it ran 20:00–21:00 and set the end to 22:00. Code does this maths.
         let extendBy = input["extend_by_minutes"] as? Int
         let shiftBy = input["shift_by_minutes"] as? Int
+        var timesChanged = false
+        var clampedNote = ""
         for e in matches {
             let oldStart = e.startMinute, oldEnd = e.endMinute
             if let venue = input["new_venue"] as? String, !venue.isEmpty {
@@ -306,7 +308,17 @@ final class ChatToolExecutor {
             }
             // Receipts quote the OLD and the NEW range, never just the new one.
             if e.startMinute != oldStart || e.endMinute != oldEnd {
+                timesChanged = true
                 changes.append("\(hhmm(oldStart))–\(hhmm(oldEnd)) → \(hhmm(e.startMinute))–\(hhmm(e.endMinute))")
+            }
+            // The day has edges. If a relative change hit one, say by how much
+            // it actually moved — otherwise the reply promises a full hour the
+            // event never got.
+            if let extend = extendBy, extend != 0 {
+                let applied = (e.endMinute - oldEnd)
+                if applied != extend {
+                    clampedNote = " NOTE: only \(applied) min could be applied (asked for \(extend)) — the day ends at 24:00. Say the real new end, not the requested one."
+                }
             }
             if let newTitle = input["new_title"] as? String, !newTitle.isEmpty {
                 e.title = newTitle
@@ -318,11 +330,14 @@ final class ChatToolExecutor {
         for e in matches { resolveEventDestinationIfLink(e) }
         let days = matches.map { Self.dayString($0.date) }.joined(separator: ", ")
         // A time change ripples — but only TODAY's plan can go stale mid-day.
+        // Gate on whether times ACTUALLY moved, not on which parameter was
+        // used: the relative params are the preferred path and were silently
+        // skipping this hint, in exactly the two scenarios that test for it.
         let touchesToday = matches.contains { Calendar.current.isDate($0.date, inSameDayAs: today) }
-        let replanNote = ((newStart != nil || newEnd != nil) && touchesToday)
+        let replanNote = (timesChanged && touchesToday)
             ? " This changes today — OFFER to replan the remainder (replan_today, with resume_at and any missed_blocks)."
             : ""
-        return .init(text: "Updated \(matches.count) event(s) (\(days)): \(Set(changes).joined(separator: "; ")).\(replanNote)")
+        return .init(text: "Updated \(matches.count) event(s) (\(days)): \(Set(changes).joined(separator: "; ")).\(replanNote)\(clampedNote)")
     }
 
     @MainActor
@@ -1262,7 +1277,10 @@ final class ChatToolExecutor {
             return .init(text: "Couldn't add it — I need a title and a start time. Ask the user for whatever's missing.")
         }
         let givenEnd = (input["end_time"] as? String).flatMap(GeneratedBlock.minutes(from:))
-        let end = givenEnd ?? (start + 180)
+        // Clamp the assumed end to the day: an unclamped 3 h default stored
+        // "23:00–26:00", and edit_event (which clamps at 24:00) then turned
+        // "extend it by an hour" into a two-hour SHRINK.
+        let end = givenEnd ?? min(24 * 60, start + 180)
         let venue = (input["venue"] as? String) ?? ""
         let from = LocationKind(rawValue: (input["leaving_from"] as? String) ?? "Home") ?? .home
         if eventsOn(date).contains(where: { $0.title.lowercased() == title.lowercased() }) {
@@ -1283,7 +1301,7 @@ final class ChatToolExecutor {
         // a dinner by an hour and shortened it, because it never knew the 3 h
         // default had been applied.
         let assumed = givenEnd == nil
-            ? " (no end time given — I assumed 3 h, so it ends \(hhmm(end)); change it with edit_event's extend_by_minutes)"
+            ? " (no end time given — I assumed it ends \(hhmm(end)); change it with edit_event's extend_by_minutes)"
             : ""
         return .init(text: "Added \"\(title)\" \(hhmm(start))–\(hhmm(end)) on \(dayLabel(date))\(venueSuffix).\(assumed)")
     }

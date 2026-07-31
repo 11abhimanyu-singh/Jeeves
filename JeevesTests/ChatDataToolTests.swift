@@ -43,6 +43,16 @@ final class ChatDataToolTests: XCTestCase {
             "That would move your check-in to Aug 14 — should I?",
             "Your longest walk this month was 6.2 km.",
             "You have two events tomorrow.",
+            // Retractions — what the challenge below ASKS the model to say.
+            // Reading these as claims would fail a run for behaving correctly.
+            "You're right — nothing was updated.",
+            "Nothing was added.",
+            "That change was not saved.",
+            "Apologies — nothing was actually saved.",
+            "The Radisson stay still ends Aug 14 — it has not been shortened.",
+            "No, that hasn't been done yet.",
+            "The stay still needs to be updated.",
+            "Stays aren't extended in hours, only by date.",
         ]
         for text in notClaims {
             XCTAssertFalse(JeevesChatService.claimsCompletedAction(text),
@@ -57,6 +67,9 @@ final class ChatDataToolTests: XCTestCase {
         // And an offer following honest inaction does not.
         XCTAssertFalse(JeevesChatService.claimsCompletedAction(
             "I haven't changed anything yet. Shall I go ahead?"))
+        // The full retract-then-offer shape the challenge asks for.
+        XCTAssertFalse(JeevesChatService.claimsCompletedAction(
+            "You're right — nothing was updated. Want me to shorten the Radisson stay now?"))
     }
 
     private var cal: Calendar { Calendar.current }

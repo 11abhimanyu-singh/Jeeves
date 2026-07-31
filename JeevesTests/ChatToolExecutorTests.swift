@@ -238,6 +238,42 @@ final class ChatToolExecutorTests: XCTestCase {
         XCTAssertEqual(events.first?.endMinute, 23 * 60 + 30, "duration preserved, not stretched")
     }
 
+    func testLateNightDefaultEndStaysInsideTheDayAndStillExtends() async {
+        let context = container.mainContext
+        // The 23:00 case: an unclamped 3 h default stored 26:00, and extending
+        // then clamped to 24:00 — a two-hour SHRINK on an extend request.
+        _ = await executor.run(.init(
+            id: "n1", name: "add_event",
+            input: ["title": "Drinks with Sam", "date": "today", "start_time": "23:00"]))
+        var events = (try? context.fetch(FetchDescriptor<DailyEvent>())) ?? []
+        XCTAssertEqual(events.first?.endMinute, 24 * 60, "assumed end clamped to midnight")
+
+        let before = events.first?.endMinute ?? 0
+        let result = await executor.run(.init(
+            id: "n2", name: "edit_event",
+            input: ["title": "Drinks with Sam", "extend_by_minutes": 60]))
+
+        events = (try? context.fetch(FetchDescriptor<DailyEvent>())) ?? []
+        XCTAssertGreaterThanOrEqual(events.first?.endMinute ?? 0, before,
+                                    "an extend must never shorten the event")
+        XCTAssertTrue(result.text.contains("only 0 min could be applied"),
+                      "a clamped extend must say what actually happened: \(result.text)")
+    }
+
+    func testRelativeEditOnTodayAlsoCarriesTheReplanHint() async {
+        let context = container.mainContext
+        context.insert(DailyEvent(date: Date().startOfDay, title: "Dinner with Priya",
+                                  startMinute: 19 * 60, endMinute: 21 * 60))
+        try? context.save()
+
+        let result = await executor.run(.init(
+            id: "r2", name: "edit_event",
+            input: ["title": "Dinner with Priya", "extend_by_minutes": 60]))
+
+        XCTAssertTrue(result.text.contains("OFFER to replan"),
+                      "the PREFERRED relative path must prompt the replan too: \(result.text)")
+    }
+
     func testExtendNeverEndsBeforeItStarts() async {
         let context = container.mainContext
         context.insert(DailyEvent(date: Date().startOfDay, title: "Standup",

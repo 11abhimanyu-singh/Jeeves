@@ -197,13 +197,18 @@ enum JeevesChatService {
                       "saved", "swapped", "renamed", "shortened", "lengthened",
                       "now runs", "now ends", "now starts", "is now", "are now",
                       "back to", "all set"]
-        // Anything that makes the sentence a question, an offer, a refusal or a
-        // future promise is NOT a claim that something already happened.
+        // Anything that makes the sentence a question, an offer, a refusal, a
+        // future promise — or a NEGATION — is not a claim that something
+        // happened. Negations matter most: the challenge below asks the model
+        // to retract, and "nothing was updated" is the retraction. Reading that
+        // as a fresh claim would punish the exact behaviour we demand.
         let notAClaim = ["want me", "shall i", "should i", "do you want", "would you like",
                          "i'll ", "i will ", "let me know", "if you", "once you",
-                         "couldn't", "could not", "can't", "cannot", "unable",
-                         "didn't", "did not", "haven't", "have not", "not yet",
-                         "need ", "which ", "what ", "when ", "tell me", "confirm"]
+                         "unable", "not yet", "no change", "still needs", "still ends",
+                         "need ", "which ", "what ", "when ", "tell me", "confirm",
+                         // generic negations: covers hasn't/wasn't/isn't/aren't/
+                         // didn't/couldn't/don't as well as their long forms
+                         "n't", " not ", "nothing", "never "]
         for raw in text.lowercased().split(whereSeparator: { ".!?\n;".contains($0) }) {
             let sentence = " " + raw.trimmingCharacters(in: .whitespaces) + " "
             guard claims.contains(where: { sentence.contains($0) }) else { continue }
