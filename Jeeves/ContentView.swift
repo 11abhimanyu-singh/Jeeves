@@ -156,6 +156,12 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                // Reserve the bubble's corner instead of floating over it: a
+                // 56pt circle at the trailing edge sat on top of whatever ended
+                // the scroll, and on Tasks that was the last row's delete
+                // button — tapping delete opened chat, with no way to scroll
+                // the row clear.
+                .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 76) }
 
                 Divider().overlay(Color.textPrimary.opacity(0.14))
                 tabBar
@@ -639,17 +645,24 @@ struct ContentView: View {
 
     // MARK: Progress tab
 
+    /// The streak, month count and goal describe HOW YOU ARE DOING — they are
+    /// anchored to today, not to whichever day the check-in form happens to be
+    /// editing. Progress is the launch screen now, and selectedDate defaults to
+    /// yesterday (the day you usually still owe a check-in for), so reading the
+    /// cursor showed last month's numbers every 1st and a stale streak daily.
+    private var progressAnchor: Date { realToday }
+
     /// Every distinct day this month with either a check-in or logged activity.
     private var monthDaysCount: Int {
         let cal = Calendar.current
         var days = Set<Date>()
-        for c in checkins where cal.isDate(c.date, equalTo: selectedDate, toGranularity: .month) {
+        for c in checkins where cal.isDate(c.date, equalTo: progressAnchor, toGranularity: .month) {
             days.insert(cal.startOfDay(for: c.date))
         }
-        for w in allWorkouts where cal.isDate(w.date, equalTo: selectedDate, toGranularity: .month) {
+        for w in allWorkouts where cal.isDate(w.date, equalTo: progressAnchor, toGranularity: .month) {
             days.insert(cal.startOfDay(for: w.date))
         }
-        for s in allStretchLogs where cal.isDate(s.date, equalTo: selectedDate, toGranularity: .month) {
+        for s in allStretchLogs where cal.isDate(s.date, equalTo: progressAnchor, toGranularity: .month) {
             days.insert(cal.startOfDay(for: s.date))
         }
         return days.filter { mergedStatus(for: $0)?.qualifies == true }.count
@@ -659,17 +672,12 @@ struct ContentView: View {
         min(1.0, Double(monthDaysCount) / Double(monthlyGoal))
     }
 
-    /// Consecutive qualifying days ending at the selected date. A logged
-    /// workout alone keeps the day alive — no check-in tap needed.
+    /// Consecutive qualifying days ending today — or ending yesterday when
+    /// today hasn't been logged yet, so an unlogged morning doesn't read as a
+    /// broken streak. A logged workout alone keeps a day alive; no check-in
+    /// tap needed.
     private var streak: Int {
-        var count = 0
-        var cursor = selectedDate
-        let cal = Calendar.current
-        while let s = mergedStatus(for: cursor), s.qualifies {
-            count += 1
-            cursor = cal.date(byAdding: .day, value: -1, to: cursor)!
-        }
-        return count
+        CheckInAutoFill.streak(endingAt: progressAnchor) { mergedStatus(for: $0) }
     }
 
     private var progressView: some View {
@@ -688,7 +696,7 @@ struct ContentView: View {
                 }
             }
 
-            Text(selectedDate.formatted(.dateTime.month(.wide).year())).font(.heading(16)).foregroundStyle(Color.textPrimary)
+            Text(progressAnchor.formatted(.dateTime.month(.wide).year())).font(.heading(16)).foregroundStyle(Color.textPrimary)
 
             Text(monthDaysCount >= monthlyGoal
                  ? "Goal reached this month"

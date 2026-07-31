@@ -187,4 +187,28 @@ enum CheckInAutoFill {
     nonisolated private static func trim(_ v: Double) -> String {
         v == v.rounded() ? String(format: "%.0f", v) : String(format: "%.1f", v)
     }
+
+    /// Consecutive qualifying days ending at `today` — or ending yesterday when
+    /// today hasn't been logged yet, so an unlogged morning doesn't read as a
+    /// broken streak. `status` answers for one day (nil = nothing recorded).
+    ///
+    /// Pure, so the rule is tested rather than trusted: the view used to walk
+    /// back from whatever day the check-in form was editing, which defaults to
+    /// yesterday — fine while it was buried in Fitness, wrong once Progress
+    /// became the launch screen.
+    nonisolated static func streak(endingAt today: Date,
+                                   calendar: Calendar = .current,
+                                   status: (Date) -> DayStatus?) -> Int {
+        var cursor = calendar.startOfDay(for: today)
+        if status(cursor)?.qualifies != true {
+            cursor = calendar.date(byAdding: .day, value: -1, to: cursor) ?? cursor
+        }
+        var count = 0
+        while status(cursor)?.qualifies == true {
+            count += 1
+            guard let previous = calendar.date(byAdding: .day, value: -1, to: cursor) else { break }
+            cursor = previous
+        }
+        return count
+    }
 }

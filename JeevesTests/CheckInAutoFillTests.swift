@@ -108,4 +108,57 @@ final class CheckInAutoFillTests: XCTestCase {
         XCTAssertTrue(s.isRest)
         XCTAssertEqual(s.summary, "Rest day")
     }
+
+    // MARK: Streak anchoring
+    //
+    // Progress became the launch screen, so the streak must be anchored to
+    // TODAY, not to whichever day the check-in form is editing (which defaults
+    // to yesterday).
+
+    private func day(_ offset: Int, from base: Date) -> Date {
+        Calendar.current.date(byAdding: .day, value: offset, to: base)!
+    }
+
+    /// A status stub: `qualifying` lists the day-offsets that count.
+    private func statuses(_ qualifying: Set<Int>, base: Date) -> (Date) -> CheckInAutoFill.DayStatus? {
+        let cal = Calendar.current
+        return { date in
+            let offset = cal.dateComponents([.day], from: cal.startOfDay(for: base),
+                                            to: cal.startOfDay(for: date)).day ?? 0
+            guard qualifying.contains(offset) else { return nil }
+            return CheckInAutoFill.DayStatus(isRest: false, qualifies: true, summary: "Logged")
+        }
+    }
+
+    func testStreakCountsBackFromToday() {
+        let today = Date().startOfDay
+        let n = CheckInAutoFill.streak(endingAt: today, status: statuses([0, -1, -2], base: today))
+        XCTAssertEqual(n, 3)
+    }
+
+    func testUnloggedTodayDoesNotBreakTheStreak() {
+        // The morning case: nothing logged yet today, three days before it.
+        let today = Date().startOfDay
+        let n = CheckInAutoFill.streak(endingAt: today, status: statuses([-1, -2, -3], base: today))
+        XCTAssertEqual(n, 3, "an unlogged morning must not read as a broken streak")
+    }
+
+    func testStreakStopsAtTheFirstGap() {
+        let today = Date().startOfDay
+        let n = CheckInAutoFill.streak(endingAt: today, status: statuses([0, -1, -3, -4], base: today))
+        XCTAssertEqual(n, 2, "the gap at -2 ends it")
+    }
+
+    func testNoActivityAtAllIsZero() {
+        let today = Date().startOfDay
+        let n = CheckInAutoFill.streak(endingAt: today, status: statuses([], base: today))
+        XCTAssertEqual(n, 0)
+    }
+
+    func testRestDayDoesNotQualify() {
+        let today = Date().startOfDay
+        let rest = CheckInAutoFill.DayStatus(isRest: true, qualifies: false, summary: "Rest day")
+        let n = CheckInAutoFill.streak(endingAt: today) { _ in rest }
+        XCTAssertEqual(n, 0, "a rest day is recorded but does not extend the streak")
+    }
 }

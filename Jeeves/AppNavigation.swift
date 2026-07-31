@@ -42,20 +42,25 @@ final class AppNavigator {
 /// The app-wide hamburger. Every screen's header renders exactly this, so the
 /// menu never disagrees with itself between tabs.
 struct AppMenuButton: View {
-    @Environment(AppNavigator.self) private var nav
+    // Optional on purpose. The non-optional form TRAPS the moment the view is
+    // rendered without a navigator in scope ("No Observable object of type
+    // AppNavigator found") — which is exactly what every #Preview does, and
+    // what any future sheet that forgets to forward the environment would do.
+    // A menu that quietly does nothing beats a crash.
+    @Environment(AppNavigator.self) private var nav: AppNavigator?
 
     var body: some View {
         Menu {
             Menu {
                 ForEach(StatsScreen.allCases) { screen in
-                    Button { nav.statsScreen = screen } label: {
+                    Button { nav?.statsScreen = screen } label: {
                         Label(screen.label, systemImage: screen.icon)
                     }
                 }
             } label: {
                 Label("Stats", systemImage: "chart.bar.fill")
             }
-            Button { nav.showSettings = true } label: {
+            Button { nav?.showSettings = true } label: {
                 Label("Settings", systemImage: "gearshape")
             }
         } label: {
@@ -72,10 +77,10 @@ struct AppMenuButton: View {
 /// The floating Jeeves bubble. Chat stopped being a tab — it follows you
 /// across screens instead, and opens as a modal you can minimise back down.
 struct ChatBubble: View {
-    @Environment(AppNavigator.self) private var nav
+    @Environment(AppNavigator.self) private var nav: AppNavigator?
 
     var body: some View {
-        Button { nav.chatPresented = true } label: {
+        Button { nav?.chatPresented = true } label: {
             Circle()
                 .fill(Color.accent)
                 .frame(width: 56, height: 56)
