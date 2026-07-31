@@ -84,6 +84,8 @@ def main() -> None:
         try:
             verdict = call_gpt(key, "gpt-5.6-terra", content)
         except Exception:
+            # Single same-model RETRY for transient failures (no older-model
+            # fallback exists any more).
             verdict = call_gpt(key, "gpt-5.6-terra", content)
         reports.append(verdict)
         flag = "🧳" if verdict.get("stale") else ("⚠️" if verdict.get("score", 10) < 7 else "  ")

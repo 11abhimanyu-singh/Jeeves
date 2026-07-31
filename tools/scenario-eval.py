@@ -114,7 +114,7 @@ def call(key, system, user, max_tokens=24000):
                 return result
         except (urllib.error.HTTPError, json.JSONDecodeError):
             continue
-    sys.exit("Both models returned empty/invalid JSON — try again or raise max_tokens.")
+    sys.exit("The model returned empty/invalid JSON — try again or raise max_tokens.")
 
 
 def main() -> None:

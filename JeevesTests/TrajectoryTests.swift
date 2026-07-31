@@ -73,8 +73,11 @@ final class TrajectoryTests: XCTestCase {
 
         let executor = ChatToolExecutor(modelContext: context)
         // Live traffic can't be measured from an in-memory suite — a fixed
-        // stub keeps journeys honest (non-zero) without the network.
+        // stub keeps journeys honest (non-zero) without the network. And no
+        // notification scheduling: a fresh simulator's permission prompt
+        // would hang a headless run.
         executor.commuteMinutes = { _, _, _ in 45 }
+        executor.scheduleNudges = false
 
         // Load the permanent dialogue plan from the repo.
         let planURL = URL(fileURLWithPath: #filePath)

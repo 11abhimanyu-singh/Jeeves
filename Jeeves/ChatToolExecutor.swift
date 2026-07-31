@@ -18,6 +18,9 @@ import SwiftUI
 final class ChatToolExecutor {
     let modelContext: ModelContext
     var now: () -> Date = { Date() }
+    // Headless test runs must not touch UNUserNotificationCenter — a fresh
+    // simulator's permission prompt would hang the suite.
+    var scheduleNudges = true
     // Injectable for headless test runs — live traffic can't be measured
     // inside an in-memory suite, and travel=0 rows there read as data
     // corruption to every audit. Real runs keep the live lookup.
@@ -295,9 +298,10 @@ final class ChatToolExecutor {
         // A pasted Maps link resolves to a real address + pin, same as add_event.
         for e in matches { resolveEventDestinationIfLink(e) }
         let days = matches.map { Self.dayString($0.date) }.joined(separator: ", ")
-        // A time change ripples: the rest of that day's plan may now be stale.
-        let replanNote = (newStart != nil || newEnd != nil)
-            ? " If this shifts a day already planned, OFFER to replan the remainder (replan_today, with resume_at and any missed_blocks)."
+        // A time change ripples — but only TODAY's plan can go stale mid-day.
+        let touchesToday = matches.contains { Calendar.current.isDate($0.date, inSameDayAs: today) }
+        let replanNote = ((newStart != nil || newEnd != nil) && touchesToday)
+            ? " This changes today — OFFER to replan the remainder (replan_today, with resume_at and any missed_blocks)."
             : ""
         return .init(text: "Updated \(matches.count) event(s) (\(days)): \(Set(changes).joined(separator: "; ")).\(replanNote)")
     }
@@ -505,10 +509,26 @@ final class ChatToolExecutor {
     // then CGH Earth Wayanad"). Each lodging is a TripStay; consecutive
     // different stays get an auto drive transition, measured in background.
 
+    /// resolveDate silently answers TODAY for anything it can't read — fine
+    /// for optional filters, catastrophic for a stay (a garbled date would
+    /// mint a trip covering today and sweep today's plan). Only these forms
+    /// count as an explicit day.
+    private func isExplicitDay(_ raw: String?) -> Bool {
+        guard let s = raw?.lowercased().trimmingCharacters(in: .whitespaces), !s.isEmpty else { return false }
+        if s.contains("today") || s.contains("tonight") || s.contains("tomorrow") { return true }
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f.date(from: s) != nil
+    }
+
     @MainActor
     private func toolAddStay(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
         let place = (input["hotel"] as? String ?? "").trimmingCharacters(in: .whitespaces)
         guard !place.isEmpty else { return .init(text: "Need the hotel/place name.") }
+        guard isExplicitDay(input["arrive_date"] as? String),
+              isExplicitDay(input["depart_date"] as? String) else {
+            return .init(text: "Which dates? Give arrive_date and depart_date as YYYY-MM-DD (or 'today'/'tomorrow') — I won't guess.")
+        }
         let arrive = JeevesChatService.resolveDate(input["arrive_date"] as? String, relativeTo: today)
         let depart = JeevesChatService.resolveDate(input["depart_date"] as? String, relativeTo: today)
         guard depart >= arrive else { return .init(text: "Checkout is before check-in.") }
@@ -516,23 +536,48 @@ final class ChatToolExecutor {
         // Trip resolution. The old `?? trips.last` fallback silently attached
         // any unmatched stay to whatever trip happened to exist — a whole
         // Mysore road trip once vanished into the Singapore trip that way.
-        // Now: name match wins; an unnamed stay may join a trip already
-        // covering its dates; otherwise the stay CREATES its trip.
+        // Now: name match wins (with a dead-trip sanity check); an unnamed
+        // stay may join a trip FULLY covering its dates; otherwise the stay
+        // CREATES its trip — guarded against interior overlap, boundary
+        // handover days stay legal.
         let tripQuery = (input["trip"] as? String ?? "").trimmingCharacters(in: .whitespaces)
         let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
         var resolved = JeevesChatService.bestMatches(trips, title: \.title, query: tripQuery).first
-        if resolved == nil, tripQuery.isEmpty {
-            resolved = trips.first {
-                $0.startDate <= arrive.startOfDay && arrive.startOfDay <= $0.endDate
+        if let match = resolved {
+            // A name match whose trip ended long before this stay is a NEW
+            // trip being described with an old name — don't stretch a fossil.
+            let gap = Calendar.current.dateComponents([.day], from: match.endDate,
+                                                      to: arrive.startOfDay).day ?? 0
+            if gap > 30 {
+                return .init(text: "'\(match.title)' ended \(Self.dayString(match.endDate)) — over a month before this stay. If this is a new trip, use a fresh trip name; to really stretch the old one, extend it first with update_trip.")
             }
+        }
+        if resolved == nil, tripQuery.isEmpty {
+            let covering = trips
+                .filter { $0.startDate <= arrive.startOfDay && depart.startOfDay <= $0.endDate }
+                .sorted { $0.startDate > $1.startDate }
+            if covering.count > 1 {
+                let names = covering.map { "'\($0.title)' (\(TravelGuard.dayRange($0)))" }
+                    .joined(separator: ", ")
+                return .init(text: "\(names) all cover those dates — which trip is this stay part of? Name it in trip.")
+            }
+            resolved = covering.first
         }
         var createdTrip = false
         let trip: Trip
         if let resolved {
             trip = resolved
         } else {
+            let newStart = arrive.startOfDay, newEnd = depart.startOfDay
+            // STRICT INTERIOR overlap only — trips may legally touch at a
+            // handover day (land from Singapore, leave for Mysore). Minting a
+            // trip inside another would trip the audit forever and hand
+            // clean_travel_data a merge that recreates the merged-Mysore bug.
+            if let clash = trips.first(where: { $0.endDate > newStart && $0.startDate < newEnd }) {
+                return .init(text: "Those dates sit inside '\(clash.title)' (\(TravelGuard.dayRange(clash))). One set of days belongs to one trip: name '\(clash.title)' in trip to add the stay there, or move its dates first with update_trip.")
+            }
             let newTrip = Trip(title: tripQuery.isEmpty ? place : tripQuery,
-                               startDate: arrive.startOfDay, endDate: depart.startOfDay)
+                               startDate: newStart, endDate: newEnd)
             modelContext.insert(newTrip)
             modelContext.saveOrLog("chat.addStay.newTrip")
             EventLog.log(.tripCreated, "\(newTrip.title) \(TravelGuard.dayRange(newTrip)) via add_stay",
@@ -579,7 +624,7 @@ final class ChatToolExecutor {
                     EventLog.log(.journeyMeasured, "\(seg.label) — \(m) min", subject: seg.id,
                                  context: modelContext)
                     await TravelGuard.absorb(seg, context: modelContext)
-                    await TravelNotifier.schedule(segment: seg)
+                    if self.scheduleNudges { await TravelNotifier.schedule(segment: seg) }
                 }
             }
         }
@@ -734,9 +779,14 @@ final class ChatToolExecutor {
     private func toolAddJourney(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
         let tripQuery = input["trip"] as? String ?? ""
         let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
-        guard let trip = JeevesChatService.bestMatches(trips, title: \.title, query: tripQuery).first
-                ?? trips.last else {
-            return .init(text: "No trip matches '\(tripQuery)'. Create one with add_trip first.")
+        // No silent trips.last fallback — a journey landing in an arbitrary
+        // trip is the same wrong-home bug as the merged-Mysore stay.
+        guard let trip = JeevesChatService.bestMatches(trips, title: \.title, query: tripQuery).first else {
+            if trips.isEmpty {
+                return .init(text: "No trips exist yet — create one with add_trip first.")
+            }
+            let names = trips.map { "'\($0.title)' (\(TravelGuard.dayRange($0)))" }.joined(separator: ", ")
+            return .init(text: "No trip matches '\(tripQuery)'. Existing: \(names). Name one of them, or create the right trip with add_trip.")
         }
         let mode = TravelMode(rawValue: input["mode"] as? String ?? "flight") ?? .flight
         guard let minute = minutesFrom(input["time"] as? String) else {
@@ -862,7 +912,7 @@ final class ChatToolExecutor {
         // trip. Without this, a chat-added two-day drive computed a leave day
         // outside the trip window and its card rendered on no day at all.
         let widened = await TravelGuard.absorb(segment, context: modelContext)
-        await TravelNotifier.schedule(segment: segment)
+        if scheduleNudges { await TravelNotifier.schedule(segment: segment) }
 
         guard let plan = LeaveBy.plan(for: segment) else {
             return .init(text: "Journey saved, but I need \(mode == .drive ? "an arrival" : "a departure") time to compute a leave-by.")

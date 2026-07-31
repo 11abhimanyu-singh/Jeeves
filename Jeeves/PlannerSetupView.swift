@@ -45,6 +45,11 @@ struct PlannerSetupView: View {
         }
         .sheet(item: $editingEvent) { event in
             EventEditSheet(draft: EventDraft(event: event), onSave: { draft in apply(draft, to: event) }, onDelete: {
+                // Same rule as every other delete path: a synced event stays
+                // deleted — tombstone its calendar ID or sync resurrects it.
+                if !event.externalID.isEmpty {
+                    modelContext.insert(CalendarTombstone(externalID: event.externalID))
+                }
                 modelContext.delete(event); modelContext.saveOrLog()
             })
         }
@@ -168,7 +173,12 @@ struct PlannerSetupView: View {
             defer { isImportingCalendar = false }
             do {
                 let calEvents = try await GoogleCalendarService.events(on: today)
+                // Deleted synced events stay deleted — this path used to
+                // resurrect tombstoned events (and imported them without
+                // their externalID, so later syncs duplicated them).
+                let dead = CalendarTombstone.ids(in: modelContext)
                 for c in calEvents {
+                    guard c.externalID.isEmpty || !dead.contains(c.externalID) else { continue }
                     // Skip anything already imported (same title + start today).
                     let dup = todayEvents.contains { $0.title == c.title && $0.startMinute == c.startMinute }
                     guard !dup else { continue }
@@ -176,7 +186,8 @@ struct PlannerSetupView: View {
                         date: today, title: c.title,
                         startMinute: c.startMinute, endMinute: c.endMinute,
                         destinationAddress: c.location, outboundStart: .home, source: .calendar,
-                        isAllDay: c.isAllDay
+                        isAllDay: c.isAllDay,
+                        externalID: c.externalID
                     ))
                 }
                 modelContext.saveOrLog()

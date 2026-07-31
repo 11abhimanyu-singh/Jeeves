@@ -33,6 +33,7 @@ final class ChatToolExecutorTests: XCTestCase {
         container = try! ModelContainer(for: schema, configurations: [config])
         executor = ChatToolExecutor(modelContext: container.mainContext)
         executor.commuteMinutes = { _, _, _ in 42 }
+        executor.scheduleNudges = false
     }
 
     override func tearDown() {
@@ -130,6 +131,64 @@ final class ChatToolExecutorTests: XCTestCase {
 
         XCTAssertTrue(result.text.contains("Which date"), "must ask, never assume today")
         XCTAssertEqual(((try? context.fetch(FetchDescriptor<TravelSegment>())) ?? []).count, 0)
+    }
+
+    // MARK: measured auto-transition (the stub makes it deterministic)
+
+    func testSecondStayGetsMeasuredDriveTransition() async throws {
+        let context = container.mainContext
+        _ = await executor.run(.init(
+            id: "m1", name: "add_stay",
+            input: ["trip": "Mysore", "hotel": "Radisson Mysore",
+                    "arrive_date": day(10), "depart_date": day(12)]))
+        _ = await executor.run(.init(
+            id: "m2", name: "add_stay",
+            input: ["trip": "Mysore", "hotel": "CGH Earth Wayanad",
+                    "arrive_date": day(12), "depart_date": day(14)]))
+
+        // The measure runs in a background Task — poll briefly.
+        var seg: TravelSegment?
+        for _ in 0..<40 {
+            try await Task.sleep(nanoseconds: 50_000_000)
+            let segs = (try? context.fetch(FetchDescriptor<TravelSegment>())) ?? []
+            if let s = segs.first(where: { $0.travelMinutes > 0 }) { seg = s; break }
+        }
+        XCTAssertNotNil(seg, "auto transition must exist and get measured")
+        XCTAssertEqual(seg?.travelMinutes, 42, "measured via the injected stub")
+        XCTAssertEqual(seg?.mode, .drive)
+        XCTAssertTrue(seg?.label.contains("Radisson") ?? false)
+    }
+
+    // MARK: flight zone caveat + replan hint
+
+    func testFlightWithoutZonesGetsCorrectionNote() async {
+        let context = container.mainContext
+        context.insert(Trip(title: "Colombo",
+                            startDate: Calendar.current.date(byAdding: .day, value: 20, to: Date())!.startOfDay,
+                            endDate: Calendar.current.date(byAdding: .day, value: 23, to: Date())!.startOfDay))
+        try? context.save()
+
+        let result = await executor.run(.init(
+            id: "z1", name: "add_journey",
+            input: ["trip": "Colombo", "mode": "flight", "label": "UL 174",
+                    "to": "Bengaluru Airport", "date": day(20), "time": "09:45"]))
+
+        XCTAssertTrue(result.text.contains("no timezones stamped"),
+                      "flight saved without zones must surface the gap: \(result.text)")
+    }
+
+    func testEditingTodaysEventSuggestsReplanOffer() async {
+        let context = container.mainContext
+        context.insert(DailyEvent(date: Date().startOfDay, title: "Standup",
+                                  startMinute: 600, endMinute: 660))
+        try? context.save()
+
+        let result = await executor.run(.init(
+            id: "r1", name: "edit_event",
+            input: ["title": "Standup", "new_end": "12:00"]))
+
+        XCTAssertTrue(result.text.contains("OFFER to replan"),
+                      "time change on today must carry the replan hint: \(result.text)")
     }
 
     // MARK: calendar tombstones

@@ -700,9 +700,14 @@ struct DayPlannerView: View {
                 // not even offered for re-import (they'd be pre-checked and
                 // quietly resurrected on confirm).
                 let dead = CalendarTombstone.ids(in: modelContext)
+                let before = evs.count
                 evs.removeAll { !$0.externalID.isEmpty && dead.contains($0.externalID) }
                 if evs.isEmpty {
-                    calendarError = "No calendar events on \(day == today ? "today" : "this day")."
+                    // "No events" would be a lie when everything on the day
+                    // was previously deleted here — say what actually happened.
+                    calendarError = before > 0
+                        ? "Only previously deleted events on this day — they stay deleted."
+                        : "No calendar events on \(day == today ? "today" : "this day")."
                 } else {
                     calendarReview = CalendarReview(date: day, events: evs)
                 }
