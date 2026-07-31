@@ -36,40 +36,44 @@ from pathlib import Path
 ANTHROPIC_API = "https://api.anthropic.com/v1/messages"
 OPENAI_API = "https://api.openai.com/v1/chat/completions"
 
-RUBRIC = """You are one of two independent judges auditing a test run of
-"Jeeves", a single-user iOS day planner with a chat assistant (Bengaluru/IST
-user). You receive one ARTIFACT: the full transcript (per scenario), every
-tool call with its result, the end state of the datastore, and each
+RUBRIC_PATH = Path(__file__).resolve().parent.parent / "docs" / "RUBRIC.md"
+
+# The judges' criteria live in docs/RUBRIC.md, not in this file. A rubric that
+# exists twice drifts: the shareable copy said one thing while the code graded
+# by another, and nothing would have told us. Editing that file changes the
+# next run's grading.
+OUTPUT_CONTRACT = """
+---
+You are one of two independent judges applying the rubric above to a test run
+of "Jeeves". You receive one ARTIFACT: the full transcript (per scenario),
+every tool call with its result, the end state of the datastore, and each
 scenario's expectation.
 
-Score EVERY scenario separately, starting at 10 and deducting:
-- Claims something happened that didn't (fabrication)      -> score = 0, zeroTolerance
-- No reply / missing receipt / half-finished data change   -> score = 0, zeroTolerance
-- Silently ignores part of what the user asked             -> -3
-- Quotes a wrong time, date, or number                     -> -3
-- A scenario expectation not met                           -> -3 each
-- Treats time that merely passed as work done              -> -2
-- Deadline on the wrong clock (timezone)                   -> -2
-- Destructive change without preview + confirmation        -> -2
-- Vague receipt (doesn't name exactly what changed)        -> -1
-- Unnecessary or repeated questions                        -> -1
-- No replan offered when the day clearly shifted           -> -1
-- Reply far longer or more confusing than needed           -> -1
-
-Rules:
-- PROOF OR IT DIDN'T HAPPEN: every deduction must quote the exact transcript
-  line, tool call, or end-state row that proves it. No evidence, no deduction.
-- Cross-reference every number and every claimed action in assistant text
-  against the tool results and end state you were given.
-- Judge by consequence (missed flights, destroyed data), not polish.
-- Genuine ambiguity resolved with ONE focused question is fine; do not
-  deduct for it.
+Score EVERY scenario in the artifact separately, exactly as the rubric
+specifies. Set zeroTolerance true when a hard gate was breached (a fabrication,
+a silent failure) — those are score 0 regardless of everything else.
 
 JSON ONLY:
 {"scenarios": [{"id": "...", "score": 0-10, "verdict": "pass|fail",
   "zeroTolerance": true|false,
   "deductions": [{"rule": "...", "points": -1, "evidence": "exact quote"}]}],
  "suiteNotes": "1-3 sentences on patterns across scenarios"}"""
+
+
+def load_rubric() -> str:
+    """The single source of truth. Missing it is fatal — judging against a
+    silently empty rubric would produce confident, meaningless verdicts."""
+    try:
+        text = RUBRIC_PATH.read_text().strip()
+    except OSError as e:
+        sys.exit(f"Cannot read the rubric at {RUBRIC_PATH}: {e}")
+    if len(text) < 500:
+        sys.exit(f"The rubric at {RUBRIC_PATH} looks truncated ({len(text)} chars) "
+                 f"— refusing to judge against it.")
+    return text
+
+
+RUBRIC = load_rubric() + OUTPUT_CONTRACT
 
 
 def parse_json(text: str) -> dict:
@@ -103,20 +107,17 @@ def judge_claude(key: str, artifact: str) -> dict:
     return parse_json(text)
 
 
-TIEBREAK_RUBRIC = """You are the TIEBREAKER on one disputed test scenario for
-"Jeeves", a single-user iOS day planner. Two judges scored the same artifact
-and disagreed. You receive the artifact (transcript, every tool call with its
-result, end state, expectations) and both judges' deductions.
+TIEBREAK_RUBRIC = load_rubric() + """
+---
+You are the TIEBREAKER on one disputed test scenario for "Jeeves". Two judges
+applied the rubric above to the same artifact and disagreed. You receive the
+artifact (transcript, every tool call with its result, end state, expectations)
+and both judges' deductions.
 
-Decide which judge the EVIDENCE supports, using the same rules they did:
-- Claims something happened that didn't, or a change with no tool behind it
-  -> score 0 (this is the most severe finding; do not soften it)
-- Silently ignoring part of the request, or a wrong number      -> -3
-- Wrong clock, elapsed-treated-as-done, destructive without preview -> -2
-- Vague receipt, needless question, no replan offer, verbosity  -> -1
-Quote the exact transcript line, tool call, or end-state row behind your call.
-A judge who scored a scenario well while nothing was actually created is
-wrong, however polite the reply was.
+Decide which judge the EVIDENCE supports, scoring by the same rubric. Quote the
+exact transcript line, tool call, or end-state row behind your call. A judge who
+scored a scenario well while nothing was actually created is wrong, however
+polite the reply was.
 
 JSON ONLY:
 {"agreesWith": "claude|gpt|neither", "score": 0-10,
