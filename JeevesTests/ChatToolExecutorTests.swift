@@ -93,6 +93,32 @@ final class ChatToolExecutorTests: XCTestCase {
         XCTAssertEqual(stays.first?.tripID, trip.id)
     }
 
+    func testAddStayIsIdempotentForTheSameBooking() async {
+        let context = container.mainContext
+        for id in ["s1", "s2"] {
+            _ = await executor.run(.init(
+                id: id, name: "add_stay",
+                input: ["trip": "Ooty", "hotel": "Western Valley Resort",
+                        "arrive_date": day(14), "depart_date": day(16)]))
+        }
+        let stays = (try? context.fetch(FetchDescriptor<TripStay>())) ?? []
+        XCTAssertEqual(stays.count, 1, "the same booking twice must UPDATE, not duplicate")
+    }
+
+    func testSameHotelOnSeparateDatesStaysTwoBookings() async {
+        let context = container.mainContext
+        _ = await executor.run(.init(
+            id: "s3", name: "add_stay",
+            input: ["trip": "Delhi", "hotel": "Airport Hotel",
+                    "arrive_date": day(5), "depart_date": day(6)]))
+        _ = await executor.run(.init(
+            id: "s4", name: "add_stay",
+            input: ["trip": "Delhi", "hotel": "Airport Hotel",
+                    "arrive_date": day(12), "depart_date": day(13)]))
+        let stays = (try? context.fetch(FetchDescriptor<TripStay>())) ?? []
+        XCTAssertEqual(stays.count, 2, "first and last night at the same hotel are two bookings")
+    }
+
     // MARK: delete_stay two-phase
 
     func testDeleteStayPreviewsThenDeletesOnConfirm() async {

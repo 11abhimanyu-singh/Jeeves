@@ -620,6 +620,32 @@ final class ChatToolExecutor {
             createdTrip = true
             trip = newTrip
         }
+        // Idempotent, like add_trip and add_journey: a correction turn ("make
+        // that two nights", or the model simply restating the itinerary) must
+        // UPDATE the booking, never mint a second one. Same trip + same place +
+        // overlapping dates is the same stay. Non-overlapping dates at the same
+        // hotel stay separate — a first and last night there are two bookings.
+        let siblings = ((try? modelContext.fetch(FetchDescriptor<TripStay>())) ?? [])
+            .filter { $0.tripID == trip.id }
+        if let existing = siblings.first(where: {
+            ($0.place.localizedCaseInsensitiveContains(place)
+             || place.localizedCaseInsensitiveContains($0.place))
+                && $0.departDate >= arrive.startOfDay && depart.startOfDay >= $0.arriveDate
+        }) {
+            let oldRange = fmtRange(existing)
+            existing.arriveDate = arrive.startOfDay
+            existing.departDate = depart.startOfDay
+            if let address = input["address"] as? String, !address.isEmpty {
+                existing.address = address
+            }
+            if arrive.startOfDay < trip.startDate { trip.startDate = arrive.startOfDay }
+            if depart.startOfDay > trip.endDate { trip.endDate = depart.startOfDay }
+            modelContext.saveOrLog("chat.addStay.upsert")
+            EventLog.log(.stayUpdated, "\(existing.place) \(oldRange) → \(fmtRange(existing))",
+                         subject: existing.id, context: modelContext)
+            return .init(text: "Updated the existing \(existing.place) stay: \(oldRange) → \(fmtRange(existing)). Nothing new created.")
+        }
+
         let stay = TripStay(tripID: trip.id, place: place,
                             address: input["address"] as? String ?? "",
                             arriveDate: arrive, departDate: depart)
