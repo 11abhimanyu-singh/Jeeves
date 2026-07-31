@@ -36,6 +36,27 @@ TOOLS = Path(__file__).parent
 DEFAULT_MAX_AGE_HOURS = 36
 
 
+def openai_key():
+    """The key, from the environment or the login Keychain.
+
+    An unattended 08:30 run has no shell profile and no stashed file (the
+    stash-then-delete dance was for interactive runs). The Keychain is the
+    one place a key can live that survives reboots without ever sitting in
+    plaintext in the repo, a dotfile, or a transcript.
+    """
+    env = os.environ.get("OPENAI_API_KEY", "").strip()
+    if env:
+        return env
+    try:
+        r = subprocess.run(
+            ["security", "find-generic-password", "-a", os.environ.get("USER", ""),
+             "-s", "jeeves-openai", "-w"],
+            capture_output=True, text=True, timeout=20)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
 def read_json(path):
     try:
         return json.loads(path.read_text())
@@ -159,15 +180,22 @@ def main() -> None:
         lines.append("\nNo jeeves-anomalies.json yet — the phone's scan hasn't exported.")
 
     # ---- 4. Judged layers ------------------------------------------------
-    key = os.environ.get("OPENAI_API_KEY", "").strip()
+    key = openai_key()
     if key and store.exists():
         dump = ICLOUD.parent / "jeeves-dump.json"
+        # Passed as env to the children only — never written anywhere.
+        child_env = {**os.environ, "OPENAI_API_KEY": key}
         results["dump"] = run("DUMP", [sys.executable, str(TOOLS / "store-dump.py"),
                                        str(store), str(dump)], lines)
-        results["coherence"] = run("COHERENCE (third party)",
-                                   [sys.executable, str(TOOLS / "coherence-eval.py"), str(dump)], lines)
+        rc = subprocess.run([sys.executable, str(TOOLS / "coherence-eval.py"), str(dump)],
+                            capture_output=True, text=True, env=child_env)
+        lines.append("\n===== COHERENCE (third party) =====")
+        lines.append(((rc.stdout or "") + (rc.stderr or "")).rstrip())
+        lines.append(f"----- COHERENCE: exit {rc.returncode}")
+        results["coherence"] = rc.returncode
     else:
-        lines.append("\n===== JUDGED LAYERS: SKIPPED — no OPENAI_API_KEY =====")
+        why = "no key in the environment or Keychain" if not key else "no exported store to judge"
+        lines.append(f"\n===== JUDGED LAYERS: SKIPPED — {why} =====")
         lines.append("Deterministic layers ran; judgment layers did NOT. Not a clean bill.")
 
     worst = max(results.values()) if results else 0
