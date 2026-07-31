@@ -411,4 +411,24 @@ enum SyncOutbox {
                 d.string(forKey: failureKey),
                 d.object(forKey: failureAtKey) as? Date)
     }
+
+    /// Whether the last export actually LEFT the phone.
+    ///
+    /// A write to the ubiquity container succeeds locally even when iCloud
+    /// isn't syncing this app — which is exactly how the export reported
+    /// success for days while the Mac received nothing. Uploading is the
+    /// property that matters, so it's the one reported.
+    ///
+    /// nil means there's nothing to judge (no container, or no file yet).
+    nonisolated static func uploadState() -> (uploaded: Bool, error: String?)? {
+        guard let docs = documentsURL() else { return nil }
+        let url = docs.appendingPathComponent("heartbeat.json")
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let keys: Set<URLResourceKey> = [.ubiquitousItemIsUploadedKey,
+                                         .ubiquitousItemUploadingErrorKey]
+        guard let values = try? url.resourceValues(forKeys: keys) else { return nil }
+        let uploaded = values.ubiquitousItemIsUploaded ?? false
+        let error = (values.ubiquitousItemUploadingError as NSError?)?.localizedDescription
+        return (uploaded, error)
+    }
 }

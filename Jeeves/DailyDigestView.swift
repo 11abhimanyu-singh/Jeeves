@@ -140,7 +140,19 @@ struct DailyDigestView: View {
             if let failure = health.failure {
                 row("Mac export", "failing — \(failure)", tint: Color.accentDeep)
             } else if let ok = health.lastSuccess {
-                row("Mac export", "last succeeded \(ok.formatted(.dateTime.month(.abbreviated).day().hour().minute()))")
+                // "Written" is not "delivered": a local write to the iCloud
+                // container succeeds even when the app isn't syncing.
+                let upload = SyncOutbox.uploadState()
+                let when = ok.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+                if let upload, !upload.uploaded {
+                    row("Mac export", "written \(when) but NOT uploaded"
+                        + (upload.error.map { " — \($0)" } ?? " — iCloud hasn't taken it"),
+                        tint: Color.accentDeep)
+                } else if upload?.uploaded == true {
+                    row("Mac export", "uploaded · last write \(when)")
+                } else {
+                    row("Mac export", "last write \(when) (upload state unknown)")
+                }
             } else {
                 row("Mac export", "never completed on this device", tint: Color.accentDeep)
             }

@@ -86,6 +86,16 @@ enum AnomalyScan {
                 rule: "export-channel-stale",
                 title: "No successful iCloud export in \(Int(now.timeIntervalSince(last) / 3600)) h",
                 detail: "The app hasn't managed a successful export since \(dayFmt.string(from: last)). Either it hasn't been opened or iCloud is refusing writes."))
+        } else if let upload = SyncOutbox.uploadState(), !upload.uploaded {
+            // The write succeeded but iCloud never took it — the exact state
+            // that made this look healthy while the Mac stayed empty.
+            out.append(Anomaly(
+                severity: "high", day: dayFmt.string(from: now),
+                rule: "export-written-but-not-uploaded",
+                title: "Export is written but not uploading",
+                detail: "The file is on the phone but iCloud hasn't uploaded it"
+                    + (upload.error.map { " (\($0))" } ?? "")
+                    + ". Writing to the container succeeds even when iCloud Drive is off for this app, so check Settings → Apple Account → iCloud → See All → Jeeves, and that iCloud storage isn't full."))
         } else if health.lastSuccess == nil {
             out.append(Anomaly(
                 severity: "high", day: dayFmt.string(from: now),
