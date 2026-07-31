@@ -70,7 +70,7 @@ struct RoutineCatalogView: View {
                     .font(.serif(16))
                     .foregroundStyle(a.enabled ? Color.textPrimary : Color.textMuted)
                 Text("\(a.durationMinutes) min · \(a.tier.rawValue)")
-                    .font(.system(size: 12.5)).foregroundStyle(Color.textSoft)
+                    .font(.ui(12.5)).foregroundStyle(Color.textSoft)
             }
             Spacer()
             Toggle("", isOn: Binding(

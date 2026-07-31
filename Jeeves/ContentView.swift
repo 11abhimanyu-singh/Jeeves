@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit   // UIFontMetrics — the only way to scale an arbitrary point size
 import SwiftData
 
 // MARK: - Palette (matches the web prototype's design tokens)
@@ -45,12 +46,73 @@ extension Color {
 // (Georgia ships with iOS, so nothing needs bundling; swap the family name here
 // if real PT Serif files are ever added.)
 extension Font {
-    static func serif(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
-        .custom("Georgia", size: size).weight(weight)
+    /// The text style a given point size should scale against. Picking one per
+    /// size band keeps the app's existing rhythm — a 10 pt eyebrow and a 40 pt
+    /// stat shouldn't grow at the same rate — while still tracking the user's
+    /// setting.
+    nonisolated static func metricStyle(for size: CGFloat) -> UIFont.TextStyle {
+        switch size {
+        // 11.5, not 11: the floor is 11, so a `..<11` band would be dead code
+        // and the app's smallest text would scale as caption1 instead of the
+        // smallest style there is.
+        case ..<11.5:  return .caption2
+        case ..<12.5:  return .caption1
+        case ..<14:    return .footnote
+        case ..<15.5:  return .subheadline
+        case ..<17.5:  return .callout
+        case ..<20:    return .title3
+        case ..<26:    return .title2
+        case ..<34:    return .title1
+        default:       return .largeTitle
+        }
     }
+
+    /// Smallest size the app will render. Below this, text stops being
+    /// readable for a lot of people — and the 8.5 pt time-zone label was the
+    /// one that distinguishes 15:00 Thimphu from 15:00 IST.
+    nonisolated static let minimumPointSize: CGFloat = 11
+
+    /// Scaling replacement for `.system(size:)`. `Font.system(size:)` is fixed
+    /// forever — there is no `relativeTo:` for it — so the point size is run
+    /// through UIFontMetrics, which is what Dynamic Type actually uses. At the
+    /// default text size `scaledValue(for:)` is the identity, so this changes
+    /// nothing visually until the user asks it to.
+    static func ui(_ size: CGFloat,
+                   weight: Font.Weight = .regular,
+                   design: Font.Design = .default) -> Font {
+        let floored = max(size, minimumPointSize)
+        let scaled = UIFontMetrics(forTextStyle: metricStyle(for: floored))
+            .scaledValue(for: floored)
+        return .system(size: scaled, weight: weight, design: design)
+    }
+
+    /// The editorial serif. `.custom(_:size:relativeTo:)` DOES scale, unlike
+    /// the system-font initialiser — this one line is what makes 81 display
+    /// call sites respond to Dynamic Type.
+    static func serif(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
+        .custom("Georgia", size: max(size, minimumPointSize),
+                relativeTo: textStyle(for: max(size, minimumPointSize)))
+            .weight(weight)
+    }
+
     /// Kept for existing call sites; now resolves to the serif display face.
     static func heading(_ size: CGFloat) -> Font {
         serif(size)
+    }
+
+    /// SwiftUI's mirror of `metricStyle(for:)`, for `relativeTo:`.
+    nonisolated static func textStyle(for size: CGFloat) -> Font.TextStyle {
+        switch size {
+        case ..<11.5:  return .caption2   // mirrors metricStyle's floor band
+        case ..<12.5:  return .caption
+        case ..<14:    return .footnote
+        case ..<15.5:  return .subheadline
+        case ..<17.5:  return .callout
+        case ..<20:    return .title3
+        case ..<26:    return .title2
+        case ..<34:    return .title
+        default:       return .largeTitle
+        }
     }
 }
 
@@ -237,7 +299,7 @@ struct ContentView: View {
                 Circle()
                     .fill(Color.accent)
                     .frame(width: 30, height: 30)
-                    .overlay(Image(systemName: icon).foregroundStyle(.white).font(.system(size: 13)))
+                    .overlay(Image(systemName: icon).foregroundStyle(.white).font(.ui(13)))
                 Text(title).font(.heading(18)).foregroundStyle(Color.textPrimary)
             }
             Spacer()
@@ -248,8 +310,8 @@ struct ContentView: View {
 
     private var streakChip: some View {
         HStack(spacing: 4) {
-            Image(systemName: "flame.fill").font(.system(size: 12)).foregroundStyle(Color.sageDeep)
-            Text("\(streak) day streak").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Color.sageDeep)
+            Image(systemName: "flame.fill").font(.ui(12)).foregroundStyle(Color.sageDeep)
+            Text("\(streak) day streak").font(.ui(12.5, weight: .semibold)).foregroundStyle(Color.sageDeep)
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
         .background(Capsule().fill(Color.sageLight))
@@ -289,14 +351,14 @@ struct ContentView: View {
                             _ tapped: @escaping () -> Void) -> some View {
         Button(action: tapped) {
             HStack(spacing: 12) {
-                Image(systemName: icon).font(.system(size: 18))
-                    .foregroundStyle(Color.accent).frame(width: 26)
+                Image(systemName: icon).font(.ui(18))
+                    .foregroundStyle(Color.accentDeep).frame(width: 26)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(Font.serif(15, weight: .semibold)).foregroundStyle(Color.textPrimary)
-                    Text(subtitle).font(.system(size: 11.5)).foregroundStyle(Color.textMuted)
+                    Text(subtitle).font(.ui(11.5)).foregroundStyle(Color.textMuted)
                 }
                 Spacer()
-                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                Image(systemName: "chevron.right").font(.ui(13, weight: .semibold))
                     .foregroundStyle(Color.textMuted)
             }
             .padding(13)
@@ -344,8 +406,8 @@ struct ContentView: View {
             HStack {
                 Button { showDatePicker.toggle() } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: "calendar").font(.system(size: 14)).foregroundStyle(Color.textSoft)
-                        Text(prettyDate(selectedDate)).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Color.textSoft)
+                        Image(systemName: "calendar").font(.ui(14)).foregroundStyle(Color.textSoft)
+                        Text(prettyDate(selectedDate)).font(.ui(13.5, weight: .semibold)).foregroundStyle(Color.textSoft)
                     }
                 }
                 Spacer()
@@ -366,9 +428,9 @@ struct ContentView: View {
                 if auto.hasAnything {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 13)).foregroundStyle(Color.sageDeep)
+                            .font(.ui(13)).foregroundStyle(Color.sageDeep)
                         Text("Already logged from your workouts \u{2014} sealed ticks below came from them.")
-                            .font(.system(size: 12)).foregroundStyle(Color.textSoft)
+                            .font(.ui(12)).foregroundStyle(Color.textSoft)
                     }
                     .padding(.horizontal, 13).padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -388,7 +450,7 @@ struct ContentView: View {
 
                 if workedOut == true {
                     Text("WHAT DID YOU DO")
-                        .font(.system(size: 11.5, weight: .semibold))
+                        .font(.ui(11.5, weight: .semibold))
                         .foregroundStyle(Color.textMuted)
                         .padding(.bottom, 10)
 
@@ -405,12 +467,12 @@ struct ContentView: View {
                         // there, not in manual fields.
                         HStack(spacing: 8) {
                             Image(systemName: auto.cardioIsRun ? "figure.run" : "figure.walk")
-                                .font(.system(size: 14)).foregroundStyle(Color.sageDeep)
+                                .font(.ui(14)).foregroundStyle(Color.sageDeep)
                             Text(autoCardioLine(auto))
-                                .font(.system(size: 13)).foregroundStyle(Color.textPrimary)
+                                .font(.ui(13)).foregroundStyle(Color.textPrimary)
                             Spacer()
                             Text("edit the workout to change")
-                                .font(.system(size: 10.5)).foregroundStyle(Color.textMuted)
+                                .font(.ui(10.5)).foregroundStyle(Color.textMuted)
                         }
                         .padding(14)
                         .background(RoundedRectangle(cornerRadius: 16).fill(Color.surface))
@@ -420,7 +482,7 @@ struct ContentView: View {
                     // sessions (an untracked run plus a logged walk).
                     if cardio {
                         VStack(alignment: .leading, spacing: 14) {
-                            Text("CARDIO TYPE").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.textMuted)
+                            Text("CARDIO TYPE").font(.ui(11, weight: .semibold)).foregroundStyle(Color.textMuted)
                             HStack(spacing: 8) {
                                 cardioTypeButton("Running")
                                 cardioTypeButton("Inclined Walk")
@@ -437,8 +499,8 @@ struct ContentView: View {
                     }
                 } else if workedOut == false {
                     HStack(spacing: 8) {
-                        Image(systemName: "xmark").font(.system(size: 13)).foregroundStyle(Color.textMuted)
-                        Text("Logged as a rest day").font(.system(size: 13.5)).foregroundStyle(Color.textSoft)
+                        Image(systemName: "xmark").font(.ui(13)).foregroundStyle(Color.textMuted)
+                        Text("Logged as a rest day").font(.ui(13.5)).foregroundStyle(Color.textSoft)
                     }
                     .padding(.horizontal, 14).padding(.vertical, 12)
                     .background(RoundedRectangle(cornerRadius: 16).fill(Color.surface))
@@ -452,8 +514,8 @@ struct ContentView: View {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { justSaved = false }
                     } label: {
                         HStack(spacing: 6) {
-                            Image(systemName: "checkmark").font(.system(size: 14, weight: .bold))
-                            Text("Save check-in").font(.system(size: 14.5, weight: .semibold))
+                            Image(systemName: "checkmark").font(.ui(14, weight: .bold))
+                            Text("Save check-in").font(.ui(14.5, weight: .semibold))
                         }
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
@@ -483,7 +545,7 @@ struct ContentView: View {
     private var checkinStatsView: some View {
         VStack(alignment: .leading, spacing: 16) {
             if justSaved {
-                Text("Saved").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Color.sageDeep)
+                Text("Saved").font(.ui(12.5, weight: .semibold)).foregroundStyle(Color.sageDeep)
             }
 
             if let s = mergedStatus(for: selectedDate) {
@@ -494,13 +556,13 @@ struct ContentView: View {
                         .overlay(Circle().stroke(s.isRest ? Color.textPrimary.opacity(0.14) : .clear, lineWidth: 1.5))
                         .overlay(
                             Image(systemName: s.isRest ? "xmark" : "checkmark")
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(.ui(15, weight: .semibold))
                                 .foregroundStyle(s.isRest ? Color.textMuted : .white)
                         )
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(s.isRest ? "Rest day" : "Logged").font(.system(size: 14.5, weight: .bold)).foregroundStyle(Color.textPrimary)
+                        Text(s.isRest ? "Rest day" : "Logged").font(.ui(14.5, weight: .bold)).foregroundStyle(Color.textPrimary)
                         if s.summary != (s.isRest ? "Rest day" : "Logged") {
-                            Text(s.summary).font(.system(size: 12.5)).foregroundStyle(Color.textSoft)
+                            Text(s.summary).font(.ui(12.5)).foregroundStyle(Color.textSoft)
                         }
                     }
                     Spacer()
@@ -519,8 +581,8 @@ struct ContentView: View {
                 isEditingCheckin = true
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "pencil").font(.system(size: 13, weight: .semibold))
-                    Text("Edit check-in").font(.system(size: 14, weight: .semibold))
+                    Image(systemName: "pencil").font(.ui(13, weight: .semibold))
+                    Text("Edit check-in").font(.ui(14, weight: .semibold))
                 }
                 .foregroundStyle(Color.textPrimary)
                 .frame(maxWidth: .infinity)
@@ -535,11 +597,11 @@ struct ContentView: View {
         Button(action: action) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.system(size: 13.5, weight: .bold)).foregroundStyle(fg)
-                    Text(subtitle).font(.system(size: 12)).foregroundStyle(Color.textSoft)
+                    Text(title).font(.ui(13.5, weight: .bold)).foregroundStyle(fg)
+                    Text(subtitle).font(.ui(12)).foregroundStyle(Color.textSoft)
                 }
                 Spacer()
-                Image(systemName: "arrow.right").font(.system(size: 14)).foregroundStyle(iconColor)
+                Image(systemName: "arrow.right").font(.ui(14)).foregroundStyle(iconColor)
             }
             .padding(.horizontal, 16).padding(.vertical, 13)
             .background(RoundedRectangle(cornerRadius: 16).fill(bg))
@@ -551,7 +613,7 @@ struct ContentView: View {
     private func choiceButton(_ label: String, selected: Bool, fillWhenSelected: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 14.5, weight: .semibold))
+                .font(.ui(14.5, weight: .semibold))
                 .foregroundStyle(selected && fillWhenSelected == .accent ? .white : Color.textPrimary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 13)
@@ -572,7 +634,7 @@ struct ContentView: View {
             cardioType = type
         } label: {
             Text(type == "Running" ? "Running" : "Inclined walk")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.ui(13, weight: .semibold))
                 .foregroundStyle(cardioType == type ? .white : Color.textPrimary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 9)
@@ -599,9 +661,9 @@ struct ContentView: View {
             HStack(spacing: 6) {
                 if on {
                     Image(systemName: locked ? "checkmark.seal.fill" : "checkmark")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.ui(11, weight: .bold))
                 }
-                Text(label).font(.system(size: 13.5, weight: .semibold))
+                Text(label).font(.ui(13.5, weight: .semibold))
             }
             .foregroundStyle(on ? .white : Color.textPrimary)
             .padding(.horizontal, 16).padding(.vertical, 9)
@@ -615,7 +677,7 @@ struct ContentView: View {
 
     private func numberField(_ label: String, text: Binding<String>, allowDecimal: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.textMuted)
+            Text(label).font(.ui(11, weight: .semibold)).foregroundStyle(Color.textMuted)
             TextField("0", text: filteredBinding(text, allowDecimal: allowDecimal))
                 .keyboardType(allowDecimal ? .decimalPad : .numberPad)
                 .padding(8)
@@ -692,7 +754,7 @@ struct ContentView: View {
                     .animation(.easeInOut(duration: 0.4), value: progressPct)
                 VStack(spacing: 0) {
                     Text("\(monthDaysCount)").font(.heading(24)).foregroundStyle(Color.textPrimary)
-                    Text("of \(monthlyGoal) days").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.textMuted)
+                    Text("of \(monthlyGoal) days").font(.ui(11, weight: .semibold)).foregroundStyle(Color.textMuted)
                 }
             }
 
@@ -701,7 +763,7 @@ struct ContentView: View {
             Text(monthDaysCount >= monthlyGoal
                  ? "Goal reached this month"
                  : "\(monthlyGoal - monthDaysCount) more workout day\(monthlyGoal - monthDaysCount == 1 ? "" : "s") to hit your goal")
-                .font(.system(size: 13)).foregroundStyle(Color.textSoft).multilineTextAlignment(.center)
+                .font(.ui(13)).foregroundStyle(Color.textSoft).multilineTextAlignment(.center)
 
             HStack(spacing: 10) {
                 statCard("This month", "\(monthDaysCount)")
@@ -715,7 +777,7 @@ struct ContentView: View {
     private func statCard(_ label: String, _ value: String) -> some View {
         VStack(spacing: 2) {
             Text(value).font(.heading(20)).foregroundStyle(Color.accentDeep)
-            Text(label).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(Color.textMuted)
+            Text(label).font(.ui(10.5, weight: .semibold)).foregroundStyle(Color.textMuted)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
@@ -748,9 +810,9 @@ struct ContentView: View {
     private func tabButton(_ target: Tab, _ icon: String, _ label: String) -> some View {
         Button { tab = target } label: {
             VStack(spacing: 3) {
-                Image(systemName: icon).font(.system(size: 17))
+                Image(systemName: icon).font(.ui(17))
                     .foregroundStyle(tab == target ? Color.accent : Color.textMuted)
-                Text(label).font(.system(size: 10.5, weight: tab == target ? .bold : .medium))
+                Text(label).font(.ui(10.5, weight: tab == target ? .bold : .medium))
                     .foregroundStyle(tab == target ? Color.textPrimary : Color.textMuted)
             }
             .frame(maxWidth: .infinity)

@@ -44,13 +44,13 @@ struct WorkoutTodaySection: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
                 Text("Today")
-                    .font(.system(size: 11, weight: .bold)).textCase(.uppercase)
+                    .font(.ui(11, weight: .bold)).textCase(.uppercase)
                     .kerning(0.9).foregroundStyle(Color.accentDeep)
                 Spacer()
                 Button { showHistory = true } label: {
                     HStack(spacing: 4) {
-                        Text("History").font(.system(size: 12.5, weight: .semibold))
-                        Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold))
+                        Text("History").font(.ui(12.5, weight: .semibold))
+                        Image(systemName: "chevron.right").font(.ui(10, weight: .bold))
                     }
                     .foregroundStyle(Color.accentDeep)
                 }
@@ -59,7 +59,7 @@ struct WorkoutTodaySection: View {
 
             if today.isEmpty {
                 Text("Nothing yet today.\nStart a workout on your watch \u{2014} it lands here.")
-                    .font(.system(size: 13)).foregroundStyle(Color.textMuted)
+                    .font(.ui(13)).foregroundStyle(Color.textMuted)
                     .frame(maxWidth: .infinity)
                     .multilineTextAlignment(.center)
                     .padding(.vertical, 16)
@@ -73,7 +73,7 @@ struct WorkoutTodaySection: View {
             Button { showNew = true } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "plus.circle.fill")
-                    Text("Workout").font(.system(size: 14.5, weight: .semibold))
+                    Text("Workout").font(.ui(14.5, weight: .semibold))
                 }
                 .foregroundStyle(Color.accentDeep)
                 .frame(maxWidth: .infinity)
@@ -176,7 +176,7 @@ struct WorkoutCard: View {
                     .padding(.vertical, 2)
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
-                        Image(systemName: icon).font(.system(size: 15))
+                        Image(systemName: icon).font(.ui(15))
                             .foregroundStyle(stripe)
                         Text(workout.title.isEmpty ? "Workout" : workout.title)
                             .font(Font.serif(16, weight: .semibold))
@@ -187,12 +187,12 @@ struct WorkoutCard: View {
                     metaLine
                     if let summary {
                         Text(summary)
-                            .font(.system(size: 12))
+                            .font(.ui(12))
                             .foregroundStyle(Color.textMuted)
                             .lineLimit(2)
                     }
                     Text(sourceLabel)
-                        .font(.system(size: 10.5))
+                        .font(.ui(10.5))
                         .foregroundStyle(Color.textMuted.opacity(0.8))
                 }
                 .padding(.leading, 12)
@@ -221,7 +221,7 @@ struct WorkoutCard: View {
 
     private func chipText(_ t: String, fg: Color, bg: Color) -> some View {
         Text(t)
-            .font(.system(size: 10, weight: .bold)).textCase(.uppercase).kerning(0.5)
+            .font(.ui(10, weight: .bold)).textCase(.uppercase).kerning(0.5)
             .foregroundStyle(fg)
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(Capsule().fill(bg))
@@ -235,7 +235,7 @@ struct WorkoutCard: View {
             if workout.avgBPM > 0 {
                 HStack(spacing: 3) {
                     Image(systemName: "heart.fill")
-                        .font(.system(size: 10))
+                        .font(.ui(10))
                         .foregroundStyle(Color(red: 0.70, green: 0.23, blue: 0.18))
                     Text("\(workout.avgBPM)")
                 }
@@ -247,7 +247,7 @@ struct WorkoutCard: View {
                 Text("incline \(trimmed(workout.inclinePercent))%")
             }
         }
-        .font(.system(size: 12.5, weight: .medium))
+        .font(.ui(12.5, weight: .medium))
         .foregroundStyle(Color.textSoft)
         .monospacedDigit()
     }
@@ -337,7 +337,7 @@ struct WorkoutLiftView: View {
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 15)
-                    .background(Capsule().fill(exercises.isEmpty ? Color.textMuted.opacity(0.5) : Color.accent))
+                    .background(Capsule().fill(exercises.isEmpty ? Color.textMuted : Color.accent))
                 }
                 .buttonStyle(.plain)
                 .disabled(exercises.isEmpty)
@@ -375,7 +375,7 @@ struct WorkoutLiftView: View {
     private func stat(_ k: String, _ v: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(k.uppercased())
-                .font(.system(size: 10, weight: .bold)).kerning(0.8)
+                .font(.ui(10, weight: .bold)).kerning(0.8)
                 .foregroundStyle(Color.textMuted)
             Text(v)
                 .font(Font.serif(17, weight: .semibold))
@@ -391,19 +391,19 @@ struct WorkoutLiftView: View {
     private var liveHRPill: some View {
         HStack(spacing: 8) {
             Image(systemName: "heart.fill")
-                .font(.system(size: 13))
+                .font(.ui(13))
                 .foregroundStyle(Color(red: 0.70, green: 0.23, blue: 0.18))
             if let bpm = watchLink.currentBPM {
                 Text("\(bpm)").font(Font.serif(18)).monospacedDigit()
                     .foregroundStyle(Color.textPrimary)
-                Text("BPM").font(.system(size: 11, weight: .semibold))
+                Text("BPM").font(.ui(11, weight: .semibold))
                     .foregroundStyle(Color.textMuted)
             } else {
                 Text("Watch workout in progress\u{2026}")
-                    .font(.system(size: 12.5)).foregroundStyle(Color.textMuted)
+                    .font(.ui(12.5)).foregroundStyle(Color.textMuted)
             }
             Spacer()
-            Text("live from watch").font(.system(size: 10.5)).foregroundStyle(Color.textMuted)
+            Text("live from watch").font(.ui(10.5)).foregroundStyle(Color.textMuted)
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
@@ -423,7 +423,7 @@ struct WorkoutLiftView: View {
                     exercises.removeAll { $0.id == e.id }
                 } label: {
                     Image(systemName: "trash")
-                        .font(.system(size: 13)).foregroundStyle(Color.textMuted)
+                        .font(.ui(13)).foregroundStyle(Color.textMuted)
                 }
                 .buttonStyle(.plain)
             }
@@ -440,7 +440,7 @@ struct WorkoutLiftView: View {
                                                      holdSeconds: base.holdSeconds))
             } label: {
                 Text("\u{FF0B} Add set\(e.sets.isEmpty ? "" : " (same as last)")")
-                    .font(.system(size: 13.5, weight: .semibold))
+                    .font(.ui(13.5, weight: .semibold))
                     .foregroundStyle(Color.accentDeep)
             }
             .buttonStyle(.plain)
@@ -456,17 +456,17 @@ struct WorkoutLiftView: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("SET \(idx)")
-                    .font(.system(size: 10.5, weight: .bold)).kerning(0.8)
+                    .font(.ui(10.5, weight: .bold)).kerning(0.8)
                     .foregroundStyle(Color.accentDeep)
                 Spacer()
                 Text(d.inputType == .isometric
                      ? "\(d.holdSeconds)s hold"
                      : "\(Int(d.tonnage.rounded())) kg")
-                    .font(.system(size: 11)).foregroundStyle(Color.textMuted)
+                    .font(.ui(11)).foregroundStyle(Color.textMuted)
                     .monospacedDigit()
                 Button { exercise.wrappedValue.sets.removeAll { $0.id == d.id } } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.ui(10, weight: .bold))
                         .foregroundStyle(Color.textMuted)
                 }
                 .buttonStyle(.plain)
@@ -515,7 +515,7 @@ struct WorkoutLiftView: View {
                           edit: @escaping () -> Void) -> some View {
         HStack(spacing: 8) {
             Text(title)
-                .font(.system(size: 13.5, weight: .medium))
+                .font(.ui(13.5, weight: .medium))
                 .foregroundStyle(Color.textSoft)
             Spacer(minLength: 4)
             HStack(spacing: 9) {
@@ -538,8 +538,8 @@ struct WorkoutLiftView: View {
     private func roundButton(_ symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Color.accent)
+                .font(.ui(12, weight: .bold))
+                .foregroundStyle(Color.accentDeep)
                 .frame(width: 30, height: 30)
                 .background(Circle().fill(Color.surface))
         }
@@ -550,7 +550,7 @@ struct WorkoutLiftView: View {
         Button { showPicker = true } label: {
             HStack(spacing: 8) {
                 Image(systemName: "plus.circle.fill")
-                Text("Add exercise").font(.system(size: 15, weight: .semibold))
+                Text("Add exercise").font(.ui(15, weight: .semibold))
             }
             .foregroundStyle(Color.accentDeep)
             .frame(maxWidth: .infinity)
@@ -587,11 +587,11 @@ struct WorkoutLiftView: View {
                             } label: {
                                 HStack {
                                     Text(ex.name)
-                                        .font(.system(size: 15.5, weight: .medium))
+                                        .font(.ui(15.5, weight: .medium))
                                         .foregroundStyle(Color.textPrimary)
                                     Spacer()
                                     Image(systemName: "plus")
-                                        .font(.system(size: 12, weight: .semibold))
+                                        .font(.ui(12, weight: .semibold))
                                         .foregroundStyle(Color.accentDeep)
                                 }
                             }
@@ -600,7 +600,7 @@ struct WorkoutLiftView: View {
                         }
                     } header: {
                         Text(section.group.rawValue)
-                            .font(.system(size: 12.5, weight: .semibold)).kerning(1.1)
+                            .font(.ui(12.5, weight: .semibold)).kerning(1.1)
                             .foregroundStyle(Color.accentDeep)
                     }
                 }
@@ -766,7 +766,7 @@ struct WalkDetailView: View {
                     }
                     if workout.source == .watch {
                         Text("Captured by your Apple Watch")
-                            .font(.system(size: 11.5)).foregroundStyle(Color.textMuted)
+                            .font(.ui(11.5)).foregroundStyle(Color.textMuted)
                             .frame(maxWidth: .infinity)
                     }
                     stepperRow("Minutes", "\(minutes)",
@@ -778,7 +778,7 @@ struct WalkDetailView: View {
                                inc: { incline += 0.5 },
                                edit: { promptEdit("Incline (%)", current: incline, isInt: false) { incline = $0 } })
                     Text("Treadmill incline isn't measurable by the watch \u{2014} add it here and Jeeves factors it into effort.")
-                        .font(.system(size: 12))
+                        .font(.ui(12))
                         .foregroundStyle(Color.textMuted)
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -838,7 +838,7 @@ struct WalkDetailView: View {
     private func stat(_ k: String, _ v: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(k.uppercased())
-                .font(.system(size: 10, weight: .bold)).kerning(0.8)
+                .font(.ui(10, weight: .bold)).kerning(0.8)
                 .foregroundStyle(Color.textMuted)
             Text(v)
                 .font(Font.serif(17, weight: .semibold))
@@ -855,14 +855,14 @@ struct WalkDetailView: View {
                             edit: @escaping () -> Void) -> some View {
         HStack(spacing: 8) {
             Text(title)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.ui(15, weight: .semibold))
                 .foregroundStyle(Color.textPrimary)
             Spacer(minLength: 4)
             HStack(spacing: 10) {
                 Button(action: dec) {
                     Image(systemName: "minus")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color.accent)
+                        .font(.ui(12, weight: .bold))
+                        .foregroundStyle(Color.accentDeep)
                         .frame(width: 32, height: 32)
                         .background(Circle().fill(Color.bg))
                 }
@@ -879,8 +879,8 @@ struct WalkDetailView: View {
                 .buttonStyle(.plain)
                 Button(action: inc) {
                     Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color.accent)
+                        .font(.ui(12, weight: .bold))
+                        .foregroundStyle(Color.accentDeep)
                         .frame(width: 32, height: 32)
                         .background(Circle().fill(Color.bg))
                 }
@@ -979,7 +979,7 @@ struct UnifiedHistoryList: View {
             LazyVStack(spacing: 8) {
                 if days.isEmpty {
                     Text("Nothing logged yet.")
-                        .font(.system(size: 13.5)).foregroundStyle(Color.textMuted)
+                        .font(.ui(13.5)).foregroundStyle(Color.textMuted)
                         .padding(.vertical, 32)
                 }
                 ForEach(days) { day in
@@ -1009,20 +1009,20 @@ struct UnifiedHistoryList: View {
                         .overlay(Circle().stroke(day.status.isRest ? Color.textPrimary.opacity(0.14) : .clear, lineWidth: 1.5))
                         .overlay(
                             Image(systemName: day.status.isRest ? "xmark" : "checkmark")
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(.ui(14, weight: .semibold))
                                 .foregroundStyle(day.status.isRest ? Color.textMuted : .white)
                         )
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(prettyDate(day.id)).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Color.textPrimary)
-                        Text(day.status.summary).font(.system(size: 12)).foregroundStyle(Color.textSoft).lineLimit(1)
+                        Text(prettyDate(day.id)).font(.ui(13.5, weight: .semibold)).foregroundStyle(Color.textPrimary)
+                        Text(day.status.summary).font(.ui(12)).foregroundStyle(Color.textSoft).lineLimit(1)
                     }
                     Spacer()
                     if !day.workouts.isEmpty {
                         HStack(spacing: 4) {
                             Text("\(day.workouts.count)")
-                                .font(.system(size: 11.5, weight: .bold)).foregroundStyle(Color.sageDeep)
+                                .font(.ui(11.5, weight: .bold)).foregroundStyle(Color.sageDeep)
                             Image(systemName: expanded.contains(day.id) ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 10, weight: .semibold)).foregroundStyle(Color.textMuted)
+                                .font(.ui(10, weight: .semibold)).foregroundStyle(Color.textMuted)
                         }
                         .padding(.horizontal, 8).padding(.vertical, 5)
                         .background(Capsule().fill(Color.sageLight))
@@ -1102,7 +1102,7 @@ struct WorkoutHistoryDetail: View {
                     }
                 }
                 Text(sourceLine)
-                    .font(.system(size: 11.5)).foregroundStyle(Color.textMuted)
+                    .font(.ui(11.5)).foregroundStyle(Color.textMuted)
                     .frame(maxWidth: .infinity)
 
                 switch workout.type {
@@ -1144,23 +1144,23 @@ struct WorkoutHistoryDetail: View {
                     .foregroundStyle(Color.textPrimary)
                 Spacer()
                 Text("\(Int(LiftMath.sessionTonnage(ss).rounded())) kg")
-                    .font(.system(size: 12)).foregroundStyle(Color.textMuted)
+                    .font(.ui(12)).foregroundStyle(Color.textMuted)
                     .monospacedDigit()
             }
             ForEach(Array(ss.enumerated()), id: \.element.id) { i, set in
                 HStack(spacing: 10) {
                     Text("\(i + 1)")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.ui(11, weight: .bold))
                         .foregroundStyle(Color.sageDeep)
                         .frame(width: 22, height: 22)
                         .background(RoundedRectangle(cornerRadius: 6).fill(Color.sageLight))
                     Text(setLine(set))
-                        .font(.system(size: 14))
+                        .font(.ui(14))
                         .foregroundStyle(Color.textPrimary)
                         .monospacedDigit()
                     Spacer()
                     Text("\(Int(LiftMath.setTonnage(set).rounded())) kg")
-                        .font(.system(size: 11.5)).foregroundStyle(Color.textMuted)
+                        .font(.ui(11.5)).foregroundStyle(Color.textMuted)
                         .monospacedDigit()
                 }
             }
@@ -1180,7 +1180,7 @@ struct WorkoutHistoryDetail: View {
 
     private func infoBlock(_ t: String) -> some View {
         Text(t)
-            .font(.system(size: 14))
+            .font(.ui(14))
             .foregroundStyle(Color.textPrimary)
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1198,7 +1198,7 @@ struct WorkoutHistoryDetail: View {
     private func stat(_ k: String, _ v: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(k.uppercased())
-                .font(.system(size: 10, weight: .bold)).kerning(0.8)
+                .font(.ui(10, weight: .bold)).kerning(0.8)
                 .foregroundStyle(Color.textMuted)
             Text(v)
                 .font(Font.serif(16, weight: .semibold))
@@ -1234,7 +1234,7 @@ struct NewWorkoutSheet: View {
                 .foregroundStyle(Color.textPrimary)
                 .padding(.top, 22).padding(.bottom, 4)
             Text("Runs use the full run tool. Lifts and walks are logged manually — no heart rate or auto-duration.")
-                .font(.system(size: 12.5))
+                .font(.ui(12.5))
                 .foregroundStyle(Color.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, 18)
@@ -1259,18 +1259,18 @@ struct NewWorkoutSheet: View {
         Button(action: action) {
             HStack(spacing: 13) {
                 Image(systemName: icon)
-                    .font(.system(size: 18))
-                    .foregroundStyle(Color.accent)
+                    .font(.ui(18))
+                    .foregroundStyle(Color.accentDeep)
                     .frame(width: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(Font.serif(15, weight: .semibold))
                         .foregroundStyle(Color.textPrimary)
-                    Text(subtitle).font(.system(size: 11.5))
+                    Text(subtitle).font(.ui(11.5))
                         .foregroundStyle(Color.textMuted)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.ui(13, weight: .semibold))
                     .foregroundStyle(Color.textMuted)
             }
             .padding(14)

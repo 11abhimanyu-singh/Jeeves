@@ -65,7 +65,7 @@ struct AppMenuButton: View {
             }
         } label: {
             Image(systemName: "line.3.horizontal")
-                .font(.system(size: 17, weight: .semibold))
+                .font(.ui(17, weight: .semibold))
                 .foregroundStyle(Color.textSoft)
                 .frame(width: 30, height: 30)
                 .contentShape(Rectangle())
@@ -86,7 +86,7 @@ struct ChatBubble: View {
                 .frame(width: 56, height: 56)
                 .overlay(
                     Image(systemName: "sparkles")
-                        .font(.system(size: 22, weight: .semibold))
+                        .font(.ui(22, weight: .semibold))
                         .foregroundStyle(.white)
                 )
                 .shadow(color: Color.textPrimary.opacity(0.22), radius: 10, x: 0, y: 4)
@@ -109,12 +109,12 @@ struct StatsScreenView: View {
                     .fill(Color.accent)
                     .frame(width: 30, height: 30)
                     .overlay(Image(systemName: screen.icon)
-                        .foregroundStyle(.white).font(.system(size: 13)))
+                        .foregroundStyle(.white).font(.ui(13)))
                 Text(screen.label).font(.heading(18)).foregroundStyle(Color.textPrimary)
                 Spacer()
                 Button(action: onClose) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.ui(15, weight: .semibold))
                         .foregroundStyle(Color.textSoft)
                         .frame(width: 30, height: 30)
                         .contentShape(Rectangle())

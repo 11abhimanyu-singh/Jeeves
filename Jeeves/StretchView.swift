@@ -108,7 +108,7 @@ struct StretchView: View {
                     .font(.serif(28))
                     .foregroundStyle(Color.textPrimary)
                 Text("A timed, hands-off flow — hold, breathe, switch on the cue.")
-                    .font(.system(size: 14))
+                    .font(.ui(14))
                     .foregroundStyle(Color.textSoft)
             }
 
@@ -122,7 +122,7 @@ struct StretchView: View {
 
             if let last = logs.first {
                 Text("Last session · \(last.routineName) · \(relativeDay(last.date))")
-                    .font(.system(size: 12.5))
+                    .font(.ui(12.5))
                     .foregroundStyle(Color.textMuted)
                     .padding(.top, 2)
             }
@@ -140,17 +140,17 @@ struct StretchView: View {
                         .font(.serif(19))
                         .foregroundStyle(Color.textPrimary)
                     Text(routine.subtitle)
-                        .font(.system(size: 13))
+                        .font(.ui(13))
                         .foregroundStyle(Color.textSoft)
                         .multilineTextAlignment(.leading)
                     Text("~\(routine.approxMinutes) min · \(routine.moves.count) moves")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.ui(12, weight: .medium))
                         .foregroundStyle(Color.accentDeep)
                         .padding(.top, 2)
                 }
                 Spacer(minLength: 8)
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22))
+                    .font(.ui(22))
                     .foregroundStyle(selected ? Color.accent : Color.textMuted.opacity(0.5))
             }
             .padding(16)
@@ -192,7 +192,7 @@ struct StretchView: View {
         if let seg = currentSegment {
             VStack(spacing: 18) {
                 Text("MOVE \(segmentIndex + 1) OF \(segments.count)")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.ui(12, weight: .semibold))
                     .tracking(1.4)
                     .foregroundStyle(Color.accentDeep)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -227,7 +227,7 @@ struct StretchView: View {
                         .foregroundStyle(Color.textPrimary)
                         .monospacedDigit()
                     Text(isPaused ? "paused" : "seconds")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.ui(12, weight: .medium))
                         .foregroundStyle(Color.textMuted)
                 }
             }
@@ -240,11 +240,11 @@ struct StretchView: View {
                     .foregroundStyle(Color.textPrimary)
                     .multilineTextAlignment(.center)
                 Text(seg.move.target)
-                    .font(.system(size: 14))
+                    .font(.ui(14))
                     .foregroundStyle(Color.textSoft)
                 if let note = seg.sideNote {
                     Text(note)
-                        .font(.system(size: 12.5, weight: .semibold))
+                        .font(.ui(12.5, weight: .semibold))
                         .foregroundStyle(Color.accentDeep)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 5)
@@ -269,7 +269,7 @@ struct StretchView: View {
     private func label(_ caption: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(caption.uppercased())
-                .font(.system(size: 10.5, weight: .semibold))
+                .font(.ui(10.5, weight: .semibold))
                 .tracking(1.0)
                 .foregroundStyle(Color.textMuted)
             Text(value)
@@ -301,22 +301,22 @@ struct StretchView: View {
     private var nextPreview: some View {
         HStack(spacing: 12) {
             Image(systemName: "arrow.turn.down.right")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.ui(14, weight: .semibold))
                 .foregroundStyle(Color.accentDeep)
             VStack(alignment: .leading, spacing: 2) {
                 Text("UP NEXT")
-                    .font(.system(size: 10.5, weight: .semibold))
+                    .font(.ui(10.5, weight: .semibold))
                     .tracking(1.0)
                     .foregroundStyle(Color.textMuted)
                 if let next = nextSegment {
                     Text(next.sideNote == nil
                          ? next.move.name
                          : "\(next.move.name) · \(next.sideNote!)")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.ui(14, weight: .medium))
                         .foregroundStyle(Color.textPrimary)
                 } else {
                     Text("Last hold — you're almost done")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.ui(14, weight: .medium))
                         .foregroundStyle(Color.textSoft)
                 }
             }
@@ -351,7 +351,7 @@ struct StretchView: View {
                 finish(completed: false)
             } label: {
                 Text("End session")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.ui(13, weight: .medium))
                     .foregroundStyle(Color.accentDeep)
             }
             .buttonStyle(.plain)
@@ -362,7 +362,7 @@ struct StretchView: View {
     private func controlLabel(_ title: String, icon: String, filled: Bool) -> some View {
         HStack(spacing: 7) {
             Image(systemName: icon)
-            Text(title).font(.system(size: 15, weight: .semibold))
+            Text(title).font(.ui(15, weight: .semibold))
         }
         .foregroundStyle(filled ? .white : Color.textPrimary)
         .frame(maxWidth: .infinity)
@@ -377,7 +377,7 @@ struct StretchView: View {
     private var moveList: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("ROUTINE")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.ui(11, weight: .semibold))
                 .tracking(1.2)
                 .foregroundStyle(Color.textMuted)
                 .padding(.bottom, 8)
@@ -386,21 +386,21 @@ struct StretchView: View {
                 let state = moveState(i)
                 HStack(spacing: 12) {
                     Image(systemName: state.icon)
-                        .font(.system(size: 17))
+                        .font(.ui(17))
                         .foregroundStyle(state.tint)
                         .frame(width: 22)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(move.name)
-                            .font(.system(size: 15, weight: state == .now ? .semibold : .regular))
+                            .font(.ui(15, weight: state == .now ? .semibold : .regular))
                             .foregroundStyle(state == .upcoming ? Color.textSoft : Color.textPrimary)
                         Text(holdSummary(move))
-                            .font(.system(size: 12))
+                            .font(.ui(12))
                             .foregroundStyle(Color.textMuted)
                     }
                     Spacer()
                     if state == .now {
                         Text("NOW")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.ui(10, weight: .bold))
                             .tracking(0.8)
                             .foregroundStyle(Color.accentDeep)
                     }
@@ -425,7 +425,7 @@ struct StretchView: View {
             ZStack {
                 Circle().fill(Color.sageLight).frame(width: 92, height: 92)
                 Image(systemName: "checkmark")
-                    .font(.system(size: 40, weight: .semibold))
+                    .font(.ui(40, weight: .semibold))
                     .foregroundStyle(Color.sageDeep)
             }
             .padding(.top, 12)
@@ -435,7 +435,7 @@ struct StretchView: View {
                     .font(.serif(28))
                     .foregroundStyle(Color.textPrimary)
                 Text(selectedRoutine.name)
-                    .font(.system(size: 15))
+                    .font(.ui(15))
                     .foregroundStyle(Color.textSoft)
             }
 
@@ -461,7 +461,7 @@ struct StretchView: View {
                 phase = .setup
             } label: {
                 Text("Choose another routine")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.ui(14, weight: .medium))
                     .foregroundStyle(Color.accentDeep)
             }
             .buttonStyle(.plain)
@@ -476,7 +476,7 @@ struct StretchView: View {
                 .foregroundStyle(Color.textPrimary)
                 .monospacedDigit()
             Text(caption.uppercased())
-                .font(.system(size: 10.5, weight: .semibold))
+                .font(.ui(10.5, weight: .semibold))
                 .tracking(1.0)
                 .foregroundStyle(Color.textMuted)
         }
@@ -617,11 +617,16 @@ struct StretchView: View {
         let t = Timer(timeInterval: 1, repeats: true) { _ in tick() }
         RunLoop.main.add(t, forMode: .common)
         timer = t
+        // The transition cue is the whole point of the guided flow; it can't
+        // fire usefully behind a lock screen.
+        ScreenAwake.acquire()
     }
 
     private func stopTimer() {
+        guard timer != nil else { return }   // keep acquire/release balanced
         timer?.invalidate()
         timer = nil
+        ScreenAwake.release()
     }
 
     // MARK: - Formatting helpers
@@ -641,7 +646,7 @@ struct StretchView: View {
 
     private func eyebrow(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 12, weight: .semibold))
+            .font(.ui(12, weight: .semibold))
             .tracking(1.4)
             .foregroundStyle(Color.accentDeep)
     }

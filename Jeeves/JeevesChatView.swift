@@ -74,7 +74,7 @@ struct JeevesChatView: View {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         if turns.isEmpty {
                             Text("Tell Jeeves about your day, or tap Plan my day. Jeeves reasons like a human planner — chaining trips, using the gym shower, moving lunch near your event — not just packing blocks into gaps.")
-                                .font(.system(size: 13.5))
+                                .font(.ui(13.5))
                                 .foregroundStyle(Color.textMuted)
                                 .multilineTextAlignment(.center)
                                 .padding(.top, 24).padding(.horizontal, 24)
@@ -89,13 +89,13 @@ struct JeevesChatView: View {
                             HStack(spacing: 8) {
                                 ProgressView()
                                 Text(planningStatus)
-                                    .font(.system(size: 12.5)).foregroundStyle(Color.textMuted)
+                                    .font(.ui(12.5)).foregroundStyle(Color.textMuted)
                             }
                             .padding(.leading, 4)
                         }
 
                         if let errorText {
-                            Text(errorText).font(.system(size: 12.5)).foregroundStyle(Color.accentDeep)
+                            Text(errorText).font(.ui(12.5)).foregroundStyle(Color.accentDeep)
                         }
                     }
                     .padding(16)
@@ -138,7 +138,7 @@ struct JeevesChatView: View {
             if let onMinimise {
                 Button(action: onMinimise) {
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.ui(16, weight: .semibold))
                         .foregroundStyle(Color.textSoft)
                         .frame(width: 30, height: 30)
                         .contentShape(Rectangle())
@@ -149,26 +149,26 @@ struct JeevesChatView: View {
             Circle()
                 .fill(Color.accent)
                 .frame(width: 30, height: 30)
-                .overlay(Image(systemName: "sparkles").foregroundStyle(.white).font(.system(size: 13)))
+                .overlay(Image(systemName: "sparkles").foregroundStyle(.white).font(.ui(13)))
             Text("Jeeves").font(.heading(18)).foregroundStyle(Color.textPrimary)
             Spacer()
             // New chat = start a fresh session. Older turns stay in the store
             // (they feed the chat eval) — they just leave the screen.
             if !turns.isEmpty {
                 Button { startNewSession() } label: {
-                    Image(systemName: "square.and.pencil").font(.system(size: 16)).foregroundStyle(Color.textSoft)
+                    Image(systemName: "square.and.pencil").font(.ui(16)).foregroundStyle(Color.textSoft)
                 }
             }
             // Today's anchors (gym + events). NOT a calendar glyph: that one
             // means "pick a date" everywhere else, and wearing it here made
             // three screens promise three different things with one icon.
             Button { showSetup = true } label: {
-                Image(systemName: "slider.horizontal.3").font(.system(size: 16)).foregroundStyle(Color.textSoft)
+                Image(systemName: "slider.horizontal.3").font(.ui(16)).foregroundStyle(Color.textSoft)
             }
             .accessibilityLabel("Today's anchors")
             // Gear = standing configuration (keys, integrations, locations).
             Button { showSettings = true } label: {
-                Image(systemName: "gearshape.fill").font(.system(size: 16)).foregroundStyle(Color.textSoft)
+                Image(systemName: "gearshape.fill").font(.ui(16)).foregroundStyle(Color.textSoft)
             }
         }
         .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 10)
@@ -178,8 +178,8 @@ struct JeevesChatView: View {
         HStack(spacing: 10) {
             Button(action: planMyDay) {
                 HStack(spacing: 6) {
-                    Image(systemName: "wand.and.stars").font(.system(size: 13, weight: .semibold))
-                    Text("Plan my day").font(.system(size: 14, weight: .semibold))
+                    Image(systemName: "wand.and.stars").font(.ui(13, weight: .semibold))
+                    Text("Plan my day").font(.ui(14, weight: .semibold))
                 }
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
@@ -217,7 +217,7 @@ struct JeevesChatView: View {
                 }
                 if !turn.content.isEmpty {
                     Text(turn.content)
-                        .font(.system(size: 14.5))
+                        .font(.ui(14.5))
                         .foregroundStyle(turn.isUser ? .white : Color.textPrimary)
                         .padding(.horizontal, 14).padding(.vertical, 10)
                         .background(RoundedRectangle(cornerRadius: 16).fill(turn.isUser ? Color.accent : Color.surface))
@@ -232,7 +232,7 @@ struct JeevesChatView: View {
             // Attach a ticket screenshot → Jeeves reads it and drafts an event.
             PhotosPicker(selection: $photoItem, matching: .images) {
                 Image(systemName: "photo")
-                    .font(.system(size: 22))
+                    .font(.ui(22))
                     .foregroundStyle(Color.textSoft)
                     .padding(.bottom, 4)
             }
@@ -244,11 +244,11 @@ struct JeevesChatView: View {
                     switch voice.phase {
                     case .idle:
                         Image(systemName: "mic")
-                            .font(.system(size: 22))
+                            .font(.ui(22))
                             .foregroundStyle(Color.textSoft)
                     case .recording:
                         Image(systemName: "stop.circle.fill")
-                            .font(.system(size: 24))
+                            .font(.ui(24))
                             .foregroundStyle(Color(red: 0.70, green: 0.23, blue: 0.18))
                             .symbolEffect(.pulse, options: .repeating)
                     case .transcribing:
@@ -270,7 +270,7 @@ struct JeevesChatView: View {
 
             Button(action: sendChat) {
                 Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 30))
+                    .font(.ui(30))
                     .foregroundStyle(canSend ? Color.accent : Color.textMuted.opacity(0.5))
             }
             .buttonStyle(.plain)
@@ -573,10 +573,10 @@ struct PlanTimelineCard: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(isOffline ? "OFFLINE PLAN" : "TODAY'S PLAN")
-                    .font(.system(size: 11, weight: .semibold)).tracking(1.2).foregroundStyle(Color.accent)
+                    .font(.ui(11, weight: .semibold)).tracking(1.2).foregroundStyle(Color.accentDeep)
                 Spacer()
                 if let boundary = plan.boundaryTime {
-                    Text("until \(boundary)").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.accentDeep)
+                    Text("until \(boundary)").font(.ui(11, weight: .semibold)).foregroundStyle(Color.accentDeep)
                 }
             }
             .padding(.bottom, 10)
@@ -602,7 +602,7 @@ struct PlanTimelineCard: View {
     private func blockRow(_ block: GeneratedBlock) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Text(block.startTime)
-                .font(.system(size: 12.5, weight: .semibold))
+                .font(.ui(12.5, weight: .semibold))
                 .foregroundStyle(block.isAnchor ? Color.accentDeep : Color.textSoft)
                 .frame(width: 46, alignment: .leading)
             Rectangle()
@@ -614,7 +614,7 @@ struct PlanTimelineCard: View {
                     .foregroundStyle(Color.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let note = block.note, !note.isEmpty {
-                    Text(note).font(.system(size: 11.5)).foregroundStyle(Color.textMuted)
+                    Text(note).font(.ui(11.5)).foregroundStyle(Color.textMuted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -631,14 +631,14 @@ struct PlanTimelineCard: View {
 
     private func checkbox(_ o: BlockOutcome) -> some View {
         Image(systemName: o == .done ? "checkmark.circle.fill" : (o == .skipped ? "xmark.circle" : "circle"))
-            .font(.system(size: 20))
+            .font(.ui(20))
             .foregroundStyle(o == .done ? Color.sageDeep : (o == .skipped ? Color.textMuted : Color.surfaceDeep))
     }
 
     private func changeLine(label: String, items: [String]) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label.uppercased()).font(.system(size: 10, weight: .semibold)).foregroundStyle(Color.textMuted)
-            Text(items.joined(separator: ", ")).font(.system(size: 12.5)).foregroundStyle(Color.textSoft)
+            Text(label.uppercased()).font(.ui(10, weight: .semibold)).foregroundStyle(Color.textMuted)
+            Text(items.joined(separator: ", ")).font(.ui(12.5)).foregroundStyle(Color.textSoft)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

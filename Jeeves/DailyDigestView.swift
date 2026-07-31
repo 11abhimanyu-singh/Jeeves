@@ -58,14 +58,14 @@ struct DailyDigestView: View {
             : "\(n) thing\(n == 1 ? "" : "s") worth a look."
         return VStack(alignment: .leading, spacing: 6) {
             Text(Date().formatted(.dateTime.weekday(.wide).month(.abbreviated).day()).uppercased())
-                .font(.system(size: 10.5, weight: .bold)).kerning(1)
+                .font(.ui(10.5, weight: .bold)).kerning(1)
                 .foregroundStyle(Color.textMuted)
             Text(headline)
                 .font(.serif(24, weight: .semibold))
                 .foregroundStyle(Color.textPrimary)
             if n > 0 {
                 Text("\(high.count) high · \(medium.count) medium · \(low.count) low")
-                    .font(.system(size: 12.5))
+                    .font(.ui(12.5))
                     .foregroundStyle(Color.textSoft)
             }
         }
@@ -76,7 +76,7 @@ struct DailyDigestView: View {
 
     private var cleanCard: some View {
         Text("No anomalies in the whole store — workouts, plans, travel, tasks and notes all read consistently.")
-            .font(.system(size: 13.5))
+            .font(.ui(13.5))
             .foregroundStyle(Color.textSoft)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
@@ -101,9 +101,9 @@ struct DailyDigestView: View {
                            goodIs: String, format: (Double) -> String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(label).font(.system(size: 14, weight: .semibold))
+                Text(label).font(.ui(14, weight: .semibold))
                     .foregroundStyle(Color.textPrimary)
-                Text(value.note).font(.system(size: 11.5))
+                Text(value.note).font(.ui(11.5))
                     .foregroundStyle(Color.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -113,7 +113,7 @@ struct DailyDigestView: View {
                     .font(.serif(20, weight: .semibold))
                     .foregroundStyle(value.isConfident ? Color.textPrimary : Color.textMuted)
                 Text(value.isConfident ? "\(goodIs) is better" : "early days")
-                    .font(.system(size: 9.5, weight: .semibold))
+                    .font(.ui(9.5, weight: .semibold))
                     .foregroundStyle(Color.textMuted)
             }
         }
@@ -166,10 +166,10 @@ struct DailyDigestView: View {
 
     private func row(_ label: String, _ value: String, tint: Color = Color.textSoft) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Text(label).font(.system(size: 13, weight: .semibold))
+            Text(label).font(.ui(13, weight: .semibold))
                 .foregroundStyle(Color.textPrimary)
                 .frame(width: 110, alignment: .leading)
-            Text(value).font(.system(size: 12.5)).foregroundStyle(tint)
+            Text(value).font(.ui(12.5)).foregroundStyle(tint)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
@@ -189,15 +189,15 @@ struct DailyDigestView: View {
                     VStack(alignment: .leading, spacing: 5) {
                         HStack(spacing: 7) {
                             Circle().fill(tint).frame(width: 7, height: 7)
-                            Text(a.title).font(.system(size: 14, weight: .semibold))
+                            Text(a.title).font(.ui(14, weight: .semibold))
                                 .foregroundStyle(Color.textPrimary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        Text(a.detail).font(.system(size: 12.5))
+                        Text(a.detail).font(.ui(12.5))
                             .foregroundStyle(Color.textSoft)
                             .fixedSize(horizontal: false, vertical: true)
                         Text("\(a.day) · \(a.rule)")
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .font(.ui(10, weight: .medium, design: .monospaced))
                             .foregroundStyle(Color.textMuted)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -210,11 +210,11 @@ struct DailyDigestView: View {
 
     private func sectionTitle(_ title: String, _ trailing: String?) -> some View {
         HStack {
-            Text(title.uppercased()).font(.system(size: 10.5, weight: .bold)).kerning(1)
+            Text(title.uppercased()).font(.ui(10.5, weight: .bold)).kerning(1)
                 .foregroundStyle(Color.textMuted)
             Spacer()
             if let trailing {
-                Text(trailing).font(.system(size: 10.5, weight: .bold))
+                Text(trailing).font(.ui(10.5, weight: .bold))
                     .foregroundStyle(Color.textMuted)
             }
         }
@@ -222,7 +222,7 @@ struct DailyDigestView: View {
 
     private var footnote: some View {
         Text("Computed on this phone from your own data — nothing here depends on the Mac export. Pull to refresh.")
-            .font(.system(size: 11))
+            .font(.ui(11))
             .foregroundStyle(Color.textMuted)
             .padding(.top, 4)
     }

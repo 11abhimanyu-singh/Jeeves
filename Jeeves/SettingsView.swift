@@ -123,7 +123,7 @@ struct SettingsView: View {
         let s = PlanDiagnostics.summarize(genLogs)
         return Section {
             if s.total == 0 {
-                Text("No plans generated yet.").font(.system(size: 14)).foregroundStyle(Color.textMuted)
+                Text("No plans generated yet.").font(.ui(14)).foregroundStyle(Color.textMuted)
             } else {
                 diagRow("Plans generated", "\(s.total)")
                 diagRow("Returned successfully", "\(Int((s.successRate * 100).rounded()))%")
@@ -145,9 +145,9 @@ struct SettingsView: View {
 
     private func diagRow(_ label: String, _ value: String) -> some View {
         HStack {
-            Text(label).font(.system(size: 14)).foregroundStyle(Color.textSoft)
+            Text(label).font(.ui(14)).foregroundStyle(Color.textSoft)
             Spacer()
-            Text(value).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.textPrimary)
+            Text(value).font(.ui(14, weight: .semibold)).foregroundStyle(Color.textPrimary)
         }
     }
 
@@ -216,9 +216,9 @@ struct SettingsView: View {
                 if let loc = locations.first(where: { $0.kind == kind }) {
                     NavigationLink { LocationEditView(location: loc) } label: {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(kind.rawValue).font(.system(size: 15, weight: .semibold))
+                            Text(kind.rawValue).font(.ui(15, weight: .semibold))
                             Text(loc.address.isEmpty ? "No address set" : loc.address)
-                                .font(.system(size: 12)).foregroundStyle(loc.address.isEmpty ? .secondary : .primary)
+                                .font(.ui(12)).foregroundStyle(loc.address.isEmpty ? .secondary : .primary)
                         }
                     }
                 }
@@ -253,7 +253,7 @@ struct SettingsView: View {
 
             if hasClientID {
                 if isConnecting {
-                    HStack { ProgressView(); Text("Opening Google…").font(.system(size: 13)).foregroundStyle(.secondary) }
+                    HStack { ProgressView(); Text("Opening Google…").font(.ui(13)).foregroundStyle(.secondary) }
                 } else if isCalendarConnected {
                     Label("Connected", systemImage: "checkmark.circle.fill").foregroundStyle(Color.sageDeep)
                     Button("Disconnect", role: .destructive) {
@@ -265,7 +265,7 @@ struct SettingsView: View {
                 }
             }
             if let calendarError {
-                Text(calendarError).font(.system(size: 12)).foregroundStyle(Color.accentDeep)
+                Text(calendarError).font(.ui(12)).foregroundStyle(Color.accentDeep)
             }
         } header: {
             Text("Google Calendar")

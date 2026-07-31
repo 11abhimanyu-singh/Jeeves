@@ -39,6 +39,8 @@ struct DayPlannerView: View {
 
     // Plan generation (the same PlanCoordinator call the chat uses).
     @State private var isPlanning = false
+    @State private var planningStartedAt = Date()
+    @State private var planningTask: Task<Void, Never>?
     @State private var planError: String?
     @State private var replanNote: String? = nil
 
@@ -166,23 +168,23 @@ struct DayPlannerView: View {
     private func travelSuggestionBanner(_ s: TravelDetection.Suggestion) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 8) {
-                Image(systemName: "airplane.departure").font(.system(size: 13, weight: .semibold))
-                Text("LOOKS LIKE TRAVEL").font(.system(size: 10.5, weight: .bold)).kerning(1.1)
+                Image(systemName: "airplane.departure").font(.ui(13, weight: .semibold))
+                Text("LOOKS LIKE TRAVEL").font(.ui(10.5, weight: .bold)).kerning(1.1)
                 Spacer()
             }
             .foregroundStyle(Color.travelInk)
             Text(s.reason)
-                .font(.system(size: 13))
+                .font(.ui(13))
                 .foregroundStyle(Color.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             Text("Travel mode stops me filling these days with your routine. You'd get journeys and leave-by times instead.")
-                .font(.system(size: 11.5))
+                .font(.ui(11.5))
                 .foregroundStyle(Color.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 Button { acceptTravel(s) } label: {
                     Text(s.startDay == s.endDay ? "Switch this day" : "Switch these \(dayCount(s)) days")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.ui(13, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity).padding(.vertical, 10)
                         .background(RoundedRectangle(cornerRadius: 11).fill(Color.travelInk))
@@ -190,7 +192,7 @@ struct DayPlannerView: View {
                 .buttonStyle(.plain)
                 Button { dismissedTravelDays.insert(selectedDate.startOfDay) } label: {
                     Text("Not travel")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.ui(13, weight: .semibold))
                         .foregroundStyle(Color.textSoft)
                         .frame(maxWidth: .infinity).padding(.vertical, 10)
                         .background(RoundedRectangle(cornerRadius: 11).stroke(Color.textPrimary.opacity(0.15), lineWidth: 1.3))
@@ -353,7 +355,7 @@ struct DayPlannerView: View {
         VStack(spacing: 8) {
             Button(action: planMyDay) {
                 HStack(spacing: 6) {
-                    Image(systemName: "wand.and.stars").font(.system(size: 13, weight: .semibold))
+                    Image(systemName: "wand.and.stars").font(.ui(13, weight: .semibold))
                     Text(savedPlan == nil ? "Plan my day" : "Re-plan").font(.serif(16))
                 }
                 .foregroundStyle(.white)
@@ -365,18 +367,15 @@ struct DayPlannerView: View {
             .disabled(isPlanning)
 
             if isPlanning {
-                HStack(spacing: 8) {
-                    ProgressView()
-                    Text("Jeeves is planning your day…").font(.system(size: 12.5)).foregroundStyle(Color.textMuted)
-                }
+                PlanningProgressCard(startedAt: planningStartedAt) { cancelPlanning() }
             }
             if let planError {
-                Text(planError).font(.system(size: 12)).foregroundStyle(Color.accentDeep)
+                Text(planError).font(.ui(12)).foregroundStyle(Color.accentDeep)
             }
             if let replanNote {
                 HStack(spacing: 7) {
-                    Image(systemName: "checkmark.circle.fill").font(.system(size: 12)).foregroundStyle(Color.sageDeep)
-                    Text(replanNote).font(.system(size: 11.5, weight: .medium)).foregroundStyle(Color.textSoft)
+                    Image(systemName: "checkmark.circle.fill").font(.ui(12)).foregroundStyle(Color.sageDeep)
+                    Text(replanNote).font(.ui(11.5, weight: .medium)).foregroundStyle(Color.textSoft)
                 }
                 .padding(.horizontal, 11).padding(.vertical, 7)
                 .background(Capsule().fill(Color.sage.opacity(0.16)))
@@ -395,7 +394,7 @@ struct DayPlannerView: View {
                 Spacer()
                 Button { showPlanEditor = true } label: {
                     Label("Edit", systemImage: "slider.horizontal.3")
-                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.accentDeep)
+                        .font(.ui(13, weight: .semibold)).foregroundStyle(Color.accentDeep)
                 }
             }
             PlanTimelineCard(
@@ -458,13 +457,13 @@ struct DayPlannerView: View {
             let pct = Int((score * 100).rounded())
             let done = outcomes.filter { $0 == .done }.count
             HStack(spacing: 12) {
-                Text("\(pct)%").font(.serif(26)).foregroundStyle(Color.accent)
+                Text("\(pct)%").font(.serif(26)).foregroundStyle(Color.accentDeep)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Plan followed").font(.serif(15)).foregroundStyle(Color.textPrimary)
                     // Every activity is markable, not just the auto-tracked ones —
                     // Jeeves learns from all of them and adapts your coming days.
                     Text("\(done) of \(assessed) so far — tap any activity above to mark it done or skipped. Jeeves learns from all of them.")
-                        .font(.system(size: 12)).foregroundStyle(Color.textMuted)
+                        .font(.ui(12)).foregroundStyle(Color.textMuted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
@@ -482,9 +481,9 @@ struct DayPlannerView: View {
             // Nothing assessed yet — invite feedback on the whole day, so the
             // app learns from every activity, not just the log-inferred ones.
             HStack(spacing: 10) {
-                Image(systemName: "checklist").font(.system(size: 19)).foregroundStyle(Color.accent)
+                Image(systemName: "checklist").font(.ui(19)).foregroundStyle(Color.accentDeep)
                 Text("How did the day go? Tap each activity above to mark it done or skipped — Jeeves learns from all of them and adapts your coming days.")
-                    .font(.system(size: 12.5)).foregroundStyle(Color.textSoft)
+                    .font(.ui(12.5)).foregroundStyle(Color.textSoft)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
@@ -523,7 +522,8 @@ struct DayPlannerView: View {
                 replanNote = "Re-planned from \(DayPlannerView.clockLabel(nowMinute)) · kept \(elapsed.count) earlier block\(elapsed.count == 1 ? "" : "s")"
             }
         }
-        Task {
+        planningStartedAt = Date()
+        planningTask = Task {
             // Hold a background assertion so planning survives the user
             // switching away mid-request (otherwise iOS tears the call down and
             // it falls back to the offline plan).
@@ -542,6 +542,13 @@ struct DayPlannerView: View {
                     planDate: date
                 ), context: modelContext, trigger: .planner)
             }
+            // Stopping must actually stop. The request can still finish (or
+            // fall back offline) after the user taps cancel, and committing
+            // that would overwrite the plan they chose to keep.
+            if Task.isCancelled {
+                isPlanning = false
+                return
+            }
             // Commit to this date's plan state so it persists and displays here.
             let state = DailyPlanState.fetchOrCreate(for: date, in: modelContext,
                                                      hasGymToday: hasGymToday, gymMinute: gymMinute)
@@ -554,7 +561,19 @@ struct DayPlannerView: View {
             CommuteBackgroundRefresh.scheduleNext(context: modelContext)
             if result.isOffline { planError = "Couldn't reach the planning service — showing an offline plan.\(result.error.map { " (\($0))" } ?? "")" }
             isPlanning = false
+            planningTask = nil
         }
+    }
+
+    /// Stop waiting without losing anything. The day keeps whatever plan it
+    /// already had — the in-flight request is abandoned rather than committed,
+    /// so this is always safe to tap.
+    private func cancelPlanning() {
+        planningTask?.cancel()
+        planningTask = nil
+        isPlanning = false
+        replanNote = nil
+        planError = "Stopped planning. The plan you already had is untouched."
     }
 
     /// Minutes since midnight for a wall-clock time.
@@ -621,7 +640,7 @@ struct DayPlannerView: View {
         return Button { withAnimation { selectedDate = date } } label: {
             VStack(spacing: 6) {
                 Text(date.formatted(.dateTime.weekday(.abbreviated)).uppercased())
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.ui(10, weight: .semibold))
                     .foregroundStyle(isPast ? Color.textMuted : Color.textSoft)
                 ZStack {
                     if selected {
@@ -649,13 +668,13 @@ struct DayPlannerView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 14) {
                 Text(prettyDate(selectedDate))
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.ui(12, weight: .semibold))
                     .foregroundStyle(Color.textMuted)
                 Spacer()
                 if KeychainService.isGoogleCalendarConnected {
                     Button { importFromCalendar() } label: {
                         Image(systemName: "calendar.badge.plus")
-                            .font(.system(size: 16))
+                            .font(.ui(16))
                             .foregroundStyle(Color.accentDeep)
                     }
                     .buttonStyle(.plain)
@@ -663,7 +682,7 @@ struct DayPlannerView: View {
                 }
                 Button { addEvent() } label: {
                     Label("Add", systemImage: "plus")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.ui(13, weight: .semibold))
                         .foregroundStyle(Color.accentDeep)
                 }
                 .buttonStyle(.plain)
@@ -672,16 +691,16 @@ struct DayPlannerView: View {
             if isImportingCalendar {
                 HStack(spacing: 8) {
                     ProgressView()
-                    Text("Reading your calendar…").font(.system(size: 12.5)).foregroundStyle(Color.textMuted)
+                    Text("Reading your calendar…").font(.ui(12.5)).foregroundStyle(Color.textMuted)
                 }
             }
             if let calendarError {
-                Text(calendarError).font(.system(size: 12)).foregroundStyle(Color.accentDeep)
+                Text(calendarError).font(.ui(12)).foregroundStyle(Color.accentDeep)
             }
 
             if selectedEvents.isEmpty {
                 Text(isToday ? "No events today." : "No events on this day.")
-                    .font(.system(size: 13))
+                    .font(.ui(13))
                     .foregroundStyle(Color.textSoft)
                     .padding(.vertical, 4)
             } else {
@@ -785,7 +804,7 @@ struct DayPlannerView: View {
         Button { editEvent(event) } label: {
             HStack(alignment: .top, spacing: 12) {
                 Text(event.isAllDay ? "All day" : hhmm(event.startMinute))
-                    .font(.system(size: 12.5, weight: .semibold))
+                    .font(.ui(12.5, weight: .semibold))
                     .foregroundStyle(Color.accentDeep)
                     .frame(width: 52, alignment: .trailing)
                 Rectangle().fill(Color.accent).frame(width: 3).cornerRadius(1.5)
@@ -796,11 +815,11 @@ struct DayPlannerView: View {
                     Text(event.isAllDay
                          ? "All day · from \(event.outboundStart.rawValue)"
                          : "\(hhmm(event.startMinute))–\(hhmm(event.endMinute)) · from \(event.outboundStart.rawValue)")
-                        .font(.system(size: 11.5))
+                        .font(.ui(11.5))
                         .foregroundStyle(Color.textSoft)
                     if !event.destinationAddress.isEmpty {
                         Text(event.destinationAddress)
-                            .font(.system(size: 11.5))
+                            .font(.ui(11.5))
                             .foregroundStyle(Color.textMuted)
                             .lineLimit(1)
                     }
@@ -865,7 +884,7 @@ struct DayPlannerView: View {
             AppMenuButton()
             VStack(alignment: .leading, spacing: 1) {
                 Text(selectedDate.formatted(.dateTime.month(.wide).year()).uppercased())
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.ui(11, weight: .semibold))
                     .tracking(1)
                     .foregroundStyle(Color.textMuted)
                 Text("Day Planner").font(.heading(20)).foregroundStyle(Color.textPrimary)
@@ -878,7 +897,7 @@ struct DayPlannerView: View {
                     .frame(width: 38, height: 38)
                     .overlay(Image(systemName: "airplane")
                         .foregroundStyle(tripCovering(selectedDate) != nil ? Color.travelInk : Color.textSoft)
-                        .font(.system(size: 15)))
+                        .font(.ui(15)))
             }
             .buttonStyle(.plain)
             // A calendar glyph means "pick a date" — it used to jump to today,
@@ -891,7 +910,7 @@ struct DayPlannerView: View {
                     .frame(width: 38, height: 38)
                     .overlay(Image(systemName: "calendar")
                         .foregroundStyle(isToday ? Color.textSoft : Color.travelInk)
-                        .font(.system(size: 15)))
+                        .font(.ui(15)))
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Jump to a date")
@@ -910,7 +929,7 @@ struct DayPlannerView: View {
 
             if hasGymToday {
                 HStack {
-                    Text("Weightlifting starts").font(.system(size: 13.5)).foregroundStyle(Color.textSoft)
+                    Text("Weightlifting starts").font(.ui(13.5)).foregroundStyle(Color.textSoft)
                     Spacer()
                     DatePicker("", selection: $gymTime, displayedComponents: .hourAndMinute)
                         .labelsHidden()
@@ -967,18 +986,18 @@ private struct CalendarImportSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Your Google Calendar for \(review.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())). Pick which to add to your planner.")
-                        .font(.system(size: 13)).foregroundStyle(Color.textSoft)
+                        .font(.ui(13)).foregroundStyle(Color.textSoft)
                         .padding(.bottom, 4)
                     ForEach(review.events) { event in
                         Button { toggle(event.id) } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: selected.contains(event.id) ? "checkmark.circle.fill" : "circle")
-                                    .font(.system(size: 22))
+                                    .font(.ui(22))
                                     .foregroundStyle(selected.contains(event.id) ? Color.accent : Color.textMuted.opacity(0.5))
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(event.title).font(.serif(15)).foregroundStyle(Color.textPrimary)
                                     Text((event.isAllDay ? "All day" : "\(hhmm(event.startMinute))–\(hhmm(event.endMinute))") + (event.location.isEmpty ? "" : " · \(event.location)"))
-                                        .font(.system(size: 12)).foregroundStyle(Color.textSoft).lineLimit(1)
+                                        .font(.ui(12)).foregroundStyle(Color.textSoft).lineLimit(1)
                                 }
                                 Spacer()
                             }
@@ -1039,7 +1058,7 @@ struct DateJumpSheet: View {
                     selectedDate = today
                     dismiss()
                 }
-                .font(.system(size: 14, weight: .semibold))
+                .font(.ui(14, weight: .semibold))
                 .foregroundStyle(Color.accentDeep)
             }
             .padding(.top, 20).padding(.bottom, 6)
@@ -1054,7 +1073,7 @@ struct DateJumpSheet: View {
                 dismiss()
             } label: {
                 Text("Go to \(draft.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))")
-                    .font(.system(size: 14.5, weight: .semibold))
+                    .font(.ui(14.5, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 13)

@@ -20,6 +20,7 @@ struct TodosListView: View {
     @State private var draftTitle = ""
     @State private var showDone = false
     @State private var editing: Todo?
+    @State private var undoable: UndoableDelete?
 
     // MARK: Derived lists
 
@@ -69,6 +70,14 @@ struct TodosListView: View {
         }
         .background(Color.bg)
         .sheet(item: $editing) { TodoEditSheet(todo: $0) }
+        // Pinned to the bottom so the way back is reachable with the thumb,
+        // and doesn't shift the list it was deleted from.
+        .safeAreaInset(edge: .bottom) {
+            UndoBanner(pending: $undoable)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 6)
+                .animation(.easeInOut(duration: 0.18), value: undoable?.id)
+        }
     }
 
     // MARK: Quick add
@@ -76,7 +85,7 @@ struct TodosListView: View {
     private var quickAddBar: some View {
         HStack(spacing: 10) {
             TextField("Add a to-do…", text: $draftTitle)
-                .font(.system(size: 15))
+                .font(.ui(15))
                 .foregroundStyle(Color.textPrimary)
                 .submitLabel(.done)
                 .onSubmit(addTodo)
@@ -92,7 +101,7 @@ struct TodosListView: View {
 
             Button(action: addTodo) {
                 Image(systemName: "plus")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.ui(17, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 46, height: 46)
                     .background(RoundedRectangle(cornerRadius: 12).fill(Color.accent))
@@ -113,7 +122,7 @@ struct TodosListView: View {
         HStack(spacing: 12) {
             Button { complete(todo) } label: {
                 Image(systemName: "circle")
-                    .font(.system(size: 22, weight: .regular))
+                    .font(.ui(22, weight: .regular))
                     .foregroundStyle(Color.textMuted)
             }
             .buttonStyle(.plain)
@@ -143,8 +152,11 @@ struct TodosListView: View {
 
             Button { delete(todo) } label: {
                 Image(systemName: "trash")
-                    .font(.system(size: 13))
+                    .font(.ui(13))
                     .foregroundStyle(Color.textMuted)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+                    .accessibilityLabel("Delete \(todo.title)")
                     .padding(.leading, 2)
             }
             .buttonStyle(.plain)
@@ -160,7 +172,7 @@ struct TodosListView: View {
     /// Short due label, e.g. "Jul 30".
     private func dueBadge(_ date: Date) -> some View {
         Text(date.formatted(.dateTime.month(.abbreviated).day()))
-            .font(.system(size: 12, weight: .semibold))
+            .font(.ui(12, weight: .semibold))
             .foregroundStyle(Color.accentDeep)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
@@ -179,7 +191,7 @@ struct TodosListView: View {
                         .font(.serif(15))
                         .foregroundStyle(Color.textSoft)
                     Image(systemName: showDone ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.ui(11, weight: .semibold))
                         .foregroundStyle(Color.textMuted)
                     Spacer()
                 }
@@ -201,8 +213,8 @@ struct TodosListView: View {
         HStack(spacing: 12) {
             Button { uncomplete(todo) } label: {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(Color.sage)
+                    .font(.ui(22))
+                    .foregroundStyle(Color.sageDeep)
             }
             .buttonStyle(.plain)
 
@@ -216,8 +228,11 @@ struct TodosListView: View {
 
             Button { delete(todo) } label: {
                 Image(systemName: "trash")
-                    .font(.system(size: 13))
+                    .font(.ui(13))
                     .foregroundStyle(Color.textMuted)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+                    .accessibilityLabel("Delete \(todo.title)")
             }
             .buttonStyle(.plain)
         }
@@ -226,9 +241,24 @@ struct TodosListView: View {
     }
 
     /// Remove a to-do entirely (works for open and done items).
+    /// Deleting offers a way back rather than asking first. A to-do is deleted
+    /// often enough that a confirmation on every tap would be friction, but the
+    /// trash sits inches from three other targets in the same row — so the
+    /// answer is undo, not "are you sure?". The row is rebuilt from a snapshot
+    /// taken before the delete; only the identifier differs, and nothing
+    /// references a to-do by id.
     private func delete(_ todo: Todo) {
+        let restored = Todo(title: todo.title, notes: todo.notes,
+                            priority: todo.priority, dueDate: todo.dueDate,
+                            context: todo.context, sortOrder: todo.sortOrder)
+        restored.doneAt = todo.doneAt
+        let title = todo.title
         modelContext.delete(todo)
         modelContext.saveOrLog()
+        undoable = UndoableDelete(label: title.isEmpty ? "To-do deleted" : "Deleted \u{201C}\(title)\u{201D}") {
+            modelContext.insert(restored)
+            modelContext.saveOrLog()
+        }
     }
 
     // MARK: Empty state
@@ -236,10 +266,10 @@ struct TodosListView: View {
     private var emptyState: some View {
         HStack(spacing: 10) {
             Image(systemName: "checklist")
-                .font(.system(size: 19))
-                .foregroundStyle(Color.accent)
+                .font(.ui(19))
+                .foregroundStyle(Color.accentDeep)
             Text("Nothing on the list. Add a to-do above.")
-                .font(.system(size: 13))
+                .font(.ui(13))
                 .foregroundStyle(Color.textSoft)
             Spacer(minLength: 0)
         }
@@ -305,16 +335,16 @@ struct TodoEditSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
                     TextField("What needs doing?", text: $title)
-                        .font(.system(size: 16)).padding(13)
+                        .font(.ui(16)).padding(13)
                         .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
 
-                    Text("PRIORITY").font(.system(size: 10, weight: .bold)).kerning(1)
+                    Text("PRIORITY").font(.ui(10, weight: .bold)).kerning(1)
                         .foregroundStyle(Color.textMuted).padding(.top, 14)
                     HStack(spacing: 7) {
                         ForEach(TodoPriority.allCases, id: \.self) { p in
                             let on = priority == p
                             Button { priority = p } label: {
-                                Text(p.label).font(.system(size: 12.5, weight: .semibold))
+                                Text(p.label).font(.ui(12.5, weight: .semibold))
                                     .foregroundStyle(on ? Color.accentDeep : Color.textSoft)
                                     .padding(.horizontal, 12).padding(.vertical, 9)
                                     .background(Capsule().fill(on ? Color.accent.opacity(0.15) : Color.surface))
@@ -325,7 +355,7 @@ struct TodoEditSheet: View {
                     }
 
                     Toggle(isOn: $hasDue) {
-                        Text("DUE DATE").font(.system(size: 10, weight: .bold)).kerning(1)
+                        Text("DUE DATE").font(.ui(10, weight: .bold)).kerning(1)
                             .foregroundStyle(Color.textMuted)
                     }
                     .tint(Color.accent)
@@ -337,11 +367,11 @@ struct TodoEditSheet: View {
                             .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
                     }
 
-                    Text("NOTES").font(.system(size: 10, weight: .bold)).kerning(1)
+                    Text("NOTES").font(.ui(10, weight: .bold)).kerning(1)
                         .foregroundStyle(Color.textMuted).padding(.top, 14)
                     TextField("Anything else…", text: $notes, axis: .vertical)
                         .lineLimit(3...6)
-                        .font(.system(size: 15)).padding(13)
+                        .font(.ui(15)).padding(13)
                         .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
                 }
                 .padding(20)

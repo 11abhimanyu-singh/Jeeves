@@ -51,13 +51,13 @@ private func libraryThumbnail(urlString: String?, data: Data? = nil, width: CGFl
 private var libraryThumbnailPlaceholder: some View {
     RoundedRectangle(cornerRadius: 6)
         .fill(Color.surfaceDeep)
-        .overlay(Image(systemName: "book.closed.fill").font(.system(size: 14)).foregroundStyle(Color.textMuted))
+        .overlay(Image(systemName: "book.closed.fill").font(.ui(14)).foregroundStyle(Color.textMuted))
 }
 
 private func libraryScanButtonLabel(_ icon: String, _ label: String) -> some View {
     HStack(spacing: 6) {
-        Image(systemName: icon).font(.system(size: 13))
-        Text(label).font(.system(size: 13.5, weight: .semibold))
+        Image(systemName: icon).font(.ui(13))
+        Text(label).font(.ui(13.5, weight: .semibold))
     }
     .foregroundStyle(.white)
     .frame(maxWidth: .infinity)
@@ -66,7 +66,7 @@ private func libraryScanButtonLabel(_ icon: String, _ label: String) -> some Vie
 }
 
 private func libraryBadge(_ text: String, _ fg: Color, _ bg: Color) -> some View {
-    Text(text).font(.system(size: 10, weight: .semibold)).foregroundStyle(fg)
+    Text(text).font(.ui(10, weight: .semibold)).foregroundStyle(fg)
         .padding(.horizontal, 8).padding(.vertical, 3)
         .background(Capsule().fill(bg))
 }
@@ -84,9 +84,9 @@ private func statusMenuFullWidth(current: ReadingStatus, onSelect: @escaping (Re
         }
     } label: {
         HStack {
-            Text(current.rawValue).font(.system(size: 13.5, weight: .semibold))
+            Text(current.rawValue).font(.ui(13.5, weight: .semibold))
             Spacer()
-            Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
+            Image(systemName: "chevron.down").font(.ui(11, weight: .semibold))
         }
         .foregroundStyle(Color.textSoft)
         .padding(.horizontal, 12).padding(.vertical, 7)
@@ -221,7 +221,7 @@ struct LibraryView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     if let error = scanError {
-                        Text(error).font(.system(size: 12.5)).foregroundStyle(Color.accentDeep)
+                        Text(error).font(.ui(12.5)).foregroundStyle(Color.accentDeep)
                     }
 
                     currentlyReadingTile
@@ -334,12 +334,12 @@ struct LibraryView: View {
                 Circle()
                     .fill(Color.accent)
                     .frame(width: 30, height: 30)
-                    .overlay(Image(systemName: "books.vertical.fill").foregroundStyle(.white).font(.system(size: 13)))
+                    .overlay(Image(systemName: "books.vertical.fill").foregroundStyle(.white).font(.ui(13)))
                 Text("Library").font(.heading(18)).foregroundStyle(Color.textPrimary)
             }
             Spacer()
             Button { showAddBooksPage = true } label: {
-                Image(systemName: "plus.circle.fill").font(.system(size: 22)).foregroundStyle(Color.accent)
+                Image(systemName: "plus.circle.fill").font(.ui(22)).foregroundStyle(Color.accentDeep)
             }
         }
         .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 10)
@@ -359,17 +359,17 @@ struct LibraryView: View {
     private var currentlyReadingTile: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("CURRENTLY READING").font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Color.textMuted)
+                Text("CURRENTLY READING").font(.ui(11.5, weight: .semibold)).foregroundStyle(Color.textMuted)
                 Spacer()
                 if currentlyReadingBooks.count > 1 {
                     Text("\(min(carouselIndex, currentlyReadingBooks.count - 1) + 1)/\(currentlyReadingBooks.count)")
-                        .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Color.textMuted)
+                        .font(.ui(11.5, weight: .semibold)).foregroundStyle(Color.textMuted)
                 }
             }
 
             if currentlyReadingBooks.isEmpty {
                 Text("No book marked Currently Reading yet. Set one from Unread below, or start the recommendation.")
-                    .font(.system(size: 13)).foregroundStyle(Color.textSoft)
+                    .font(.ui(13)).foregroundStyle(Color.textSoft)
             } else {
                 TabView(selection: $carouselIndex) {
                     ForEach(Array(currentlyReadingBooks.enumerated()), id: \.element.id) { index, book in
@@ -409,15 +409,15 @@ struct LibraryView: View {
             }
             .buttonStyle(.plain)
             VStack(alignment: .leading, spacing: 4) {
-                Text("UP NEXT").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.textMuted)
+                Text("UP NEXT").font(.ui(11, weight: .semibold)).foregroundStyle(Color.textMuted)
                 Text(book.title).font(.serif(15)).foregroundStyle(Color.textPrimary)
-                Text(book.author).font(.system(size: 12.5)).foregroundStyle(Color.textSoft)
+                Text(book.author).font(.ui(12.5)).foregroundStyle(Color.textSoft)
             }
             Spacer()
             Button {
                 setStatus(.currentlyReading, on: book)
             } label: {
-                Text("Start").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                Text("Start").font(.ui(13, weight: .semibold)).foregroundStyle(.white)
                     .padding(.horizontal, 16).padding(.vertical, 10)
                     .background(RoundedRectangle(cornerRadius: 12).fill(Color.accent))
             }
@@ -433,7 +433,7 @@ struct LibraryView: View {
     private func bookSection(_ title: String, _ list: [Book]) -> some View {
         if !list.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                Text(title).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Color.textMuted)
+                Text(title).font(.ui(11.5, weight: .semibold)).foregroundStyle(Color.textMuted)
                 ForEach(list) { book in
                     LibraryBookRow(
                         book: book,
@@ -626,13 +626,13 @@ private struct CurrentlyReadingRow: View {
                         .foregroundStyle(Color.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(book.author)
-                        .font(.system(size: 12.5))
+                        .font(.ui(12.5))
                         .foregroundStyle(Color.textSoft)
                         .fixedSize(horizontal: false, vertical: true)
                     if let total = book.totalPages, total > 0 {
-                        Text("Page \(book.currentPage) of \(total)").font(.system(size: 11.5)).foregroundStyle(Color.textMuted)
+                        Text("Page \(book.currentPage) of \(total)").font(.ui(11.5)).foregroundStyle(Color.textMuted)
                     } else {
-                        Text("Page \(book.currentPage)").font(.system(size: 11.5)).foregroundStyle(Color.textMuted)
+                        Text("Page \(book.currentPage)").font(.ui(11.5)).foregroundStyle(Color.textMuted)
                     }
                 }
                 .padding(.trailing, 10)
@@ -648,7 +648,7 @@ private struct CurrentlyReadingRow: View {
                 Image(systemName: met ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(met ? Color.sage : Color.textMuted.opacity(0.5))
                 Text(met ? "Today's \(dailyPageTarget)-page target hit" : "\(todaysPages) / \(dailyPageTarget) pages today")
-                    .font(.system(size: 12.5, weight: .semibold))
+                    .font(.ui(12.5, weight: .semibold))
                     .foregroundStyle(met ? Color.sageDeep : Color.textSoft)
             }
 
@@ -663,7 +663,7 @@ private struct CurrentlyReadingRow: View {
                     guard let pages = Int(pagesInput.wrappedValue), pages > 0 else { return }
                     onLog(pages)
                 } label: {
-                    Text("Log").font(.system(size: 13.5, weight: .semibold)).foregroundStyle(.white)
+                    Text("Log").font(.ui(13.5, weight: .semibold)).foregroundStyle(.white)
                         .padding(.horizontal, 18).padding(.vertical, 10)
                         .background(RoundedRectangle(cornerRadius: 10).fill(Color.accent))
                 }
@@ -706,11 +706,11 @@ private struct LibraryBookRow: View {
                     HStack(alignment: .top, spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(book.title)
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(.ui(14, weight: .semibold))
                                 .foregroundStyle(Color.textPrimary)
                                 .fixedSize(horizontal: false, vertical: true)
                             Text(book.author)
-                                .font(.system(size: 12))
+                                .font(.ui(12))
                                 .foregroundStyle(Color.textSoft)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -767,11 +767,11 @@ private struct AddBooksView: View {
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("Add your Anthropic API key").font(.system(size: 13.5, weight: .bold)).foregroundStyle(Color.textPrimary)
-                                    Text("Needed for shelf scanning and book summaries").font(.system(size: 12)).foregroundStyle(Color.textSoft)
+                                    Text("Add your Anthropic API key").font(.ui(13.5, weight: .bold)).foregroundStyle(Color.textPrimary)
+                                    Text("Needed for shelf scanning and book summaries").font(.ui(12)).foregroundStyle(Color.textSoft)
                                 }
                                 Spacer()
-                                Image(systemName: "arrow.right").font(.system(size: 14)).foregroundStyle(Color.accent)
+                                Image(systemName: "arrow.right").font(.ui(14)).foregroundStyle(Color.accentDeep)
                             }
                             .padding(.horizontal, 16).padding(.vertical, 13)
                             .background(RoundedRectangle(cornerRadius: 16).fill(Color.surface))
@@ -784,14 +784,14 @@ private struct AddBooksView: View {
                     // entry are still here, just no longer competing for
                     // first position.
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("SEARCH").font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Color.textMuted)
+                        Text("SEARCH").font(.ui(11.5, weight: .semibold)).foregroundStyle(Color.textMuted)
                         HStack(spacing: 8) {
                             TextField("Title, author, or ISBN", text: $query)
                                 .padding(10)
                                 .background(RoundedRectangle(cornerRadius: 10).fill(Color.surface))
                                 .onSubmit { runSearch() }
                             Button { runSearch() } label: {
-                                Image(systemName: "magnifyingglass").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                                Image(systemName: "magnifyingglass").font(.ui(14, weight: .semibold)).foregroundStyle(.white)
                                     .padding(10)
                                     .background(RoundedRectangle(cornerRadius: 10).fill(Color.accent))
                             }
@@ -802,7 +802,7 @@ private struct AddBooksView: View {
                             HStack { Spacer(); ProgressView(); Spacer() }.padding(.vertical, 10)
                         } else if hasSearched && results.isEmpty {
                             Text("No matches. You can still add it manually below.")
-                                .font(.system(size: 12.5)).foregroundStyle(Color.textSoft)
+                                .font(.ui(12.5)).foregroundStyle(Color.textSoft)
                                 .padding(.vertical, 4)
                         }
 
@@ -824,7 +824,7 @@ private struct AddBooksView: View {
 
                     Button(action: onAddManual) {
                         Text("Can't find it? Add manually")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.ui(13, weight: .semibold))
                             .foregroundStyle(Color.textSoft)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 10)
@@ -877,17 +877,17 @@ private struct AddBooksView: View {
             libraryThumbnail(urlString: result.thumbnailURLString)
             VStack(alignment: .leading, spacing: 2) {
                 Text(result.title).font(.serif(14)).foregroundStyle(Color.textPrimary)
-                Text(result.author).font(.system(size: 12)).foregroundStyle(Color.textSoft)
+                Text(result.author).font(.ui(12)).foregroundStyle(Color.textSoft)
             }
             Spacer()
             if added {
-                Text("In library").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.textMuted)
+                Text("In library").font(.ui(11, weight: .semibold)).foregroundStyle(Color.textMuted)
             } else {
                 Button {
                     onAddSearchResult(result)
                     addedResultIDs.insert(result.id)
                 } label: {
-                    Text("Add").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(.white)
+                    Text("Add").font(.ui(12.5, weight: .semibold)).foregroundStyle(.white)
                         .padding(.horizontal, 14).padding(.vertical, 8)
                         .background(RoundedRectangle(cornerRadius: 10).fill(Color.accent))
                 }
@@ -918,7 +918,7 @@ private struct BookSummarySheet: View {
                 libraryThumbnail(urlString: book.thumbnailURLString, data: book.thumbnailData, width: 56)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(book.title).font(.heading(17)).foregroundStyle(Color.textPrimary)
-                    Text(book.author).font(.system(size: 13)).foregroundStyle(Color.textSoft)
+                    Text(book.author).font(.ui(13)).foregroundStyle(Color.textSoft)
                 }
                 Spacer()
             }
@@ -927,14 +927,14 @@ private struct BookSummarySheet: View {
             if isLoading {
                 HStack { Spacer(); ProgressView("Asking Claude…"); Spacer() }.padding(.top, 24)
             } else if let errorText {
-                Text(errorText).font(.system(size: 13.5)).foregroundStyle(Color.textSoft)
+                Text(errorText).font(.ui(13.5)).foregroundStyle(Color.textSoft)
             } else if let summaryText {
                 ScrollView {
-                    Text(summaryText).font(.system(size: 14)).foregroundStyle(Color.textPrimary)
+                    Text(summaryText).font(.ui(14)).foregroundStyle(Color.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Button("Refresh") { Task { await load(force: true) } }
-                    .font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Color.accentDeep)
+                    .font(.ui(12.5, weight: .semibold)).foregroundStyle(Color.accentDeep)
             }
             Spacer(minLength: 0)
         }
@@ -1088,13 +1088,13 @@ private struct ScanReviewSheet: View {
                 let dup = isDuplicate(book)
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(book.title).font(.system(size: 14, weight: .semibold))
-                        Text(book.author).font(.system(size: 12)).foregroundStyle(.secondary)
+                        Text(book.title).font(.ui(14, weight: .semibold))
+                        Text(book.author).font(.ui(12)).foregroundStyle(.secondary)
                         if let genre = book.genre {
-                            Text(genre).font(.system(size: 11)).foregroundStyle(.secondary)
+                            Text(genre).font(.ui(11)).foregroundStyle(.secondary)
                         }
                         if dup {
-                            Text("Already in library").font(.system(size: 11, weight: .semibold)).foregroundStyle(.orange)
+                            Text("Already in library").font(.ui(11, weight: .semibold)).foregroundStyle(.orange)
                         }
                     }
                     Spacer()
@@ -1138,11 +1138,11 @@ private struct RatingPromptSheet: View {
     var body: some View {
         VStack(spacing: 18) {
             Text("How was it?").font(.heading(18))
-            Text(book.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(.secondary)
+            Text(book.title).font(.ui(14, weight: .semibold)).foregroundStyle(.secondary)
             VStack(spacing: 10) {
                 ForEach(BookRating.allCases, id: \.self) { rating in
                     Button { onRate(rating) } label: {
-                        Text(rating.rawValue).font(.system(size: 15, weight: .semibold))
+                        Text(rating.rawValue).font(.ui(15, weight: .semibold))
                             .foregroundStyle(Color.textPrimary)
                             .frame(maxWidth: .infinity).padding(.vertical, 13)
                             .background(RoundedRectangle(cornerRadius: 14).fill(Color.surface))

@@ -113,11 +113,11 @@ struct PlannerSetupView: View {
             ForEach(todayEvents) { event in
                 Button { editingEvent = event } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(event.title).font(.system(size: 15, weight: .semibold)).foregroundStyle(Color.textPrimary)
+                        Text(event.title).font(.ui(15, weight: .semibold)).foregroundStyle(Color.textPrimary)
                         Text("\(hhmm(event.startMinute))–\(hhmm(event.endMinute)) · from \(event.outboundStart.rawValue)")
-                            .font(.system(size: 12)).foregroundStyle(Color.textSoft)
+                            .font(.ui(12)).foregroundStyle(Color.textSoft)
                         if !event.destinationAddress.isEmpty {
-                            Text(event.destinationAddress).font(.system(size: 11.5)).foregroundStyle(Color.textMuted)
+                            Text(event.destinationAddress).font(.ui(11.5)).foregroundStyle(Color.textMuted)
                         }
                     }
                 }
@@ -135,13 +135,13 @@ struct PlannerSetupView: View {
                 }
             }
             if isReadingTicket {
-                HStack { ProgressView(); Text("Reading ticket…").font(.system(size: 12.5)).foregroundStyle(Color.textMuted) }
+                HStack { ProgressView(); Text("Reading ticket…").font(.ui(12.5)).foregroundStyle(Color.textMuted) }
             }
             if isImportingCalendar {
-                HStack { ProgressView(); Text("Importing from calendar…").font(.system(size: 12.5)).foregroundStyle(Color.textMuted) }
+                HStack { ProgressView(); Text("Importing from calendar…").font(.ui(12.5)).foregroundStyle(Color.textMuted) }
             }
             if let ticketError {
-                Text(ticketError).font(.system(size: 12)).foregroundStyle(Color.accentDeep)
+                Text(ticketError).font(.ui(12)).foregroundStyle(Color.accentDeep)
             }
         } header: {
             Text("Today's events")

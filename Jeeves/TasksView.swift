@@ -22,7 +22,7 @@ struct TasksView: View {
                 ForEach(Sub.allCases, id: \.self) { s in
                     Button { sub = s } label: {
                         Text(s.label)
-                            .font(.system(size: 12.5, weight: .bold))
+                            .font(.ui(12.5, weight: .bold))
                             .foregroundStyle(sub == s ? .white : Color.textSoft)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)

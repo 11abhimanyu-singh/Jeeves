@@ -60,6 +60,7 @@ struct RunView: View {
     @State private var finishedAvgHR: Int? = nil
     @State private var rpe = 6
     @State private var logged = false
+    @State private var confirmingDiscard = false
 
     @Query(sort: \RunSession.date, order: .reverse) private var sessions: [RunSession]
 
@@ -117,12 +118,12 @@ struct RunView: View {
                     .font(.serif(28))
                     .foregroundStyle(Color.textPrimary)
                 Text(currentWeek.focus)
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.ui(15, weight: .medium))
                     .foregroundStyle(Color.accentDeep)
                 Text(programComplete
                      ? "You've finished the 16-week plan — this is the graduation run: 30 minutes, non-stop."
                      : "The goal for week 16 is 30 minutes non-stop. One gentle step at a time.")
-                    .font(.system(size: 13.5))
+                    .font(.ui(13.5))
                     .foregroundStyle(Color.textSoft)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -134,7 +135,7 @@ struct RunView: View {
 
             if let last = sessions.first {
                 Text("Last run · Week \(last.weekIndex + 1) · \(clock(last.durationSec)) · \(oneDp(last.distanceKm)) km · \(relativeDay(last.date))")
-                    .font(.system(size: 12.5))
+                    .font(.ui(12.5))
                     .foregroundStyle(Color.textMuted)
                     .padding(.top, 2)
             }
@@ -145,7 +146,7 @@ struct RunView: View {
     private var weekProgressRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("PROGRESS")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.ui(11, weight: .semibold))
                 .tracking(1.2)
                 .foregroundStyle(Color.textMuted)
             HStack(spacing: 3) {
@@ -157,7 +158,7 @@ struct RunView: View {
                 }
             }
             Text("Week \(currentWeek.number) of \(RunProgram.totalWeeks) · \(completedCount) runs logged")
-                .font(.system(size: 12))
+                .font(.ui(12))
                 .foregroundStyle(Color.textMuted)
         }
         .padding(16)
@@ -187,7 +188,7 @@ struct RunView: View {
                 .foregroundStyle(Color.textPrimary)
                 .monospacedDigit()
             Text(caption.uppercased())
-                .font(.system(size: 10, weight: .semibold))
+                .font(.ui(10, weight: .semibold))
                 .tracking(0.8)
                 .foregroundStyle(Color.textMuted)
         }
@@ -200,7 +201,7 @@ struct RunView: View {
     private var segmentPlanCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("THIS SESSION")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.ui(11, weight: .semibold))
                 .tracking(1.2)
                 .foregroundStyle(Color.textMuted)
                 .padding(.bottom, 10)
@@ -209,15 +210,15 @@ struct RunView: View {
             ForEach(Array(condensed.enumerated()), id: \.offset) { i, row in
                 HStack(spacing: 12) {
                     Image(systemName: row.kind.icon)
-                        .font(.system(size: 16))
+                        .font(.ui(16))
                         .foregroundStyle(tint(for: row.kind))
                         .frame(width: 24)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(row.label)
-                            .font(.system(size: 15, weight: .medium))
+                            .font(.ui(15, weight: .medium))
                             .foregroundStyle(Color.textPrimary)
                         Text(pace(row.kmh))
-                            .font(.system(size: 12))
+                            .font(.ui(12))
                             .foregroundStyle(Color.textMuted)
                     }
                     Spacer()
@@ -263,7 +264,7 @@ struct RunView: View {
         if let seg = currentSegment {
             VStack(spacing: 18) {
                 Text("BLOCK \(segmentIndex + 1) OF \(segments.count)")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.ui(12, weight: .semibold))
                     .tracking(1.4)
                     .foregroundStyle(Color.accentDeep)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -298,7 +299,7 @@ struct RunView: View {
                         .foregroundStyle(Color.textPrimary)
                         .monospacedDigit()
                     Text(isPaused ? "paused" : "remaining")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.ui(12, weight: .medium))
                         .foregroundStyle(Color.textMuted)
                 }
             }
@@ -310,7 +311,7 @@ struct RunView: View {
                     .font(.serif(26))
                     .foregroundStyle(tint(for: seg.kind))
                 Text("Hold \(pace(seg.targetKmh))")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.ui(14, weight: .medium))
                     .foregroundStyle(Color.textSoft)
             }
         }
@@ -325,12 +326,12 @@ struct RunView: View {
         if remaining <= 10 && !isPaused {
             HStack(spacing: 10) {
                 Image(systemName: "bell.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.ui(14, weight: .semibold))
                     .foregroundStyle(.white)
                 Text(nextSegment == nil
                      ? "Finishing in \(remaining)s — ease off"
                      : "\(nextSegment!.kind.display.uppercased()) in \(remaining)s")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.ui(14, weight: .semibold))
                     .foregroundStyle(.white)
                 Spacer()
             }
@@ -357,12 +358,12 @@ struct RunView: View {
     private var heartRateLabel: some View {
         VStack(alignment: .center, spacing: 2) {
             Text("BPM")
-                .font(.system(size: 10.5, weight: .semibold))
+                .font(.ui(10.5, weight: .semibold))
                 .tracking(1.0)
                 .foregroundStyle(Color.textMuted)
             HStack(spacing: 4) {
                 Image(systemName: "heart.fill")
-                    .font(.system(size: 12)).foregroundStyle(Color.accent)
+                    .font(.ui(12)).foregroundStyle(Color.accentDeep)
                 Text((watchLink.currentBPM ?? hr.currentBPM).map(String.init) ?? "—")
                     .font(.serif(18))
                     .foregroundStyle(Color.textPrimary)
@@ -374,7 +375,7 @@ struct RunView: View {
     private func timeLabel(_ caption: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(caption.uppercased())
-                .font(.system(size: 10.5, weight: .semibold))
+                .font(.ui(10.5, weight: .semibold))
                 .tracking(1.0)
                 .foregroundStyle(Color.textMuted)
             Text(value)
@@ -406,20 +407,20 @@ struct RunView: View {
     private var nextPreview: some View {
         HStack(spacing: 12) {
             Image(systemName: "arrow.turn.down.right")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.ui(14, weight: .semibold))
                 .foregroundStyle(Color.accentDeep)
             VStack(alignment: .leading, spacing: 2) {
                 Text("UP NEXT")
-                    .font(.system(size: 10.5, weight: .semibold))
+                    .font(.ui(10.5, weight: .semibold))
                     .tracking(1.0)
                     .foregroundStyle(Color.textMuted)
                 if let next = nextSegment {
                     Text("\(next.kind.display) · \(clock(next.seconds)) · \(pace(next.targetKmh))")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.ui(14, weight: .medium))
                         .foregroundStyle(Color.textPrimary)
                 } else {
                     Text("Last block — you're almost there")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.ui(14, weight: .medium))
                         .foregroundStyle(Color.textSoft)
                 }
             }
@@ -454,7 +455,7 @@ struct RunView: View {
                 finish()
             } label: {
                 Text("End run")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.ui(13, weight: .medium))
                     .foregroundStyle(Color.accentDeep)
             }
             .buttonStyle(.plain)
@@ -465,7 +466,7 @@ struct RunView: View {
     private func controlLabel(_ title: String, icon: String, filled: Bool) -> some View {
         HStack(spacing: 7) {
             Image(systemName: icon)
-            Text(title).font(.system(size: 15, weight: .semibold))
+            Text(title).font(.ui(15, weight: .semibold))
         }
         .foregroundStyle(filled ? .white : Color.textPrimary)
         .frame(maxWidth: .infinity)
@@ -484,7 +485,7 @@ struct RunView: View {
             ZStack {
                 Circle().fill(Color.sageLight).frame(width: 92, height: 92)
                 Image(systemName: "checkmark")
-                    .font(.system(size: 40, weight: .semibold))
+                    .font(.ui(40, weight: .semibold))
                     .foregroundStyle(Color.sageDeep)
             }
             .padding(.top, 12)
@@ -494,7 +495,7 @@ struct RunView: View {
                     .font(.serif(28))
                     .foregroundStyle(Color.textPrimary)
                 Text("Week \(runWeekIndex + 1) · Day \(runDayIndex + 1)")
-                    .font(.system(size: 15))
+                    .font(.ui(15))
                     .foregroundStyle(Color.textSoft)
             }
 
@@ -519,15 +520,34 @@ struct RunView: View {
             .disabled(logged)
             .padding(.top, 2)
 
+            // Once the run is logged this is a plain "Done" and needs no
+            // guard. Before that it throws away a finished run — duration,
+            // distance, heart rate, RPE — and there is no undo, so it asks.
             Button {
-                stopTimer()
-                dismiss()
+                if logged {
+                    stopTimer()
+                    dismiss()
+                } else {
+                    confirmingDiscard = true
+                }
             } label: {
                 Text(logged ? "Done" : "Discard")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.ui(14, weight: .medium))
                     .foregroundStyle(Color.accentDeep)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .confirmationDialog("Discard this run?",
+                                isPresented: $confirmingDiscard, titleVisibility: .visible) {
+                Button("Discard run", role: .destructive) {
+                    stopTimer()
+                    dismiss()
+                }
+                Button("Keep it", role: .cancel) { }
+            } message: {
+                Text("\(finishedDurationSec / 60) min and \(String(format: "%.2f", finishedDistanceKm)) km won't be saved.")
+            }
         }
         .frame(maxWidth: .infinity)
     }
@@ -539,7 +559,7 @@ struct RunView: View {
         VStack(spacing: 14) {
             HStack {
                 Text("HOW HARD DID THAT FEEL")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.ui(11, weight: .semibold))
                     .tracking(1.2)
                     .foregroundStyle(Color.textMuted)
                 Spacer()
@@ -556,7 +576,7 @@ struct RunView: View {
                         .font(.serif(18))
                         .foregroundStyle(Color.textPrimary)
                     Text("RPE \(rpe) of 10")
-                        .font(.system(size: 12.5))
+                        .font(.ui(12.5))
                         .foregroundStyle(Color.textMuted)
                 }
                 Spacer()
@@ -570,7 +590,7 @@ struct RunView: View {
                         rpe = n
                     } label: {
                         Text("\(n)")
-                            .font(.system(size: 14, weight: n == rpe ? .bold : .medium))
+                            .font(.ui(14, weight: n == rpe ? .bold : .medium))
                             .monospacedDigit()
                             .foregroundStyle(n == rpe ? .white : Color.textSoft)
                             .frame(maxWidth: .infinity)
@@ -600,7 +620,7 @@ struct RunView: View {
                 .foregroundStyle(Color.textPrimary)
                 .monospacedDigit()
             Text(caption.uppercased())
-                .font(.system(size: 10.5, weight: .semibold))
+                .font(.ui(10.5, weight: .semibold))
                 .tracking(1.0)
                 .foregroundStyle(Color.textMuted)
         }
@@ -769,11 +789,17 @@ struct RunView: View {
         let t = Timer(timeInterval: 1, repeats: true) { _ in tick() }
         RunLoop.main.add(t, forMode: .common)
         timer = t
+        // A run is watched, not touched. Pausing deliberately keeps the hold
+        // (pause doesn't stop the timer), so the screen stays up until the
+        // session actually ends.
+        ScreenAwake.acquire()
     }
 
     private func stopTimer() {
+        guard timer != nil else { return }   // keep acquire/release balanced
         timer?.invalidate()
         timer = nil
+        ScreenAwake.release()
     }
 
     // MARK: - Plan condensing (collapse repeated run/walk pairs for the overview)
@@ -841,7 +867,7 @@ struct RunView: View {
 
     private func eyebrow(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 12, weight: .semibold))
+            .font(.ui(12, weight: .semibold))
             .tracking(1.4)
             .foregroundStyle(Color.accentDeep)
     }

@@ -33,13 +33,13 @@ struct TravelDayCard: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "airplane.departure")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.ui(13, weight: .semibold))
                 Text("TRAVEL MODE")
-                    .font(.system(size: 11, weight: .bold)).kerning(1.2)
+                    .font(.ui(11, weight: .bold)).kerning(1.2)
                 Spacer()
                 Button { showTrip = true } label: {
                     Text(trip.title.isEmpty ? "Trip" : trip.title)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.ui(12, weight: .semibold))
                         .underline()
                 }
                 .buttonStyle(.plain)
@@ -51,7 +51,7 @@ struct TravelDayCard: View {
                     .font(Font.serif(17))
                     .foregroundStyle(Color.textPrimary)
                 Text("You're away, so the planner is standing down — no routine, no gym, no commute. Nothing to be late for.")
-                    .font(.system(size: 12.5))
+                    .font(.ui(12.5))
                     .foregroundStyle(Color.textSoft)
             } else {
                 ForEach(segments, id: \.id) { s in
@@ -81,7 +81,7 @@ struct LeaveByCard: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: segment.mode.icon)
-                    .font(.system(size: 13))
+                    .font(.ui(13))
                     .foregroundStyle(Color.travelInk)
                 Text(segment.label.isEmpty ? segment.mode.label : segment.label)
                     .font(Font.serif(16, weight: .semibold))
@@ -89,7 +89,7 @@ struct LeaveByCard: View {
                 Spacer()
                 if !segment.toPlace.isEmpty {
                     Text(segment.toPlace)
-                        .font(.system(size: 11))
+                        .font(.ui(11))
                         .foregroundStyle(Color.textMuted)
                         .lineLimit(1)
                 }
@@ -98,7 +98,7 @@ struct LeaveByCard: View {
             if let plan {
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
                     Text("Leave")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.ui(12, weight: .semibold))
                         .foregroundStyle(Color.textSoft)
                     // A tilde marks a chain still missing its journey time —
                     // "Leave ~05:30" reads as the estimate it is, not a fact.
@@ -108,12 +108,12 @@ struct LeaveByCard: View {
                         .foregroundStyle(Color.travelInk)
                     if chainIsMultiDay {
                         Text(dayTag(plan.leaveAt, in: segment.fromTimeZone))
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.ui(12, weight: .semibold))
                             .foregroundStyle(Color.travelInk)
                     }
                     if crossesZones {
                         Text(TravelClock.label(segment.fromTimeZone, at: plan.leaveAt))
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.ui(11, weight: .semibold))
                             .foregroundStyle(Color.textMuted)
                     }
                 }
@@ -132,27 +132,27 @@ struct LeaveByCard: View {
                             // at Thimphu is 15:00 Bhutan time, labelled so.
                             VStack(alignment: .leading, spacing: 0) {
                                 Text(TravelClock.hhmm(step.time, in: zone(for: step)))
-                                    .font(.system(size: 13, weight: step.isLeave ? .bold : .regular))
+                                    .font(.ui(13, weight: step.isLeave ? .bold : .regular))
                                     .monospacedDigit()
                                     .foregroundStyle(step.isLeave ? Color.travelInk : Color.textPrimary)
                                 if chainIsMultiDay {
                                     Text(dayTag(step.time, in: zone(for: step)))
-                                        .font(.system(size: 9, weight: .semibold))
+                                        .font(.ui(9, weight: .semibold))
                                         .foregroundStyle(Color.textMuted)
                                 }
                                 if driveZonesDiffer {
                                     Text(TravelClock.label(zone(for: step), at: step.time))
-                                        .font(.system(size: 8.5, weight: .semibold))
+                                        .font(.ui(8.5, weight: .semibold))
                                         .foregroundStyle(Color.textMuted)
                                 }
                             }
                             .frame(width: 46, alignment: .leading)
                             Text(step.label)
-                                .font(.system(size: 12.5, weight: step.isLeave ? .semibold : .regular))
+                                .font(.ui(12.5, weight: step.isLeave ? .semibold : .regular))
                                 .foregroundStyle(step.isLeave ? Color.travelInk : Color.textSoft)
                             Spacer(minLength: 4)
                             Text(step.detail)
-                                .font(.system(size: 10.5))
+                                .font(.ui(10.5))
                                 .foregroundStyle(Color.textMuted)
                                 .multilineTextAlignment(.trailing)
                         }
@@ -170,24 +170,24 @@ struct LeaveByCard: View {
                                 .padding(.top, 6)
                             VStack(alignment: .leading, spacing: 0) {
                                 Text(TravelClock.hhmm(arriveAt, in: segment.toTimeZone))
-                                    .font(.system(size: 13, weight: .semibold))
+                                    .font(.ui(13, weight: .semibold))
                                     .monospacedDigit()
                                     .foregroundStyle(Color.sageDeep)
                                 if chainIsMultiDay {
                                     Text(dayTag(arriveAt, in: segment.toTimeZone))
-                                        .font(.system(size: 9, weight: .semibold))
+                                        .font(.ui(9, weight: .semibold))
                                         .foregroundStyle(Color.textMuted)
                                 }
                             }
                             .frame(width: 46, alignment: .leading)
                             Text("Arrives")
-                                .font(.system(size: 12.5, weight: .semibold))
+                                .font(.ui(12.5, weight: .semibold))
                                 .foregroundStyle(Color.sageDeep)
                             if TravelClock.crossesDay(departure: segment.departAt,
                                                       departureZone: segment.fromTimeZone,
                                                       arrival: arriveAt, arrivalZone: segment.toTimeZone) {
                                 Text("next day")
-                                    .font(.system(size: 9.5, weight: .bold))
+                                    .font(.ui(9.5, weight: .bold))
                                     .padding(.horizontal, 5).padding(.vertical, 2)
                                     .background(Capsule().fill(Color.accent.opacity(0.18)))
                                     .foregroundStyle(Color.accentDeep)
@@ -197,7 +197,7 @@ struct LeaveByCard: View {
                                  + (TravelClock.offsetLabel(from: segment.fromTimeZone,
                                                             to: segment.toTimeZone,
                                                             at: arriveAt).map { " \u{00B7} clock \($0)" } ?? ""))
-                                .font(.system(size: 10.5))
+                                .font(.ui(10.5))
                                 .foregroundStyle(Color.textMuted)
                         }
                         .padding(.vertical, 3)
@@ -211,7 +211,7 @@ struct LeaveByCard: View {
                      : plan.travelIsEstimated
                      ? "Journey time is an estimate — tap Measure to price it against live traffic. Cut-off, security and buffer are always your assumptions."
                      : "Journey measured against live traffic. Cut-off, security and buffer are your assumptions.")
-                    .font(.system(size: 10.5))
+                    .font(.ui(10.5))
                     .foregroundStyle(segment.travelMinutes == 0 ? Color.accentDeep : Color.textMuted)
                     .padding(.top, 2)
 
@@ -219,9 +219,9 @@ struct LeaveByCard: View {
                     Button { measure() } label: {
                         HStack(spacing: 6) {
                             if pricing { ProgressView().scaleEffect(0.6) }
-                            Image(systemName: "location.fill").font(.system(size: 10))
+                            Image(systemName: "location.fill").font(.ui(10))
                             Text(pricing ? "Measuring…" : "Measure the journey")
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(.ui(12, weight: .semibold))
                         }
                         .foregroundStyle(Color.travelInk)
                         .padding(.vertical, 8).frame(maxWidth: .infinity)
@@ -232,7 +232,7 @@ struct LeaveByCard: View {
                 }
                 if let measureNote {
                     Text(measureNote)
-                        .font(.system(size: 10.5))
+                        .font(.ui(10.5))
                         .foregroundStyle(Color.accentDeep)
                         .padding(.top, 2)
                 }
@@ -240,7 +240,7 @@ struct LeaveByCard: View {
                 Text(segment.mode == .drive
                      ? "Add the time you must arrive and I'll work backwards."
                      : "Add the departure time and I'll work backwards.")
-                    .font(.system(size: 12.5))
+                    .font(.ui(12.5))
                     .foregroundStyle(Color.textMuted)
             }
         }
@@ -374,10 +374,10 @@ struct TravelQuietDayCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "airplane.departure")
-                    .font(.system(size: 13))
+                    .font(.ui(13))
                     .foregroundStyle(Color.travelInk)
                 Text("TRAVEL MODE")
-                    .font(.system(size: 12, weight: .bold)).kerning(1.5)
+                    .font(.ui(12, weight: .bold)).kerning(1.5)
                     .foregroundStyle(Color.travelInk)
                 Spacer()
             }
@@ -385,7 +385,7 @@ struct TravelQuietDayCard: View {
                 .font(Font.serif(26, weight: .semibold))
                 .foregroundStyle(Color.textPrimary)
             Text("You're away, so the planner is standing down — no routine, no gym, no commute. Nothing to be late for.")
-                .font(.system(size: 14))
+                .font(.ui(14))
                 .foregroundStyle(Color.textSoft)
 
             // Every trip owning this day, each a link into its editor.
@@ -393,7 +393,7 @@ struct TravelQuietDayCard: View {
                 ForEach(trips, id: \.id) { trip in
                     Button { onOpen(trip) } label: {
                         Text(trip.title.isEmpty ? "Trip" : trip.title)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.ui(12, weight: .semibold))
                             .underline()
                             .foregroundStyle(Color.travelInk)
                             .lineLimit(1)
@@ -405,7 +405,7 @@ struct TravelQuietDayCard: View {
 
             if hasInteriorOverlap {
                 Text("These trips overlap — that's duplicate data, not a handover. Say \u{201C}clean up my travel data\u{201D} in Jeeves chat and they'll merge, with a receipt.")
-                    .font(.system(size: 11.5))
+                    .font(.ui(11.5))
                     .foregroundStyle(Color.accentDeep)
                     .padding(.top, 4)
             }
@@ -428,6 +428,7 @@ struct TripEditorView: View {
     // Segments minted this session by the add buttons: dismissing their
     // editor without saving discards them.
     @State private var freshIDs = Set<UUID>()
+    @State private var confirmingDelete = false
 
     private var segments: [TravelSegment] {
         allSegments.filter { $0.tripID == trip.id }
@@ -451,7 +452,7 @@ struct TripEditorView: View {
                     }
 
                     Text("The planner stands down for every day of this trip. What you get instead are the journeys below.")
-                        .font(.system(size: 12))
+                        .font(.ui(12))
                         .foregroundStyle(Color.textMuted)
                         .padding(.bottom, 2)
 
@@ -460,10 +461,10 @@ struct TripEditorView: View {
                     if segments.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("How are you getting there — and home?")
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(.ui(14, weight: .semibold))
                                 .foregroundStyle(Color.travelInk)
                             Text("Add the outbound and the return below, and I'll work out when to leave for each — including the way home.")
-                                .font(.system(size: 12))
+                                .font(.ui(12))
                                 .foregroundStyle(Color.textSoft)
                         }
                         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -471,8 +472,17 @@ struct TripEditorView: View {
                     }
 
                     ForEach(segments, id: \.id) { s in
-                        Button { editing = s } label: { LeaveByCard(segment: s) }
-                            .buttonStyle(.plain)
+                        // NOT a Button wrapping the card: LeaveByCard has its
+                        // own "Measure the journey" button inside it, and a
+                        // Button nested in another Button's label lets the
+                        // outer one swallow the tap — Measure would silently
+                        // open the editor instead of measuring. A tap gesture
+                        // on the card yields to the inner button, so both work.
+                        LeaveByCard(segment: s)
+                            .contentShape(Rectangle())
+                            .onTapGesture { editing = s }
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityHint("Opens this journey's details")
                     }
 
                     Button { editing = newSegment(.flight) } label: {
@@ -492,16 +502,30 @@ struct TripEditorView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     // Deleting a trip takes its stays and journeys with it and
-                    // hands the days back to the planner.
-                    Button(role: .destructive) { deleteTrip() } label: {
+                    // hands the days back to the planner. Chat confirms and
+                    // issues a receipt for exactly this operation; the UI used
+                    // to do it on one unlabelled tap with no way back.
+                    Button(role: .destructive) { confirmingDelete = true } label: {
                         Image(systemName: "trash")
-                    }.tint(.red)
+                    }
+                    .tint(Color.accentDeep)
+                    .accessibilityLabel("Delete trip")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }.tint(Color.accentDeep)
                 }
             }
             .sheet(item: $editing) { SegmentEditorView(segment: $0, isNew: freshIDs.contains($0.id)) }
+            // Name the blast radius in the message rather than asking a bare
+            // "are you sure?" — the counts are what make the choice.
+            .confirmationDialog("Delete this trip?",
+                                isPresented: $confirmingDelete, titleVisibility: .visible) {
+                Button("Delete trip and \(segments.count) journey\(segments.count == 1 ? "" : "s")",
+                       role: .destructive) { deleteTrip() }
+                Button("Keep it", role: .cancel) { }
+            } message: {
+                Text("\(trip.dayCount) day\(trip.dayCount == 1 ? "" : "s") go back to the normal planner, and every leave-by nudge for this trip is cancelled. This can't be undone.")
+            }
         }
     }
 
@@ -564,11 +588,11 @@ struct TripEditorView: View {
 
     private func dateBox(_ title: String, get: @escaping () -> Date, set: @escaping (Date) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title.uppercased()).font(.system(size: 10, weight: .bold)).kerning(0.8)
+            Text(title.uppercased()).font(.ui(10, weight: .bold)).kerning(0.8)
                 .foregroundStyle(Color.textMuted)
             DatePicker("", selection: Binding(get: get, set: set), displayedComponents: [.date])
                 .labelsHidden()
-                .font(.system(size: 13))
+                .font(.ui(13))
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 13).fill(Color.surface))
@@ -588,8 +612,8 @@ struct TripEditorView: View {
 
     private func addLabel(_ t: String, _ icon: String) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: icon).font(.system(size: 13))
-            Text(t).font(.system(size: 14.5, weight: .semibold))
+            Image(systemName: icon).font(.ui(13))
+            Text(t).font(.ui(14.5, weight: .semibold))
         }
         .foregroundStyle(Color.travelInk)
         .frame(maxWidth: .infinity).padding(.vertical, 12)
@@ -599,7 +623,7 @@ struct TripEditorView: View {
 
     private func stat(_ k: String, _ v: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(k.uppercased()).font(.system(size: 10, weight: .bold)).kerning(0.8)
+            Text(k.uppercased()).font(.ui(10, weight: .bold)).kerning(0.8)
                 .foregroundStyle(Color.textMuted)
             Text(v).font(Font.serif(18, weight: .semibold)).foregroundStyle(Color.textPrimary)
         }
@@ -629,6 +653,7 @@ struct SegmentEditorView: View {
     @State private var stops = 0
     @State private var travel = 0
     @State private var loaded = false
+    @State private var confirmingDelete = false
     @State private var arrives = Date()
     @State private var fromZoneID = ""
     @State private var toZoneID = ""
@@ -683,7 +708,7 @@ struct SegmentEditorView: View {
 
                     DatePicker(isFlight ? "Departs" : "Must arrive by",
                                selection: $when, displayedComponents: [.date, .hourAndMinute])
-                        .font(.system(size: 14))
+                        .font(.ui(14))
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
 
@@ -700,19 +725,19 @@ struct SegmentEditorView: View {
                     if isFlight {
                         DatePicker("Arrives", selection: $arrives,
                                    displayedComponents: [.date, .hourAndMinute])
-                            .font(.system(size: 14))
+                            .font(.ui(14))
                             .padding(12)
                             .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
                         zoneRow("Arrival clock", $toZoneID, place: to)
                         if let off = TravelClock.offsetLabel(from: zone(fromZoneID), to: zone(toZoneID),
                                                              at: Date()) {
                             Text("Destination clock is \(off) from where you leave.")
-                                .font(.system(size: 11)).foregroundStyle(Color.textMuted)
+                                .font(.ui(11)).foregroundStyle(Color.textMuted)
                         }
                     }
 
                     Text("ASSUMPTIONS — CORRECT THEM ONCE")
-                        .font(.system(size: 10, weight: .bold)).kerning(1)
+                        .font(.ui(10, weight: .bold)).kerning(1)
                         .foregroundStyle(Color.textMuted).padding(.top, 6)
 
                     if isFlight {
@@ -729,7 +754,7 @@ struct SegmentEditorView: View {
 
                     if let saveError {
                         Text(saveError)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.ui(12, weight: .medium))
                             .foregroundStyle(Color.accentDeep)
                     }
                 }
@@ -740,15 +765,11 @@ struct SegmentEditorView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(role: .destructive) {
-                        // A deleted journey must take its leave-by nudge with
-                        // it — a cancelled trip still fired 3 a.m. reminders.
-                        didDelete = true
-                        TravelNotifier.cancel(segment: segment)
-                        modelContext.delete(segment)
-                        modelContext.saveOrLog("SegmentEditor.delete")
-                        dismiss()
-                    } label: { Image(systemName: "trash") }.tint(.red)
+                    Button(role: .destructive) { confirmingDelete = true } label: {
+                        Image(systemName: "trash")
+                    }
+                    .tint(Color.accentDeep)
+                    .accessibilityLabel(isFlight ? "Delete flight" : "Delete drive")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     // Saving mid-lookup stored an empty zone or a zero journey
@@ -758,6 +779,21 @@ struct SegmentEditorView: View {
                 }
             }
             .onAppear(perform: load)
+            .confirmationDialog("Delete this \(isFlight ? "flight" : "drive")?",
+                                isPresented: $confirmingDelete, titleVisibility: .visible) {
+                Button("Delete", role: .destructive) {
+                    // A deleted journey must take its leave-by nudge with
+                    // it — a cancelled trip still fired 3 a.m. reminders.
+                    didDelete = true
+                    TravelNotifier.cancel(segment: segment)
+                    modelContext.delete(segment)
+                    modelContext.saveOrLog("SegmentEditor.delete")
+                    dismiss()
+                }
+                Button("Keep it", role: .cancel) { }
+            } message: {
+                Text("Its leave-by nudge is cancelled with it. This can't be undone.")
+            }
             .onDisappear {
                 // Swiping away a freshly minted segment abandons it — take it
                 // back out rather than leaving a shell in the trip.
@@ -881,18 +917,18 @@ struct SegmentEditorView: View {
     private func field(_ title: String, text: Binding<String>, placeholder: String,
                        homeChip: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(title.uppercased()).font(.system(size: 10, weight: .bold)).kerning(0.8)
+            Text(title.uppercased()).font(.ui(10, weight: .bold)).kerning(0.8)
                 .foregroundStyle(Color.textMuted)
             HStack(spacing: 6) {
                 TextField(placeholder, text: text)
-                    .font(.system(size: 15))
+                    .font(.ui(15))
                 // One tap for the place the app already knows. Only offered
                 // when a Home address is actually saved — never an invented one.
                 if homeChip, text.wrappedValue.isEmpty, !homeAddress.isEmpty {
                     Button { text.wrappedValue = homeAddress } label: {
                         HStack(spacing: 3) {
-                            Image(systemName: "house.fill").font(.system(size: 9))
-                            Text("Home").font(.system(size: 11.5, weight: .semibold))
+                            Image(systemName: "house.fill").font(.ui(9))
+                            Text("Home").font(.ui(11.5, weight: .semibold))
                         }
                         .foregroundStyle(Color.travelInk)
                         .padding(.horizontal, 9).padding(.vertical, 5)
@@ -919,27 +955,27 @@ struct SegmentEditorView: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("JOURNEY TIME").font(.system(size: 9.5, weight: .bold)).kerning(0.7)
+                    Text("JOURNEY TIME").font(.ui(9.5, weight: .bold)).kerning(0.7)
                         .foregroundStyle(Color.textMuted)
                     if measuring {
                         Text("Measuring against live traffic\u{2026}")
-                            .font(.system(size: 13)).foregroundStyle(Color.textSoft)
+                            .font(.ui(13)).foregroundStyle(Color.textSoft)
                     } else if travel > 0 {
                         Text(LeaveBy.hours(travel)
                              + (travelMeasured ? " \u{00B7} live traffic" : " \u{00B7} entered by you"))
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.ui(14, weight: .semibold))
                             .foregroundStyle(Color.textPrimary)
                     } else if implausibleMinutes > 0 {
                         Text("That routes \(LeaveBy.hours(implausibleMinutes)) by road")
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.ui(13, weight: .medium))
                             .foregroundStyle(Color.accentDeep)
                     } else if measureFailed {
                         Text("Couldn't find that place")
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.ui(13, weight: .medium))
                             .foregroundStyle(Color.accentDeep)
                     } else {
                         Text("Add a destination and I'll measure it")
-                            .font(.system(size: 13)).foregroundStyle(Color.textMuted)
+                            .font(.ui(13)).foregroundStyle(Color.textMuted)
                     }
                 }
                 Spacer(minLength: 6)
@@ -947,7 +983,7 @@ struct SegmentEditorView: View {
                 else if !to.isEmpty {
                     Button { measureJourney() } label: {
                         Text(travel > 0 ? "Re-measure" : "Measure")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.ui(12, weight: .semibold))
                             .foregroundStyle(Color.travelInk)
                             .padding(.horizontal, 11).padding(.vertical, 7)
                             .background(Capsule().fill(Color.travelInk.opacity(0.12)))
@@ -970,7 +1006,7 @@ struct SegmentEditorView: View {
                      : measureFailed
                      ? "I couldn't route to \u{201C}\(to)\u{201D} — give me a rough number and I'll work backwards from it."
                      : "Using your number. Tap Measure to price the real route instead.")
-                    .font(.system(size: 11)).foregroundStyle(Color.textMuted)
+                    .font(.ui(11)).foregroundStyle(Color.textMuted)
             }
         }
     }
@@ -1019,12 +1055,12 @@ struct SegmentEditorView: View {
     private func zoneRow(_ title: String, _ binding: Binding<String>, place: String) -> some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(title.uppercased()).font(.system(size: 9.5, weight: .bold)).kerning(0.7)
+                Text(title.uppercased()).font(.ui(9.5, weight: .bold)).kerning(0.7)
                     .foregroundStyle(Color.textMuted)
                 Text(binding.wrappedValue.isEmpty
                      ? "This phone (\(TravelClock.label(.current)))"
                      : "\(binding.wrappedValue) (\(TravelClock.label(zone(binding.wrappedValue))))")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.ui(13, weight: .medium))
                     .foregroundStyle(Color.textPrimary)
                     .lineLimit(1)
             }
@@ -1033,7 +1069,7 @@ struct SegmentEditorView: View {
                 Button { lookUpZone(for: place, into: binding) } label: {
                     HStack(spacing: 4) {
                         if lookingUpZone { ProgressView().scaleEffect(0.55) }
-                        Text("Find").font(.system(size: 12, weight: .semibold))
+                        Text("Find").font(.ui(12, weight: .semibold))
                     }
                     .foregroundStyle(Color.travelInk)
                     .padding(.horizontal, 10).padding(.vertical, 6)
@@ -1045,7 +1081,7 @@ struct SegmentEditorView: View {
             if !binding.wrappedValue.isEmpty {
                 Button { binding.wrappedValue = "" } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14)).foregroundStyle(Color.textMuted)
+                        .font(.ui(14)).foregroundStyle(Color.textMuted)
                 }
                 .buttonStyle(.plain)
             }
@@ -1099,19 +1135,19 @@ struct SegmentEditorView: View {
 
     private func stepper(_ title: String, _ value: Binding<Int>, step: Int, unit: String) -> some View {
         HStack {
-            Text(title).font(.system(size: 13.5)).foregroundStyle(Color.textSoft)
+            Text(title).font(.ui(13.5)).foregroundStyle(Color.textSoft)
             Spacer()
             HStack(spacing: 10) {
                 Button { value.wrappedValue = max(0, value.wrappedValue - step) } label: {
-                    Image(systemName: "minus").font(.system(size: 11, weight: .bold))
+                    Image(systemName: "minus").font(.ui(11, weight: .bold))
                         .frame(width: 28, height: 28)
                         .background(Circle().fill(Color.bg))
                 }.buttonStyle(.plain).foregroundStyle(Color.travelInk)
                 Text("\(value.wrappedValue) \(unit)")
-                    .font(.system(size: 14, weight: .semibold)).monospacedDigit()
+                    .font(.ui(14, weight: .semibold)).monospacedDigit()
                     .frame(minWidth: 62)
                 Button { value.wrappedValue += step } label: {
-                    Image(systemName: "plus").font(.system(size: 11, weight: .bold))
+                    Image(systemName: "plus").font(.ui(11, weight: .bold))
                         .frame(width: 28, height: 28)
                         .background(Circle().fill(Color.bg))
                 }.buttonStyle(.plain).foregroundStyle(Color.travelInk)

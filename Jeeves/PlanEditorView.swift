@@ -72,7 +72,7 @@ struct PlanEditorView: View {
         if b.isAnchor {
             HStack(spacing: 8) {
                 rowBody(b)
-                Image(systemName: "lock.fill").font(.system(size: 12)).foregroundStyle(Color.textMuted)
+                Image(systemName: "lock.fill").font(.ui(12)).foregroundStyle(Color.textMuted)
             }
         } else {
             NavigationLink(value: i) { rowBody(b) }
@@ -82,13 +82,13 @@ struct PlanEditorView: View {
     private func rowBody(_ b: GeneratedBlock) -> some View {
         HStack(spacing: 12) {
             Text(b.startTime)
-                .font(.system(size: 12.5, weight: .semibold))
+                .font(.ui(12.5, weight: .semibold))
                 .foregroundStyle(b.isAnchor ? Color.accentDeep : Color.textSoft)
                 .frame(width: 46, alignment: .leading)
             VStack(alignment: .leading, spacing: 1) {
                 Text(b.title).font(.serif(15)).foregroundStyle(Color.textPrimary)
                 Text("\(b.durationMinutes) min\(b.note.map { " · \($0)" } ?? "")")
-                    .font(.system(size: 11.5)).foregroundStyle(Color.textMuted).lineLimit(1)
+                    .font(.ui(11.5)).foregroundStyle(Color.textMuted).lineLimit(1)
             }
             Spacer(minLength: 4)
         }

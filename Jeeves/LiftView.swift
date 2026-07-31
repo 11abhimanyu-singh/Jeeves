@@ -144,7 +144,7 @@ struct LiftView: View {
             if groupedResults.isEmpty {
                 Section {
                     Text("No exercises match \u{201C}\(searchQuery)\u{201D}")
-                        .font(.system(size: 14))
+                        .font(.ui(14))
                         .foregroundStyle(Color.textMuted)
                         .listRowBackground(Color.surface)
                 }
@@ -170,7 +170,7 @@ struct LiftView: View {
             Image(systemName: "checkmark.seal.fill")
                 .foregroundStyle(Color.sageDeep)
             Text("Session saved")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.ui(14, weight: .semibold))
                 .foregroundStyle(Color.sageDeep)
         }
     }
@@ -178,11 +178,11 @@ struct LiftView: View {
     private func exerciseRow(_ ex: LiftExercise) -> some View {
         HStack {
             Text(ex.name)
-                .font(.system(size: 15.5, weight: .medium))
+                .font(.ui(15.5, weight: .medium))
                 .foregroundStyle(Color.textPrimary)
             Spacer()
             Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.ui(12, weight: .semibold))
                 .foregroundStyle(Color.textMuted)
         }
         .contentShape(Rectangle())
@@ -196,7 +196,7 @@ struct LiftView: View {
                 .font(.serif(16))
                 .foregroundStyle(Color.textPrimary)
             Text(sessionSummary(s, sets: sets))
-                .font(.system(size: 12.5))
+                .font(.ui(12.5))
                 .foregroundStyle(Color.textSoft)
         }
         .padding(.vertical, 2)
@@ -241,7 +241,7 @@ struct LiftView: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(ex.group.rawValue.uppercased())
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.ui(12, weight: .semibold))
                     .tracking(1.4)
                     .foregroundStyle(Color.accentDeep)
                 Text(ex.name)
@@ -255,7 +255,7 @@ struct LiftView: View {
                 draftSets = []
             } label: {
                 Text("Change")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.ui(14, weight: .semibold))
                     .foregroundStyle(Color.accentDeep)
             }
             .buttonStyle(.plain)
@@ -265,7 +265,7 @@ struct LiftView: View {
     private var tonnageCard: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("LIVE TONNAGE")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.ui(12, weight: .semibold))
                 .tracking(1.4)
                 .foregroundStyle(Color.accentDeep)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -278,7 +278,7 @@ struct LiftView: View {
                     .foregroundStyle(Color.textSoft)
             }
             Text(tonnageSubtitle)
-                .font(.system(size: 12.5))
+                .font(.ui(12.5))
                 .foregroundStyle(Color.textMuted)
         }
         .padding(18)
@@ -290,7 +290,7 @@ struct LiftView: View {
     private var heartRatePill: some View {
         HStack(spacing: 8) {
             Image(systemName: "heart.fill")
-                .font(.system(size: 14))
+                .font(.ui(14))
                 .foregroundStyle(Color(red: 0.70, green: 0.23, blue: 0.18))
             if let bpm = liveBPM {
                 Text("\(bpm)")
@@ -298,16 +298,16 @@ struct LiftView: View {
                     .monospacedDigit()
                     .foregroundStyle(Color.textPrimary)
                 Text("BPM")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.ui(12, weight: .semibold))
                     .foregroundStyle(Color.textMuted)
             } else {
                 Text("Waiting for Apple Watch\u{2026}")
-                    .font(.system(size: 13))
+                    .font(.ui(13))
                     .foregroundStyle(Color.textMuted)
             }
             Spacer()
             Text("Strength \u{00B7} live HR")
-                .font(.system(size: 11))
+                .font(.ui(11))
                 .foregroundStyle(Color.textMuted)
         }
         .padding(.horizontal, 15)
@@ -322,7 +322,7 @@ struct LiftView: View {
         return VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("SET \(idx)")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.ui(12, weight: .semibold))
                     .tracking(1.2)
                     .foregroundStyle(Color.accentDeep)
                 Spacer()
@@ -330,7 +330,7 @@ struct LiftView: View {
                     draftSets.removeAll { $0.id == d.id }
                 } label: {
                     Image(systemName: "trash")
-                        .font(.system(size: 14))
+                        .font(.ui(14))
                         .foregroundStyle(Color.textMuted)
                 }
                 .buttonStyle(.plain)
@@ -375,7 +375,7 @@ struct LiftView: View {
 
             Divider().overlay(Color.textPrimary.opacity(0.08))
             Text(setSummary(d))
-                .font(.system(size: 12.5, weight: .medium))
+                .font(.ui(12.5, weight: .medium))
                 .foregroundStyle(Color.textSoft)
         }
         .padding(16)
@@ -388,7 +388,7 @@ struct LiftView: View {
                              edit: (() -> Void)? = nil) -> some View {
         HStack(spacing: 8) {
             Text(title)
-                .font(.system(size: 14, weight: .medium))
+                .font(.ui(14, weight: .medium))
                 .foregroundStyle(Color.textSoft)
             Spacer(minLength: 4)
             HStack(spacing: 10) {
@@ -415,8 +415,8 @@ struct LiftView: View {
     private func stepButton(_ symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(Color.accent)
+                .font(.ui(13, weight: .bold))
+                .foregroundStyle(Color.accentDeep)
                 .frame(width: 34, height: 34)
                 .background(Circle().fill(Color.bg))
         }
@@ -428,7 +428,7 @@ struct LiftView: View {
             HStack(spacing: 8) {
                 Image(systemName: "plus.circle.fill")
                 Text("Add set")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.ui(15, weight: .semibold))
             }
             .foregroundStyle(Color.accentDeep)
             .frame(maxWidth: .infinity)
@@ -448,7 +448,7 @@ struct LiftView: View {
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 15)
-            .background(Capsule().fill(draftSets.isEmpty ? Color.textMuted.opacity(0.5) : Color.accent))
+            .background(Capsule().fill(draftSets.isEmpty ? Color.textMuted : Color.accent))
         }
         .buttonStyle(.plain)
         .disabled(draftSets.isEmpty)
@@ -610,7 +610,7 @@ struct LiftView: View {
 
     private func sectionHeader(_ t: String) -> some View {
         Text(t)
-            .font(.system(size: 12.5, weight: .semibold))
+            .font(.ui(12.5, weight: .semibold))
             .tracking(1.1)
             .foregroundStyle(Color.accentDeep)
     }

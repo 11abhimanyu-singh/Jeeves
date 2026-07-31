@@ -22,6 +22,7 @@ struct RemindersListView: View {
     @State private var draftMinute = 0
     @State private var draftRecurrence: ReminderRecurrence = .once
     @State private var editing: Reminder?
+    @State private var undoable: UndoableDelete?
 
     private var active: [Reminder] { reminders.filter(\.isActive) }
     private var todayList: [Reminder] { active.filter(firesToday) }
@@ -32,8 +33,8 @@ struct RemindersListView: View {
             VStack(alignment: .leading, spacing: 18) {
                 Button { openAdd() } label: {
                     HStack(spacing: 9) {
-                        Image(systemName: "plus.circle.fill").font(.system(size: 18))
-                        Text("New reminder").font(.system(size: 14, weight: .semibold))
+                        Image(systemName: "plus.circle.fill").font(.ui(18))
+                        Text("New reminder").font(.ui(14, weight: .semibold))
                         Spacer()
                     }
                     .foregroundStyle(Color.accentDeep)
@@ -50,6 +51,12 @@ struct RemindersListView: View {
         .background(Color.bg)
         .sheet(isPresented: $showAdd) { addSheet }
         .sheet(item: $editing) { ReminderEditSheet(reminder: $0, onSaved: rescheduleAll) }
+        .safeAreaInset(edge: .bottom) {
+            UndoBanner(pending: $undoable)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 6)
+                .animation(.easeInOut(duration: 0.18), value: undoable?.id)
+        }
     }
 
     // MARK: Sections
@@ -60,7 +67,7 @@ struct RemindersListView: View {
             Text(title).font(.serif(18)).foregroundStyle(Color.textPrimary)
             if items.isEmpty {
                 if let emptyText {
-                    Text(emptyText).font(.system(size: 13)).foregroundStyle(Color.textMuted)
+                    Text(emptyText).font(.ui(13)).foregroundStyle(Color.textMuted)
                         .padding(14)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(RoundedRectangle(cornerRadius: 14).fill(Color.surface))
@@ -74,7 +81,7 @@ struct RemindersListView: View {
     private func row(_ r: Reminder) -> some View {
         HStack(spacing: 12) {
             Button { complete(r) } label: {
-                Image(systemName: "circle").font(.system(size: 22)).foregroundStyle(Color.textMuted)
+                Image(systemName: "circle").font(.ui(22)).foregroundStyle(Color.textMuted)
             }
             .buttonStyle(.plain)
 
@@ -87,11 +94,11 @@ struct RemindersListView: View {
                             .font(.serif(16)).foregroundStyle(Color.textPrimary).lineLimit(2)
                         HStack(spacing: 7) {
                             Text(timeLabel(r))
-                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .font(.ui(12, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(Color.accentDeep)
                             if r.recurrence != .once {
                                 Text(r.recurrence.label.uppercased())
-                                    .font(.system(size: 9, weight: .bold)).kerning(0.4)
+                                    .font(.ui(9, weight: .bold)).kerning(0.4)
                                     .foregroundStyle(Color.sageDeep)
                                     .padding(.horizontal, 6).padding(.vertical, 3)
                                     .background(Capsule().fill(Color.sage.opacity(0.20)))
@@ -104,14 +111,16 @@ struct RemindersListView: View {
             }
             .buttonStyle(.plain)
             Button { snooze(r) } label: {
-                Text("Snooze").font(.system(size: 11.5, weight: .bold)).foregroundStyle(Color.accentDeep)
+                Text("Snooze").font(.ui(11.5, weight: .bold)).foregroundStyle(Color.accentDeep)
             }
             .buttonStyle(.plain)
             Button { delete(r) } label: {
                 Image(systemName: "trash")
-                    .font(.system(size: 13))
+                    .font(.ui(13))
                     .foregroundStyle(Color.textMuted)
-                    .padding(.leading, 4)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+                    .accessibilityLabel("Delete \(r.title)")
             }
             .buttonStyle(.plain)
         }
@@ -121,10 +130,22 @@ struct RemindersListView: View {
     }
 
     /// Remove a reminder entirely — and its pending notification with it.
+    /// Undo rather than confirm — this trash sits directly beside "Snooze",
+    /// the tightest and riskiest adjacency in the app. Restoring keeps the
+    /// original id so the rescheduled notification matches the old one.
     private func delete(_ r: Reminder) {
+        let restored = Reminder(id: r.id, title: r.title, fireAt: r.fireAt,
+                                recurrence: r.recurrence, enabled: r.enabled,
+                                completedAt: r.completedAt)
+        let title = r.title
         modelContext.delete(r)
         modelContext.saveOrLog()
         rescheduleAll()
+        undoable = UndoableDelete(label: title.isEmpty ? "Reminder deleted" : "Deleted \u{201C}\(title)\u{201D}") {
+            modelContext.insert(restored)
+            modelContext.saveOrLog()
+            rescheduleAll()
+        }
     }
 
     // MARK: Add sheet
@@ -136,21 +157,21 @@ struct RemindersListView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
                     TextField("Remind me to…", text: $draftTitle)
-                        .font(.system(size: 16)).padding(13)
+                        .font(.ui(16)).padding(13)
                         .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
 
-                    Text("WHEN").font(.system(size: 10, weight: .bold)).kerning(1).foregroundStyle(Color.textMuted).padding(.top, 14)
+                    Text("WHEN").font(.ui(10, weight: .bold)).kerning(1).foregroundStyle(Color.textMuted).padding(.top, 14)
                     chipRow(timeChips.map(\.0)) { i in draftHour == timeChips[i].1 && draftMinute == timeChips[i].2 } pick: { i in
                         draftHour = timeChips[i].1; draftMinute = timeChips[i].2
                     }
 
-                    Text("REPEAT").font(.system(size: 10, weight: .bold)).kerning(1).foregroundStyle(Color.textMuted).padding(.top, 14)
+                    Text("REPEAT").font(.ui(10, weight: .bold)).kerning(1).foregroundStyle(Color.textMuted).padding(.top, 14)
                     chipRow(ReminderRecurrence.allCases.map(\.label)) { i in draftRecurrence == ReminderRecurrence.allCases[i] } pick: { i in
                         draftRecurrence = ReminderRecurrence.allCases[i]
                     }
 
                     Button { saveReminder() } label: {
-                        Text("Add reminder").font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                        Text("Add reminder").font(.ui(15, weight: .bold)).foregroundStyle(.white)
                             .frame(maxWidth: .infinity).padding(13)
                             .background(RoundedRectangle(cornerRadius: 13).fill(Color.accent))
                     }
@@ -170,7 +191,7 @@ struct RemindersListView: View {
             ForEach(Array(labels.enumerated()), id: \.offset) { i, label in
                 let on = selected(i)
                 Button { pick(i) } label: {
-                    Text(label).font(.system(size: 12.5, weight: .semibold))
+                    Text(label).font(.ui(12.5, weight: .semibold))
                         .foregroundStyle(on ? Color.accentDeep : Color.textSoft)
                         .padding(.horizontal, 12).padding(.vertical, 9)
                         .background(Capsule().fill(on ? Color.accent.opacity(0.15) : Color.surface))
@@ -264,10 +285,10 @@ struct ReminderEditSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
                     TextField("Remind me to…", text: $title)
-                        .font(.system(size: 16)).padding(13)
+                        .font(.ui(16)).padding(13)
                         .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
 
-                    Text("WHEN").font(.system(size: 10, weight: .bold)).kerning(1)
+                    Text("WHEN").font(.ui(10, weight: .bold)).kerning(1)
                         .foregroundStyle(Color.textMuted).padding(.top, 14)
                     // A full picker, not just chips: fixing "18:00" to "18:30"
                     // is exactly the edit this sheet exists for.
@@ -278,13 +299,13 @@ struct ReminderEditSheet: View {
                         .padding(10)
                         .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
 
-                    Text("REPEAT").font(.system(size: 10, weight: .bold)).kerning(1)
+                    Text("REPEAT").font(.ui(10, weight: .bold)).kerning(1)
                         .foregroundStyle(Color.textMuted).padding(.top, 14)
                     HStack(spacing: 7) {
                         ForEach(ReminderRecurrence.allCases, id: \.self) { rec in
                             let on = recurrence == rec
                             Button { recurrence = rec } label: {
-                                Text(rec.label).font(.system(size: 12.5, weight: .semibold))
+                                Text(rec.label).font(.ui(12.5, weight: .semibold))
                                     .foregroundStyle(on ? Color.accentDeep : Color.textSoft)
                                     .padding(.horizontal, 12).padding(.vertical, 9)
                                     .background(Capsule().fill(on ? Color.accent.opacity(0.15) : Color.surface))
