@@ -440,6 +440,10 @@ struct JeevesChatView: View {
         case "add_journey":    return await toolAddJourney(call.input)
         case "clean_travel_data": return toolCleanTravelData()
         case "delete_trip":    return toolDeleteTrip(call.input)
+        case "add_stay":       return await toolAddStay(call.input)
+        case "update_stay":    return await toolUpdateStay(call.input)
+        case "delete_stay":    return toolDeleteStay(call.input)
+        case "update_trip":    return await toolUpdateTrip(call.input)
         case "delete_journey": return toolDeleteJourney(call.input)
         default:               return .init(text: "Unknown tool \(call.name).")
         }
@@ -455,6 +459,7 @@ struct JeevesChatView: View {
         "commute_estimate", "log_walk", "mark_block_done", "complete_todo",
         "delete_todo", "delete_reminder", "fetch_chat_history", "remember_preference",
         "add_trip", "add_journey", "clean_travel_data", "delete_trip", "delete_journey",
+        "add_stay", "update_stay", "delete_stay", "update_trip",
     ]
 
     /// Removes one journey from a trip, with its nudge and a receipt.
@@ -829,6 +834,185 @@ struct JeevesChatView: View {
         return .init(text: "Travel mode on for \(trip.dayCount) day(s): \(title), "
                      + "\(JeevesChatView.dayString(start)) – \(JeevesChatView.dayString(end)). "
                      + "The planner stands down on those days. Add each flight or drive with add_journey.")
+    }
+
+    // MARK: Stays via chat — the itinerary layer ("2 nights at the Radisson,
+    // then CGH Earth Wayanad"). Each lodging is a TripStay; consecutive
+    // different stays get an auto drive transition, measured in background.
+
+    @MainActor
+    private func toolAddStay(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
+        let tripQuery = input["trip"] as? String ?? ""
+        let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
+        guard let trip = JeevesChatService.bestMatches(trips, title: \.title, query: tripQuery).first
+                ?? trips.last else {
+            return .init(text: "No trip matches '\(tripQuery)'. Create one with add_trip first.")
+        }
+        let place = (input["hotel"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        guard !place.isEmpty else { return .init(text: "Need the hotel/place name.") }
+        let arrive = JeevesChatService.resolveDate(input["arrive_date"] as? String, relativeTo: today)
+        let depart = JeevesChatService.resolveDate(input["depart_date"] as? String, relativeTo: today)
+        guard depart >= arrive else { return .init(text: "Checkout is before check-in.") }
+        let stay = TripStay(tripID: trip.id, place: place,
+                            address: input["address"] as? String ?? "",
+                            arriveDate: arrive, departDate: depart)
+        modelContext.insert(stay)
+
+        // The trip covers its stays — grow (never shrink) and sweep.
+        var grew = false
+        if arrive.startOfDay < trip.startDate { trip.startDate = arrive.startOfDay; grew = true }
+        if depart.startOfDay > trip.endDate { trip.endDate = depart.startOfDay; grew = true }
+        modelContext.saveOrLog("chat.addStay")
+        EventLog.log(.stayAdded, "\(place) \(TravelGuard.dayRange(trip)) in '\(trip.title)'",
+                     subject: stay.id, context: modelContext)
+        if grew { await TravelGuard.sweep(context: modelContext) }
+
+        // Auto drive transition from the previous lodging, like acceptTravel's
+        // calendar path — measured in background, nudge scheduled once real.
+        var transitionNote = ""
+        let stays = ((try? modelContext.fetch(FetchDescriptor<TripStay>())) ?? [])
+            .filter { $0.tripID == trip.id && $0.id != stay.id }
+        if let prev = stays.filter({ $0.departDate <= arrive.startOfDay && $0.place != place })
+            .max(by: { $0.departDate < $1.departDate }) {
+            let noon = Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: arrive) ?? arrive
+            let seg = TravelSegment(tripID: trip.id, mode: .drive,
+                                    label: "\(prev.place) → \(place)",
+                                    fromPlace: prev.address.isEmpty ? prev.place : prev.address,
+                                    toPlace: stay.address.isEmpty ? place : stay.address,
+                                    arriveBy: noon, checkInMinutes: 0, securityMinutes: 0)
+            modelContext.insert(seg)
+            modelContext.saveOrLog("chat.addStay.transition")
+            transitionNote = " Added the \(prev.place) → \(place) drive (arrive by noon — measuring the route now; adjust the deadline if needed)."
+            Task {
+                if let m = await GoogleMapsService.commuteMinutes(
+                    from: seg.fromPlace, to: seg.toPlace, departure: max(noon, Date())) {
+                    seg.travelMinutes = m
+                    seg.travelIsEstimated = false
+                    modelContext.saveOrLog("chat.addStay.measure")
+                    EventLog.log(.journeyMeasured, "\(seg.label) — \(m) min", subject: seg.id,
+                                 context: modelContext)
+                    await TravelGuard.absorb(seg, context: modelContext)
+                    await TravelNotifier.schedule(segment: seg)
+                }
+            }
+        }
+        let f = DateFormatter(); f.dateFormat = "d MMM"
+        return .init(text: "Stay added to '\(trip.title)': \(place), \(f.string(from: arrive)) – \(f.string(from: depart))."
+                     + (grew ? " The trip grew to cover it." : "") + transitionNote)
+    }
+
+    private func toolUpdateTrip(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
+        let query = (input["title"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
+        var candidates = JeevesChatService.bestMatches(trips, title: \.title, query: query)
+        if candidates.count > 1, let dateRaw = input["start_date"] as? String {
+            let wanted = JeevesChatService.resolveDate(dateRaw, relativeTo: today)
+            candidates = candidates.filter { Calendar.current.isDate($0.startDate, inSameDayAs: wanted) }
+        }
+        if candidates.count > 1 {
+            let names = candidates.map { "'\($0.title)' (\(TravelGuard.dayRange($0)))" }.joined(separator: ", ")
+            return .init(text: "\(candidates.count) trips match: \(names). Pin one with start_date.")
+        }
+        guard let trip = candidates.first else {
+            return .init(text: "No trip matches '\(query)'.")
+        }
+        let oldRange = TravelGuard.dayRange(trip)
+        if let t = input["new_title"] as? String, !t.isEmpty { trip.title = t }
+        var grew = false
+        if let raw = input["new_start_date"] as? String {
+            let d = JeevesChatService.resolveDate(raw, relativeTo: today).startOfDay
+            if d < trip.startDate { grew = true }
+            trip.startDate = d
+        }
+        if let raw = input["new_end_date"] as? String {
+            let d = JeevesChatService.resolveDate(raw, relativeTo: today).startOfDay
+            if d > trip.endDate { grew = true }
+            trip.endDate = d
+        }
+        guard trip.endDate >= trip.startDate else {
+            return .init(text: "Those dates end before they start — nothing changed.")
+        }
+        modelContext.saveOrLog("chat.updateTrip")
+        EventLog.log(.tripUpdated, "'\(trip.title)' \(oldRange) → \(TravelGuard.dayRange(trip))",
+                     subject: trip.id, context: modelContext)
+        if grew { await TravelGuard.sweep(context: modelContext) }
+        let shrinkNote = grew ? "" : " Days no longer covered go back to the planner — it will fill them again."
+        return .init(text: "'\(trip.title)' is now \(TravelGuard.dayRange(trip)) (was \(oldRange)).\(shrinkNote)")
+    }
+
+    private func toolUpdateStay(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
+        let query = (input["hotel"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return .init(text: "Which hotel/stay? Give me its name.") }
+        let stays = (try? modelContext.fetch(FetchDescriptor<TripStay>())) ?? []
+        var matches = JeevesChatService.staysMatching(stays, query: query)
+        if matches.count > 1, let dateRaw = input["date"] as? String {
+            let wanted = JeevesChatService.resolveDate(dateRaw, relativeTo: today)
+            matches = matches.filter { $0.covers(wanted) }
+        }
+        if matches.count > 1 {
+            let f = DateFormatter(); f.dateFormat = "d MMM"
+            let names = matches.map { "\($0.place) (\(f.string(from: $0.arriveDate))–\(f.string(from: $0.departDate)))" }
+                .joined(separator: ", ")
+            return .init(text: "\(matches.count) stays match '\(query)': \(names). Pin one with date.")
+        }
+        guard let stay = matches.first else {
+            return .init(text: "No stay matches '\(query)'.")
+        }
+        if let h = input["new_hotel"] as? String, !h.isEmpty { stay.place = h }
+        if let a = input["new_address"] as? String, !a.isEmpty { stay.address = a }
+        if let raw = input["new_arrive_date"] as? String {
+            stay.arriveDate = JeevesChatService.resolveDate(raw, relativeTo: today).startOfDay
+        }
+        if let raw = input["new_depart_date"] as? String {
+            stay.departDate = JeevesChatService.resolveDate(raw, relativeTo: today).startOfDay
+        }
+        guard stay.departDate >= stay.arriveDate else {
+            return .init(text: "That checkout is before check-in — nothing changed.")
+        }
+        // The trip still covers its stays.
+        var grew = false
+        let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
+        if let trip = trips.first(where: { $0.id == stay.tripID }) {
+            if stay.arriveDate < trip.startDate { trip.startDate = stay.arriveDate; grew = true }
+            if stay.departDate > trip.endDate { trip.endDate = stay.departDate; grew = true }
+        }
+        modelContext.saveOrLog("chat.updateStay")
+        EventLog.log(.stayUpdated, "\(stay.place) now \(fmtRange(stay))", subject: stay.id,
+                     context: modelContext)
+        if grew { await TravelGuard.sweep(context: modelContext) }
+        return .init(text: "\(stay.place): \(fmtRange(stay))."
+                     + (grew ? " The trip grew to cover it." : ""))
+    }
+
+    private func toolDeleteStay(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let query = (input["hotel"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return .init(text: "Which hotel/stay? Give me its name.") }
+        let stays = (try? modelContext.fetch(FetchDescriptor<TripStay>())) ?? []
+        var matches = JeevesChatService.staysMatching(stays, query: query)
+        if matches.count > 1, let dateRaw = input["date"] as? String {
+            let wanted = JeevesChatService.resolveDate(dateRaw, relativeTo: today)
+            matches = matches.filter { $0.covers(wanted) }
+        }
+        if matches.count > 1 {
+            let f = DateFormatter(); f.dateFormat = "d MMM"
+            let names = matches.map { "\($0.place) (\(f.string(from: $0.arriveDate))–\(f.string(from: $0.departDate)))" }
+                .joined(separator: ", ")
+            return .init(text: "\(matches.count) stays match '\(query)': \(names). Pin one with date.")
+        }
+        guard let stay = matches.first else {
+            return .init(text: "No stay matches '\(query)' — nothing deleted.")
+        }
+        let name = stay.place
+        let range = fmtRange(stay)
+        modelContext.delete(stay)
+        modelContext.saveOrLog("chat.deleteStay")
+        EventLog.log(.stayDeleted, "\(name) \(range)", context: modelContext)
+        return .init(text: "Deleted the \(name) stay (\(range)). The trip's dates are unchanged — shrink them with update_trip if the trip is shorter now, and check its journeys still make sense.")
+    }
+
+    private func fmtRange(_ stay: TripStay) -> String {
+        let f = DateFormatter(); f.dateFormat = "d MMM"
+        return "\(f.string(from: stay.arriveDate)) – \(f.string(from: stay.departDate))"
     }
 
     /// Destructive tidying, only ever reached when the user explicitly asked

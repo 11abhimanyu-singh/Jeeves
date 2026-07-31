@@ -1,0 +1,86 @@
+{
+  "about": "Permanent chat trajectory test plan. Tier 1 dialogues run VERBATIM on the device (type each user turn into Jeeves chat); Tier 2 escalations are generated per run by scenario-eval.py against briefs/chat-trajectories.md; Tier 3 injects failures. After any run: pull the store, run trajectory-audit.py (deterministic) and the story-vs-state judge. A scenario passes only when BOTH agree.",
+  "tier1": [
+    {
+      "id": "t1-1-event-with-destination",
+      "turns": [
+        "Add dinner with Arvind tomorrow at 8 pm",
+        "It's at Toit, Indiranagar"
+      ],
+      "expect": "ONE event, correct day, 20:00 start with a sensible end, venue set via edit (not a second event). Planner shows the commute leg for it."
+    },
+    {
+      "id": "t1-2-extend-while-at-event",
+      "turns": [
+        "I'm at the dinner, it's running long — extend it by an hour"
+      ],
+      "expect": "Same event's end moves +60 min; no duplicate; a replan of the remainder is OFFERED (evening blocks after it shift), not silently skipped. Elapsed blocks before the event are not marked missed."
+    },
+    {
+      "id": "t1-3-extend-while-commuting",
+      "turns": [
+        "Stuck in traffic on the way to the dinner, push it 30 minutes"
+      ],
+      "expect": "Event start (and end) move +30; any replan uses resume_at = new start and marks blocks the delay swallowed via missed_blocks — ELAPSED IS NOT DONE."
+    },
+    {
+      "id": "t1-4-timezone-trip-both-legs",
+      "turns": [
+        "Set up a 4 day trip to Colombo starting the 20th of next month",
+        "Outbound flight UL 174 departs BLR 09:45, return UL 173 departs Colombo 20:30 on the last day, lands BLR 22:00"
+      ],
+      "expect": "One trip, 4 days. TWO flight journeys: outbound origin-clock IST, return origin-clock Asia/Colombo (+5:30 — same offset, zones still stamped). Leave-by chains on the right days; two nudges; no duplicate trips from the second turn."
+    },
+    {
+      "id": "t1-5-back-to-back-international-then-mysore-chain",
+      "turns": [
+        "I'm in Singapore till the 10th of next month, flying back SQ 510 departing 19:40 SGT, landing BLR 21:10",
+        "Next morning I drive to Mysore, staying at Radisson hotel Mysore for 2 days",
+        "Then checkout and drive to Wayanad, staying at CGH Earth Wayanad",
+        "Then checkout from Wayanad and drive back home, I want to reach home by 6 pm"
+      ],
+      "expect": "TWO trips sharing the handover day, never merged. Mysore trip: Radisson stay (2 nights) + CGH Earth stay, auto drive transitions Radisson→CGH (arrive-by noon, measured), return drive with 18:00 destination-clock deadline. One journey per leg despite four turns. Handover day shows both trips' cards."
+    },
+    {
+      "id": "t1-7-modify-trip-add-and-remove-day",
+      "turns": [
+        "Add one more day to the Mysore trip",
+        "Actually cut the last day, end it a day earlier"
+      ],
+      "expect": "update_trip both times — no new trip, no duplicate. Growth sweeps plans on the new day; shrink says days go back to the planner. Receipts quote the old and new ranges."
+    },
+    {
+      "id": "t1-8-reroute-wayanad-to-ooty",
+      "turns": [
+        "Change of plan — from Wayanad we go to Western Valley Resort near Ooty and stay there instead of coming straight home"
+      ],
+      "expect": "Either update_stay (CGH→onward) plus a new Western Valley stay, or add_stay + adjusted return — but exactly ONE new stay, a measured Wayanad→Ooty drive transition, the return-home drive updated or replaced (not duplicated), and the trip window covering Ooty days."
+    },
+    {
+      "id": "t1-9-modify-by-date-location-hotel",
+      "turns": [
+        "Move the Radisson stay to start a day later",
+        "Delete the stay at Western Valley",
+        "Delete all trips on the 15th",
+        "Extend whatever event I have on the 12th by two hours"
+      ],
+      "expect": "Each modification lands via the matching key the user chose — hotel name, date, location — with a preview/confirm on the destructive ones, receipts naming exactly what changed, and zero duplicates created by any of the four turns."
+    }
+  ],
+  "tier2": {
+    "generate": "OPENAI_API_KEY=... python3 tools/scenario-eval.py generate tools/briefs/chat-trajectories.md <outdir> — regenerates escalations each run; never hand-pick them.",
+    "axes": [
+      "clock seams: +5:45/+6:00 offsets, red-eyes crossing midnight, deadline in destination clock",
+      "order of operations: stay before trip, calendar sync after chat built the same trip, flight before its trip",
+      "corrections + consent: 'actually make that Tuesday', bare 'Sure', correction AFTER confirmation, exact repeat of a request (idempotency)",
+      "cross-entity deletion: event vs trip vs stay in one sentence ('clear my September')",
+      "failure injection: measure timeout then manual estimate then re-measure; planner API down (fallback must respect the trip); a dropped turn (apology must surface)",
+      "interleaving: a gym replan interrupts trip planning, then 'anyway, back to the trip'",
+      "long horizon: build 3 weeks out, resync calendar twice, modify once, audit must stay clean"
+    ]
+  },
+  "tier3": {
+    "note": "Chaos runs — execute a Tier 1 dialogue while: airplane mode toggled mid-conversation, app backgrounded mid-tool-call, watch delivering a workout summary simultaneously. Pass = graceful receipts or honest apologies; FAIL = silence, duplicates, or claimed actions that didn't happen."
+  },
+  "verification": "Every run: python3 tools/diagnose.py <workdir> --pull  (store-audit + trajectory-audit deterministic layer), then scenario-eval.py judge with transcript+store both in view. Pass requires: zero duplicate trips/stays/journeys, every assistant number traceable to a tool result, every claimed action present in the store, no unanswered turns."
+}

@@ -254,6 +254,11 @@ enum JeevesChatService {
     (fuel, breakfast) — they push the leave time earlier. Corrections UPDATE \
     the same trip and journey (add_trip reuses an overlapping trip; \
     add_journey updates the same leg) — never re-create from scratch, and use \
+    Stays are the itinerary: one add_stay per lodging ("2 nights Radisson \
+    Mysore then CGH Earth Wayanad" = two calls, in order) — transitions \
+    between them are auto-created as drives. Modify or remove lodgings by \
+    hotel name with update_stay/delete_stay; change trip dates with \
+    update_trip, never by re-creating the trip. \
     delete_journey to prune a leg the user abandoned. QUOTE leave-by and \
     arrival times ONLY from tool results — never compute times in your head; \
     if you didn't read it in a result, don't say it. When re-planning for \
@@ -546,6 +551,64 @@ enum JeevesChatService {
             ],
         ],
         [
+            "name": "add_stay",
+            "description": "Add a lodging to a trip — the itinerary layer ('2 nights at Radisson Mysore, then CGH Earth Wayanad' = two add_stay calls). The trip grows to cover the stay, and a drive transition from the previous lodging is auto-created and measured. One call per hotel.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "trip": ["type": "string", "description": "The trip's title (or part of it)."],
+                    "hotel": ["type": "string", "description": "Hotel/lodging name, e.g. 'Radisson Blu Mysore'."],
+                    "address": ["type": "string", "description": "Address or place detail if the user gave one — helps route measuring."],
+                    "arrive_date": ["type": "string", "description": "Check-in day, YYYY-MM-DD (or 'today'/'tomorrow')."],
+                    "depart_date": ["type": "string", "description": "Checkout day, YYYY-MM-DD."],
+                ],
+                "required": ["trip", "hotel", "arrive_date", "depart_date"],
+            ],
+        ],
+        [
+            "name": "update_stay",
+            "description": "Change an existing stay — dates, hotel, or address — matched by hotel/place name ('extend the Radisson by a day', 'move the Wayanad stay to Western Valley Resort'). The trip grows if the new dates spill outside it.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "hotel": ["type": "string", "description": "Current hotel/stay name (or part), to find it."],
+                    "date": ["type": "string", "description": "A day the stay covers — pins one when several match."],
+                    "new_hotel": ["type": "string", "description": "New lodging name, when switching hotels."],
+                    "new_address": ["type": "string", "description": "New address."],
+                    "new_arrive_date": ["type": "string", "description": "New check-in, YYYY-MM-DD."],
+                    "new_depart_date": ["type": "string", "description": "New checkout, YYYY-MM-DD."],
+                ],
+                "required": ["hotel"],
+            ],
+        ],
+        [
+            "name": "delete_stay",
+            "description": "Remove one lodging from a trip, matched by hotel/place name. The trip's dates are NOT shrunk automatically — suggest update_trip if the trip is shorter now. Confirm before calling.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "hotel": ["type": "string", "description": "Hotel/stay name (or part)."],
+                    "date": ["type": "string", "description": "A day the stay covers — pins one when several match."],
+                ],
+                "required": ["hotel"],
+            ],
+        ],
+        [
+            "name": "update_trip",
+            "description": "Change a trip's dates or title — 'add a day to the Mysore trip', 'end it a day early'. Growing sweeps any stored plans on newly covered days; shrinking hands days back to the planner (say so).",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "title": ["type": "string", "description": "The trip's title (or part of it)."],
+                    "start_date": ["type": "string", "description": "Current start, YYYY-MM-DD — pins one trip when titles collide."],
+                    "new_title": ["type": "string", "description": "Rename the trip."],
+                    "new_start_date": ["type": "string", "description": "New first day, YYYY-MM-DD."],
+                    "new_end_date": ["type": "string", "description": "New last day (inclusive), YYYY-MM-DD."],
+                ],
+                "required": ["title"],
+            ],
+        ],
+        [
             "name": "delete_trip",
             "description": "Delete a trip and EVERYTHING under it — its stays, its journeys, and their leave-by notifications. Destructive: confirm with the user before calling, and report exactly what was deleted from the tool result. This is the ONLY way to remove a trip; deleting a trip's calendar events does NOT remove the trip.",
             "input_schema": [
@@ -728,6 +791,13 @@ enum JeevesChatService {
     /// One-directional: the stored title must contain the query. What every
     /// edit/delete/complete tool matches on, so a more specific request can
     /// never sweep up shorter-titled records.
+    /// Stays matched by hotel/place name or address — "Radisson", "CGH
+    /// Earth", "the Mysore hotel" all resolve. Pure, sorted deterministically.
+    nonisolated static func staysMatching(_ stays: [TripStay], query: String) -> [TripStay] {
+        stays.filter { strictMatch($0.place, query: query) || strictMatch($0.address, query: query) }
+            .sorted { ($0.arriveDate, $0.id.uuidString) < ($1.arriveDate, $1.id.uuidString) }
+    }
+
     /// Events whose SPAN touches [start, end] (inclusive, whole days), the
     /// shape behind "delete everything from September 1 onwards". A title
     /// narrows the range; nil matches every event in it. Pure, so the range

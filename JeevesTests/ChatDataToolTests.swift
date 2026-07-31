@@ -70,6 +70,33 @@ final class ChatDataToolTests: XCTestCase {
         XCTAssertEqual(hits.map(\.title), ["A"])
     }
 
+    // MARK: stay matching by hotel name ("extend the Radisson by a day")
+
+    @MainActor
+    func testStaysMatchByHotelNameOrAddress() {
+        let stays = [
+            TripStay(tripID: UUID(), place: "Radisson Blu Mysore", address: "MG Road, Mysore",
+                     arriveDate: at(2026, 8, 10, 0), departDate: at(2026, 8, 12, 0)),
+            TripStay(tripID: UUID(), place: "CGH Earth Wayanad", address: "Lakkidi, Wayanad",
+                     arriveDate: at(2026, 8, 12, 0), departDate: at(2026, 8, 14, 0)),
+        ]
+        XCTAssertEqual(JeevesChatService.staysMatching(stays, query: "Radisson").map(\.place),
+                       ["Radisson Blu Mysore"])
+        XCTAssertEqual(JeevesChatService.staysMatching(stays, query: "Wayanad").map(\.place),
+                       ["CGH Earth Wayanad"], "address matches too")
+        XCTAssertTrue(JeevesChatService.staysMatching(stays, query: "Taj").isEmpty)
+    }
+
+    @MainActor
+    func testStayMatchesSortDeterministically() {
+        let a = TripStay(tripID: UUID(), place: "Radisson A", address: "",
+                         arriveDate: at(2026, 9, 1, 0), departDate: at(2026, 9, 2, 0))
+        let b = TripStay(tripID: UUID(), place: "Radisson B", address: "",
+                         arriveDate: at(2026, 8, 1, 0), departDate: at(2026, 8, 2, 0))
+        let hits = JeevesChatService.staysMatching([a, b], query: "Radisson")
+        XCTAssertEqual(hits.map(\.place), ["Radisson B", "Radisson A"], "earliest arrival first")
+    }
+
     // MARK: add_reminder fire-date
 
     func testFutureTimeTodayStaysToday() {

@@ -31,6 +31,10 @@ enum AppEventKind: String, Codable, CaseIterable {
     case travelCleanup         // user-invoked clean_travel_data ran
     case toolCall              // any chat tool invocation, with input + result digest
     case chatError             // a chat turn failed; an apology turn was stored
+    case stayAdded
+    case stayUpdated
+    case stayDeleted
+    case tripUpdated           // dates or title changed via chat
 }
 
 @Model
