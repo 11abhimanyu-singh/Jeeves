@@ -82,9 +82,19 @@ struct ContentView: View {
 
     enum Tab { case jeeves, planner, tasks, fitness, library, stats }
     enum FitnessSheet: String, Identifiable { case run, lift, stretch; var id: String { rawValue } }
-    enum StatsSub: CaseIterable { case progress, history; var label: String { self == .progress ? "Progress" : "History" } }
+    enum StatsSub: CaseIterable {
+        case health, progress, history
+        var label: String {
+            switch self {
+            case .health:   return "Health"
+            case .progress: return "Progress"
+            case .history:  return "History"
+            }
+        }
+    }
 
     @State private var tab: Tab = .planner
+    @State private var showSettings = false
     @State private var fitnessSheet: FitnessSheet?
     @State private var statsSub: StatsSub = .progress
     @State private var selectedDate: Date = Calendar.current.date(byAdding: .day, value: -1, to: Date())!.startOfDay
@@ -160,6 +170,9 @@ struct ContentView: View {
             tabBar
         }
         .background(Color.bg)
+        .sheet(isPresented: $showSettings) {
+            NavigationStack { SettingsView() }
+        }
         .onAppear {
             loadFields(for: selectedDate)
             // Any plan generation still "pending" from a prior run never
@@ -205,6 +218,7 @@ struct ContentView: View {
     private func moduleHeader(_ title: String, _ icon: String, @ViewBuilder trailing: () -> some View) -> some View {
         HStack {
             HStack(spacing: 8) {
+                appMenu
                 Circle()
                     .fill(Color.accent)
                     .frame(width: 30, height: 30)
@@ -215,6 +229,26 @@ struct ContentView: View {
             trailing()
         }
         .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 10)
+    }
+
+    /// App-level navigation. Settings used to live only inside Library and
+    /// chat — findable if you already knew where it was.
+    private var appMenu: some View {
+        Menu {
+            Button { tab = .stats; statsSub = .health } label: {
+                Label("Daily health", systemImage: "stethoscope")
+            }
+            Button { showSettings = true } label: {
+                Label("Settings", systemImage: "gearshape")
+            }
+        } label: {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.textSoft)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Menu")
     }
 
     private var streakChip: some View {
@@ -309,10 +343,10 @@ struct ContentView: View {
             .background(RoundedRectangle(cornerRadius: 12).fill(Color.textPrimary.opacity(0.05)))
             .padding(.horizontal, 16).padding(.vertical, 8)
 
-            if statsSub == .progress {
-                ScrollView { progressView.padding(20) }
-            } else {
-                historyView
+            switch statsSub {
+            case .health:   DailyDigestView()
+            case .progress: ScrollView { progressView.padding(20) }
+            case .history:  historyView
             }
         }
     }
