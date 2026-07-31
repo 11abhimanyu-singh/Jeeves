@@ -116,14 +116,14 @@ def judge_gpt(key: str, artifact: str) -> dict:
             content = json.load(r)["choices"][0]["message"]["content"]
         return parse_json(content) if content.strip() else None
 
-    for model in ("gpt-5", "gpt-5-mini"):
+    for model in ("gpt-5.6-terra",):
         try:
             result = attempt(model)
             if result is not None:
                 return result
         except (urllib.error.HTTPError, json.JSONDecodeError):
             continue
-    raise RuntimeError("GPT judge returned empty/invalid JSON on both models")
+    raise RuntimeError("GPT judge returned empty/invalid JSON")
 
 
 def main() -> None:

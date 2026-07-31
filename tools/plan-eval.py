@@ -82,9 +82,9 @@ def main() -> None:
             "planBlocks": p["plan"].get("blocks", []),
         }, indent=1)
         try:
-            verdict = call_gpt(key, "gpt-5", content)
+            verdict = call_gpt(key, "gpt-5.6-terra", content)
         except Exception:
-            verdict = call_gpt(key, "gpt-5-mini", content)
+            verdict = call_gpt(key, "gpt-5.6-terra", content)
         reports.append(verdict)
         flag = "🧳" if verdict.get("stale") else ("⚠️" if verdict.get("score", 10) < 7 else "  ")
         print(f"\n{flag} {p['date']} — score {verdict.get('score')}/10"

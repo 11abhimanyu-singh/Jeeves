@@ -19,6 +19,7 @@ struct TodosListView: View {
 
     @State private var draftTitle = ""
     @State private var showDone = false
+    @State private var editing: Todo?
 
     // MARK: Derived lists
 
@@ -67,6 +68,7 @@ struct TodosListView: View {
             .padding(20)
         }
         .background(Color.bg)
+        .sheet(item: $editing) { TodoEditSheet(todo: $0) }
     }
 
     // MARK: Quick add
@@ -116,16 +118,24 @@ struct TodosListView: View {
             }
             .buttonStyle(.plain)
 
-            Circle()
-                .fill(todo.priority.dotColor)
-                .frame(width: 9, height: 9)
+            // The row body opens the editor — a typo shouldn't force
+            // delete-and-retype.
+            Button { editing = todo } label: {
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(todo.priority.dotColor)
+                        .frame(width: 9, height: 9)
 
-            Text(todo.title.isEmpty ? "Untitled" : todo.title)
-                .font(.serif(16))
-                .foregroundStyle(Color.textPrimary)
-                .lineLimit(2)
+                    Text(todo.title.isEmpty ? "Untitled" : todo.title)
+                        .font(.serif(16))
+                        .foregroundStyle(Color.textPrimary)
+                        .lineLimit(2)
 
-            Spacer(minLength: 8)
+                    Spacer(minLength: 8)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
 
             if let due = todo.dueDate {
                 dueBadge(due)
@@ -272,5 +282,100 @@ private extension TodoPriority {
         case .medium: return Color(hex: "B4842A")
         case .low:    return Color.sage
         }
+    }
+}
+
+// MARK: - Edit sheet
+
+/// Tap a to-do to fix it in place — title, priority, due date, notes.
+struct TodoEditSheet: View {
+    let todo: Todo
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var title = ""
+    @State private var notes = ""
+    @State private var priority: TodoPriority = .medium
+    @State private var hasDue = false
+    @State private var due = Date()
+    @State private var loaded = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("What needs doing?", text: $title)
+                        .font(.system(size: 16)).padding(13)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
+
+                    Text("PRIORITY").font(.system(size: 10, weight: .bold)).kerning(1)
+                        .foregroundStyle(Color.textMuted).padding(.top, 14)
+                    HStack(spacing: 7) {
+                        ForEach(TodoPriority.allCases, id: \.self) { p in
+                            let on = priority == p
+                            Button { priority = p } label: {
+                                Text(p.label).font(.system(size: 12.5, weight: .semibold))
+                                    .foregroundStyle(on ? Color.accentDeep : Color.textSoft)
+                                    .padding(.horizontal, 12).padding(.vertical, 9)
+                                    .background(Capsule().fill(on ? Color.accent.opacity(0.15) : Color.surface))
+                                    .overlay(Capsule().stroke(on ? Color.accent : Color.textPrimary.opacity(0.08), lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    Toggle(isOn: $hasDue) {
+                        Text("DUE DATE").font(.system(size: 10, weight: .bold)).kerning(1)
+                            .foregroundStyle(Color.textMuted)
+                    }
+                    .tint(Color.accent)
+                    .padding(.top, 14)
+                    if hasDue {
+                        DatePicker("", selection: $due, displayedComponents: [.date])
+                            .labelsHidden()
+                            .padding(10)
+                            .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
+                    }
+
+                    Text("NOTES").font(.system(size: 10, weight: .bold)).kerning(1)
+                        .foregroundStyle(Color.textMuted).padding(.top, 14)
+                    TextField("Anything else…", text: $notes, axis: .vertical)
+                        .lineLimit(3...6)
+                        .font(.system(size: 15)).padding(13)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
+                }
+                .padding(20)
+            }
+            .background(Color.bg)
+            .navigationTitle("Edit to-do")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }.tint(Color.accentDeep)
+                        .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .onAppear(perform: load)
+        }
+    }
+
+    private func load() {
+        guard !loaded else { return }
+        loaded = true
+        title = todo.title
+        notes = todo.notes
+        priority = todo.priority
+        hasDue = todo.dueDate != nil
+        due = todo.dueDate ?? Date()
+    }
+
+    private func save() {
+        todo.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        todo.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        todo.priorityRaw = priority.rawValue
+        todo.dueDate = hasDue ? due : nil
+        modelContext.saveOrLog("TodoEditSheet.save")
+        dismiss()
     }
 }

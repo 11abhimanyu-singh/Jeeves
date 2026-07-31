@@ -60,6 +60,7 @@ final class TrajectoryTests: XCTestCase {
             LiftSession.self, LiftSet.self, RunSession.self, StretchLog.self,
             Reminder.self, Todo.self, Workout.self, VoiceNote.self,
             Trip.self, TravelSegment.self, TripStay.self, AppEvent.self,
+            CalendarTombstone.self,
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true,
                                         cloudKitDatabase: .none)
@@ -71,6 +72,9 @@ final class TrajectoryTests: XCTestCase {
         try? context.save()
 
         let executor = ChatToolExecutor(modelContext: context)
+        // Live traffic can't be measured from an in-memory suite — a fixed
+        // stub keeps journeys honest (non-zero) without the network.
+        executor.commuteMinutes = { _, _, _ in 45 }
 
         // Load the permanent dialogue plan from the repo.
         let planURL = URL(fileURLWithPath: #filePath)

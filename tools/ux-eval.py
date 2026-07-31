@@ -51,7 +51,7 @@ def main() -> None:
     walkthrough = path.read_text()
 
     payload = {
-        "model": "gpt-5",
+        "model": "gpt-5.6-terra",
         "messages": [{"role": "system", "content": RUBRIC},
                      {"role": "user", "content": walkthrough}],
         "response_format": {"type": "json_object"},
@@ -63,7 +63,7 @@ def main() -> None:
         with urllib.request.urlopen(req, timeout=300) as r:
             verdict = json.loads(json.load(r)["choices"][0]["message"]["content"])
     except urllib.error.HTTPError:
-        payload["model"] = "gpt-5-mini"
+        payload["model"] = "gpt-5.6-terra"
         req = urllib.request.Request(API, data=json.dumps(payload).encode(), headers={
             "Authorization": f"Bearer {key}", "Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=300) as r:

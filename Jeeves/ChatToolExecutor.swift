@@ -18,6 +18,12 @@ import SwiftUI
 final class ChatToolExecutor {
     let modelContext: ModelContext
     var now: () -> Date = { Date() }
+    // Injectable for headless test runs — live traffic can't be measured
+    // inside an in-memory suite, and travel=0 rows there read as data
+    // corruption to every audit. Real runs keep the live lookup.
+    var commuteMinutes: (String, String, Date) async -> Int? = { from, to, departure in
+        await GoogleMapsService.commuteMinutes(from: from, to: to, departure: departure)
+    }
 
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
@@ -289,7 +295,11 @@ final class ChatToolExecutor {
         // A pasted Maps link resolves to a real address + pin, same as add_event.
         for e in matches { resolveEventDestinationIfLink(e) }
         let days = matches.map { Self.dayString($0.date) }.joined(separator: ", ")
-        return .init(text: "Updated \(matches.count) event(s) (\(days)): \(Set(changes).joined(separator: "; ")).")
+        // A time change ripples: the rest of that day's plan may now be stale.
+        let replanNote = (newStart != nil || newEnd != nil)
+            ? " If this shifts a day already planned, OFFER to replan the remainder (replan_today, with resume_at and any missed_blocks)."
+            : ""
+        return .init(text: "Updated \(matches.count) event(s) (\(days)): \(Set(changes).joined(separator: "; ")).\(replanNote)")
     }
 
     @MainActor
@@ -338,7 +348,14 @@ final class ChatToolExecutor {
         let deletedDays: [ClosedRange<Date>] = matches.map {
             $0.date.startOfDay...($0.spanEndDate ?? $0.date).startOfDay
         }
-        for e in matches { modelContext.delete(e) }
+        for e in matches {
+            // A deleted synced event must STAY deleted — tombstone its
+            // calendar ID so the next sync can't resurrect it.
+            if !e.externalID.isEmpty {
+                modelContext.insert(CalendarTombstone(externalID: e.externalID))
+            }
+            modelContext.delete(e)
+        }
         modelContext.saveOrLog()
         let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
         let surviving = trips.filter { trip in
@@ -371,9 +388,8 @@ final class ChatToolExecutor {
         let day = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: Date())
         let arrival = Calendar.current.date(bySettingHour: arriveMinute / 60, minute: arriveMinute % 60,
                                             second: 0, of: day) ?? day
-        guard let minutes = await GoogleMapsService.commuteMinutes(
-            from: origin, to: destination,
-            departure: max(arrival.addingTimeInterval(-3600), Date())) else {
+        guard let minutes = await commuteMinutes(
+            origin, destination, max(arrival.addingTimeInterval(-3600), Date())) else {
             return .init(text: "Couldn't get a route from \(origin) to \(destination) — the Maps key may be missing or the place ambiguous.")
         }
         let buffer = 10
@@ -491,17 +507,40 @@ final class ChatToolExecutor {
 
     @MainActor
     private func toolAddStay(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
-        let tripQuery = input["trip"] as? String ?? ""
-        let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
-        guard let trip = JeevesChatService.bestMatches(trips, title: \.title, query: tripQuery).first
-                ?? trips.last else {
-            return .init(text: "No trip matches '\(tripQuery)'. Create one with add_trip first.")
-        }
         let place = (input["hotel"] as? String ?? "").trimmingCharacters(in: .whitespaces)
         guard !place.isEmpty else { return .init(text: "Need the hotel/place name.") }
         let arrive = JeevesChatService.resolveDate(input["arrive_date"] as? String, relativeTo: today)
         let depart = JeevesChatService.resolveDate(input["depart_date"] as? String, relativeTo: today)
         guard depart >= arrive else { return .init(text: "Checkout is before check-in.") }
+
+        // Trip resolution. The old `?? trips.last` fallback silently attached
+        // any unmatched stay to whatever trip happened to exist — a whole
+        // Mysore road trip once vanished into the Singapore trip that way.
+        // Now: name match wins; an unnamed stay may join a trip already
+        // covering its dates; otherwise the stay CREATES its trip.
+        let tripQuery = (input["trip"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
+        var resolved = JeevesChatService.bestMatches(trips, title: \.title, query: tripQuery).first
+        if resolved == nil, tripQuery.isEmpty {
+            resolved = trips.first {
+                $0.startDate <= arrive.startOfDay && arrive.startOfDay <= $0.endDate
+            }
+        }
+        var createdTrip = false
+        let trip: Trip
+        if let resolved {
+            trip = resolved
+        } else {
+            let newTrip = Trip(title: tripQuery.isEmpty ? place : tripQuery,
+                               startDate: arrive.startOfDay, endDate: depart.startOfDay)
+            modelContext.insert(newTrip)
+            modelContext.saveOrLog("chat.addStay.newTrip")
+            EventLog.log(.tripCreated, "\(newTrip.title) \(TravelGuard.dayRange(newTrip)) via add_stay",
+                         subject: newTrip.id, context: modelContext)
+            await TravelGuard.sweep(context: modelContext)
+            createdTrip = true
+            trip = newTrip
+        }
         let stay = TripStay(tripID: trip.id, place: place,
                             address: input["address"] as? String ?? "",
                             arriveDate: arrive, departDate: depart)
@@ -533,8 +572,7 @@ final class ChatToolExecutor {
             modelContext.saveOrLog("chat.addStay.transition")
             transitionNote = " Added the \(prev.place) → \(place) drive (arrive by noon — measuring the route now; adjust the deadline if needed)."
             Task {
-                if let m = await GoogleMapsService.commuteMinutes(
-                    from: seg.fromPlace, to: seg.toPlace, departure: max(noon, Date())) {
+                if let m = await self.commuteMinutes(seg.fromPlace, seg.toPlace, max(noon, Date())) {
                     seg.travelMinutes = m
                     seg.travelIsEstimated = false
                     modelContext.saveOrLog("chat.addStay.measure")
@@ -546,7 +584,10 @@ final class ChatToolExecutor {
             }
         }
         let f = DateFormatter(); f.dateFormat = "d MMM"
-        return .init(text: "Stay added to '\(trip.title)': \(place), \(f.string(from: arrive)) – \(f.string(from: depart))."
+        let created = createdTrip
+            ? "NEW trip '\(trip.title)' created (\(TravelGuard.dayRange(trip))) for this stay. "
+            : ""
+        return .init(text: created + "Stay added to '\(trip.title)': \(place), \(f.string(from: arrive)) – \(f.string(from: depart))."
                      + (grew ? " The trip grew to cover it." : "") + transitionNote)
     }
 
@@ -651,6 +692,12 @@ final class ChatToolExecutor {
         guard let stay = matches.first else {
             return .init(text: "No stay matches '\(query)' — nothing deleted.")
         }
+        // Destructive → preview first, execute only on confirmed=true.
+        if (input["confirmed"] as? Bool) != true {
+            let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
+            let tripName = trips.first { $0.id == stay.tripID }?.title ?? "its trip"
+            return .init(text: "PREVIEW ONLY — nothing deleted yet. This removes the \(stay.place) stay (\(fmtRange(stay))) from '\(tripName)'. Show the user; if they confirm, call delete_stay again with confirmed=true.")
+        }
         let name = stay.place
         let range = fmtRange(stay)
         modelContext.delete(stay)
@@ -701,7 +748,12 @@ final class ChatToolExecutor {
            !LeaveBy.plausibleFlightJourney(given) {
             return .init(text: "\(given) min (\(LeaveBy.hours(given))) by road isn't a door-to-airport run — I didn't add this. Give me the real airport-run minutes, or add the road leg as a drive and the flight separately.")
         }
-        let day = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
+        // A missing date used to default to TODAY — a return drive weeks out
+        // once got its leave-by computed for this afternoon. Never guess.
+        guard let dateRaw = input["date"] as? String, !dateRaw.isEmpty else {
+            return .init(text: "Which date is this journey on? Pass date (YYYY-MM-DD) — I won't assume today.")
+        }
+        let day = JeevesChatService.resolveDate(dateRaw, relativeTo: today)
         // A flight's time is its departure, read at the ORIGIN airport ("19:40
         // leaving Singapore" is 19:40 SGT). A drive's time is its arrival
         // deadline, read at the DESTINATION ("reach the lodge by 13:00" is
@@ -790,8 +842,8 @@ final class ChatToolExecutor {
             let originRaw = segment.fromPlace.isEmpty ? "Home" : segment.fromPlace
             let origin = saved.first { $0.kind.rawValue.lowercased() == originRaw.lowercased() }
                 .map(\.address).flatMap { $0.isEmpty ? nil : $0 } ?? originRaw
-            if let m = await GoogleMapsService.commuteMinutes(from: origin, to: segment.toPlace,
-                                                             departure: max(when.addingTimeInterval(-3600), Date())) {
+            if let m = await commuteMinutes(origin, segment.toPlace,
+                                            max(when.addingTimeInterval(-3600), Date())) {
                 // Same guard as the editor and the card: days of road time in
                 // a flight's door-to-terminal slot means `to` isn't an airport
                 // — refuse it, or absorb would grow the trip around a chain
@@ -833,9 +885,14 @@ final class ChatToolExecutor {
         // No nudge is scheduled for a chain with no journey time — don't
         // promise one.
         let nudge = segment.travelMinutes > 0 ? " I'll nudge you 30 minutes before." : ""
+        // A foreign flight saved without zone stamps silently reads its times
+        // on the device clock (IST) — surface it so the model corrects the leg.
+        let zoneNote = (mode != .drive && (fromZoneID.isEmpty || toZoneID.isEmpty))
+            ? " NOTE: no timezones stamped on this leg — its clocks assume the device zone. For an international flight, call add_journey again with from_timezone and to_timezone (IANA IDs) to correct it."
+            : ""
         return .init(text: "\(updating ? "Updated the existing" : "Added to \(trip.title):") "
                      + "\(segment.label.isEmpty ? mode.label : segment.label). "
-                     + "Leave at \(leaveLabel) on \(Self.dayString(day)).\(caveat)\(windowNote)\(nudge)")
+                     + "Leave at \(leaveLabel) on \(Self.dayString(day)).\(caveat)\(windowNote)\(nudge)\(zoneNote)")
     }
 
     // MARK: History + standing preferences

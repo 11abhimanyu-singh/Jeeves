@@ -162,9 +162,9 @@ def main() -> None:
             for t in sess)
         content = f"GROUND TRUTH:\n{truth}\n\nSESSION {i} TRANSCRIPT:\n{lines}"
         try:
-            verdict = call_gpt(key, "gpt-5", content)
+            verdict = call_gpt(key, "gpt-5.6-terra", content)
         except Exception:
-            verdict = call_gpt(key, "gpt-5-mini", content)
+            verdict = call_gpt(key, "gpt-5.6-terra", content)
         verdict["session"] = i
         verdict["turns"] = len(sess)
         reports.append(verdict)

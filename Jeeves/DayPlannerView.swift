@@ -693,7 +693,12 @@ struct DayPlannerView: View {
         Task {
             defer { isImportingCalendar = false }
             do {
-                let evs = try await GoogleCalendarService.events(on: day)
+                var evs = try await GoogleCalendarService.events(on: day)
+                // A deleted synced event stays deleted: tombstoned IDs are
+                // not even offered for re-import (they'd be pre-checked and
+                // quietly resurrected on confirm).
+                let dead = CalendarTombstone.ids(in: modelContext)
+                evs.removeAll { !$0.externalID.isEmpty && dead.contains($0.externalID) }
                 if evs.isEmpty {
                     calendarError = "No calendar events on \(day == today ? "today" : "this day")."
                 } else {
@@ -835,6 +840,11 @@ struct DayPlannerView: View {
 
     private func deleteEditingEvent() {
         if let event = editingEvent {
+            // Same rule as the chat path: a deleted synced event must never
+            // be resurrected by the next calendar sync.
+            if !event.externalID.isEmpty {
+                modelContext.insert(CalendarTombstone(externalID: event.externalID))
+            }
             modelContext.delete(event)
             modelContext.saveOrLog()
         }

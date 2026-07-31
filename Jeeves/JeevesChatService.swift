@@ -274,6 +274,25 @@ enum JeevesChatService {
     gains tools between sessions — if earlier conversation (including your own \
     messages) claimed a capability was missing, that claim is outdated. Check \
     the tool list and use the tool; never repeat a remembered limitation.
+    - NO TOOL, NO CHANGE: if you did not call a tool THIS turn, nothing \
+    changed — never say "done", "removed", "updated", "extended", and never \
+    describe anything as auto-added unless a tool result in this conversation \
+    says so. Call the tool, or say what you WOULD do and ask.
+    - RECEIPTS ARE VERBATIM: name trips, stays and records EXACTLY as the \
+    tool result names them. If a result says the stay went to 'Colombo' and \
+    the user meant the Mysore trip, that is the WRONG trip — say so and move \
+    it (delete_stay + add_stay with the right trip), never call it the right \
+    one.
+    - A stay in a NEW city or region — after coming home, or starting a \
+    fresh road trip — belongs to a NEW trip: pass that new trip's name in \
+    add_stay's trip field and it is created automatically. Never let a new \
+    itinerary stretch the previous trip.
+    - International flights: ALWAYS pass from_timezone and to_timezone \
+    (IANA IDs) on add_journey — on BOTH legs, return included, even when the \
+    offset matches IST.
+    - After moving or extending an event on a day that is already planned, \
+    OFFER to replan the remainder — don't leave the plan stale, and don't \
+    replan silently either.
     """
 
     // Internal (not private) so ChatToolParityTests can pin this roster
@@ -556,7 +575,7 @@ enum JeevesChatService {
             "input_schema": [
                 "type": "object",
                 "properties": [
-                    "trip": ["type": "string", "description": "The trip's title (or part of it)."],
+                    "trip": ["type": "string", "description": "The trip this stay belongs to. If the stay begins a NEW trip (a new city/region, or after returning home), give the NEW trip's name here — it is created automatically instead of attaching to an old trip."],
                     "hotel": ["type": "string", "description": "Hotel/lodging name, e.g. 'Radisson Blu Mysore'."],
                     "address": ["type": "string", "description": "Address or place detail if the user gave one — helps route measuring."],
                     "arrive_date": ["type": "string", "description": "Check-in day, YYYY-MM-DD (or 'today'/'tomorrow')."],
@@ -583,12 +602,13 @@ enum JeevesChatService {
         ],
         [
             "name": "delete_stay",
-            "description": "Remove one lodging from a trip, matched by hotel/place name. The trip's dates are NOT shrunk automatically — suggest update_trip if the trip is shorter now. Confirm before calling.",
+            "description": "Remove one lodging from a trip, matched by hotel/place name. Two-phase: the first call returns a PREVIEW; call again with confirmed=true after the user agrees. The trip's dates are NOT shrunk automatically — suggest update_trip if the trip is shorter now.",
             "input_schema": [
                 "type": "object",
                 "properties": [
                     "hotel": ["type": "string", "description": "Hotel/stay name (or part)."],
                     "date": ["type": "string", "description": "A day the stay covers — pins one when several match."],
+                    "confirmed": ["type": "boolean", "description": "true only AFTER the user saw the preview and agreed."],
                 ],
                 "required": ["hotel"],
             ],

@@ -21,6 +21,7 @@ struct RemindersListView: View {
     @State private var draftHour = 9
     @State private var draftMinute = 0
     @State private var draftRecurrence: ReminderRecurrence = .once
+    @State private var editing: Reminder?
 
     private var active: [Reminder] { reminders.filter(\.isActive) }
     private var todayList: [Reminder] { active.filter(firesToday) }
@@ -48,6 +49,7 @@ struct RemindersListView: View {
         }
         .background(Color.bg)
         .sheet(isPresented: $showAdd) { addSheet }
+        .sheet(item: $editing) { ReminderEditSheet(reminder: $0, onSaved: rescheduleAll) }
     }
 
     // MARK: Sections
@@ -76,23 +78,31 @@ struct RemindersListView: View {
             }
             .buttonStyle(.plain)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(r.title.isEmpty ? "Reminder" : r.title)
-                    .font(.serif(16)).foregroundStyle(Color.textPrimary).lineLimit(2)
-                HStack(spacing: 7) {
-                    Text(timeLabel(r))
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Color.accentDeep)
-                    if r.recurrence != .once {
-                        Text(r.recurrence.label.uppercased())
-                            .font(.system(size: 9, weight: .bold)).kerning(0.4)
-                            .foregroundStyle(Color.sageDeep)
-                            .padding(.horizontal, 6).padding(.vertical, 3)
-                            .background(Capsule().fill(Color.sage.opacity(0.20)))
+            // Tapping the body opens the editor — typos and wrong times get
+            // fixed in place, not deleted and retyped.
+            Button { editing = r } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(r.title.isEmpty ? "Reminder" : r.title)
+                            .font(.serif(16)).foregroundStyle(Color.textPrimary).lineLimit(2)
+                        HStack(spacing: 7) {
+                            Text(timeLabel(r))
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(Color.accentDeep)
+                            if r.recurrence != .once {
+                                Text(r.recurrence.label.uppercased())
+                                    .font(.system(size: 9, weight: .bold)).kerning(0.4)
+                                    .foregroundStyle(Color.sageDeep)
+                                    .padding(.horizontal, 6).padding(.vertical, 3)
+                                    .background(Capsule().fill(Color.sage.opacity(0.20)))
+                            }
+                        }
                     }
+                    Spacer(minLength: 6)
                 }
+                .contentShape(Rectangle())
             }
-            Spacer(minLength: 6)
+            .buttonStyle(.plain)
             Button { snooze(r) } label: {
                 Text("Snooze").font(.system(size: 11.5, weight: .bold)).foregroundStyle(Color.accentDeep)
             }
@@ -231,5 +241,95 @@ struct RemindersListView: View {
     private func rescheduleAll() {
         let all = (try? modelContext.fetch(FetchDescriptor<Reminder>())) ?? []
         ReminderScheduler.reschedule(all)
+    }
+}
+
+// MARK: - Edit sheet
+
+/// Tap a reminder to fix it in place — title, exact time, repeat — and its
+/// notification reschedules on save.
+struct ReminderEditSheet: View {
+    let reminder: Reminder
+    var onSaved: () -> Void = {}
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var title = ""
+    @State private var fireAt = Date()
+    @State private var recurrence: ReminderRecurrence = .once
+    @State private var loaded = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("Remind me to…", text: $title)
+                        .font(.system(size: 16)).padding(13)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
+
+                    Text("WHEN").font(.system(size: 10, weight: .bold)).kerning(1)
+                        .foregroundStyle(Color.textMuted).padding(.top, 14)
+                    // A full picker, not just chips: fixing "18:00" to "18:30"
+                    // is exactly the edit this sheet exists for.
+                    DatePicker("", selection: $fireAt,
+                               displayedComponents: recurrence == .once
+                               ? [.date, .hourAndMinute] : [.hourAndMinute])
+                        .labelsHidden()
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
+
+                    Text("REPEAT").font(.system(size: 10, weight: .bold)).kerning(1)
+                        .foregroundStyle(Color.textMuted).padding(.top, 14)
+                    HStack(spacing: 7) {
+                        ForEach(ReminderRecurrence.allCases, id: \.self) { rec in
+                            let on = recurrence == rec
+                            Button { recurrence = rec } label: {
+                                Text(rec.label).font(.system(size: 12.5, weight: .semibold))
+                                    .foregroundStyle(on ? Color.accentDeep : Color.textSoft)
+                                    .padding(.horizontal, 12).padding(.vertical, 9)
+                                    .background(Capsule().fill(on ? Color.accent.opacity(0.15) : Color.surface))
+                                    .overlay(Capsule().stroke(on ? Color.accent : Color.textPrimary.opacity(0.08), lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(20)
+            }
+            .background(Color.bg)
+            .navigationTitle("Edit reminder")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }.tint(Color.accentDeep)
+                        .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .onAppear(perform: load)
+        }
+    }
+
+    private func load() {
+        guard !loaded else { return }
+        loaded = true
+        title = reminder.title
+        fireAt = reminder.fireAt
+        recurrence = reminder.recurrence
+    }
+
+    private func save() {
+        reminder.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        reminder.recurrenceRaw = recurrence.rawValue
+        var fire = fireAt
+        // A one-off edited to a moment already past rolls forward a day, so
+        // the notification always has a future fire.
+        if recurrence == .once && fire < Date() {
+            fire = Calendar.current.date(byAdding: .day, value: 1, to: fire) ?? fire
+        }
+        reminder.fireAt = fire
+        modelContext.saveOrLog("ReminderEditSheet.save")
+        onSaved()
+        dismiss()
     }
 }

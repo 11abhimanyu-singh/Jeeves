@@ -107,7 +107,7 @@ def call(key, system, user, max_tokens=24000):
             content = json.load(r)["choices"][0]["message"]["content"]
         return json.loads(content) if content.strip() else None
 
-    for model in ("gpt-5", "gpt-5-mini"):
+    for model in ("gpt-5.6-terra",):
         try:
             result = attempt(model)
             if result is not None:
