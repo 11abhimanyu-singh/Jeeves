@@ -36,7 +36,6 @@ struct DayPlannerView: View {
     @State private var measuredJourneys: [String: Int] = [:]
     @State private var dismissedTravelDays: Set<Date> = []
     @State private var eventDraft: EventDraft?
-    @State private var editingEvent: DailyEvent?
 
     // Plan generation (the same PlanCoordinator call the chat uses).
     @State private var isPlanning = false
@@ -74,7 +73,10 @@ struct DayPlannerView: View {
         }
         .background(Color.bg)
         .sheet(item: $eventDraft) { draft in
-            EventEditSheet(draft: draft, onSave: saveEvent, onDelete: eventDeleteAction)
+            // Deletability comes from the draft itself — a separate @State
+            // raced the sheet's snapshot and the button sometimes vanished.
+            EventEditSheet(draft: draft, onSave: saveEvent,
+                           onDelete: draft.existingEvent.map { event in { delete(event: event) } })
         }
         .sheet(item: $calendarReview) { review in
             CalendarImportSheet(review: review, onAdd: addFromCalendar)
@@ -803,17 +805,15 @@ struct DayPlannerView: View {
     // MARK: Event actions
 
     private func addEvent() {
-        editingEvent = nil
         eventDraft = EventDraft(on: selectedDate)
     }
 
     private func editEvent(_ event: DailyEvent) {
-        editingEvent = event
         eventDraft = EventDraft(event: event)
     }
 
     private func saveEvent(_ draft: EventDraft) {
-        if let event = editingEvent {
+        if let event = draft.existingEvent {
             event.title = draft.title
             event.date = draft.date.startOfDay
             event.startMinute = draft.startMinute
@@ -830,25 +830,16 @@ struct DayPlannerView: View {
         }
         modelContext.saveOrLog()
         selectedDate = draft.date.startOfDay   // follow the event to its day
-        editingEvent = nil
     }
 
-    private var eventDeleteAction: (() -> Void)? {
-        guard editingEvent != nil else { return nil }
-        return { deleteEditingEvent() }
-    }
-
-    private func deleteEditingEvent() {
-        if let event = editingEvent {
-            // Same rule as the chat path: a deleted synced event must never
-            // be resurrected by the next calendar sync.
-            if !event.externalID.isEmpty {
-                modelContext.insert(CalendarTombstone(externalID: event.externalID))
-            }
-            modelContext.delete(event)
-            modelContext.saveOrLog()
+    private func delete(event: DailyEvent) {
+        // Same rule as the chat path: a deleted synced event must never
+        // be resurrected by the next calendar sync.
+        if !event.externalID.isEmpty {
+            modelContext.insert(CalendarTombstone(externalID: event.externalID))
         }
-        editingEvent = nil
+        modelContext.delete(event)
+        modelContext.saveOrLog()
     }
 
     private func prettyDate(_ date: Date) -> String {

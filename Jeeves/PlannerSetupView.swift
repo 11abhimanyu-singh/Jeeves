@@ -244,6 +244,10 @@ struct EventDraft: Identifiable {
     var address = ""
     var outboundStart: LocationKind = .home
     var source: EventSource = .manual
+    /// The event being edited, carried INSIDE the sheet's item. Deriving
+    /// "can delete" from a separate @State raced the sheet's snapshot — the
+    /// delete button sometimes built against a stale nil and vanished.
+    var existingEvent: DailyEvent? = nil
 
     init() {}
 
@@ -258,6 +262,7 @@ struct EventDraft: Identifiable {
         address = event.destinationAddress
         outboundStart = event.outboundStart
         source = event.source
+        existingEvent = event
     }
 
     init(detected: DetectedEvent) {
