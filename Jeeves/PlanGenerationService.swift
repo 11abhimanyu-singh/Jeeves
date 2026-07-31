@@ -68,7 +68,16 @@ enum PlanGenerationService {
             // budget_tokens with a 400; adaptive thinking is the supported mode.)
             "max_tokens": 16000,
             "thinking": ["type": "adaptive"],
-            "system": systemPrompt,
+            // The rules moved out of the user message and into a cached system
+            // block. 54% of plan runs start within 5 minutes of the previous
+            // one (measured over 95 logged generations), so the default 5-min
+            // TTL is the right one: at that hit rate a 1-hour TTL's 2x write
+            // premium costs more than it saves versus 1.25x.
+            "system": [[
+                "type": "text",
+                "text": planningRules(hasEvents: !req.events.isEmpty),
+                "cache_control": ["type": "ephemeral"],
+            ]],
             "messages": [["role": "user", "content": userPrompt(req)]],
         ]
 
@@ -97,6 +106,8 @@ enum PlanGenerationService {
                 "HTTP \(http.statusCode)" + (message.map { ": \($0)" } ?? ""))
         }
 
+        recordCacheUsage(from: data)
+
         guard let text = extractText(from: data) else {
             #if DEBUG
             print("=== RAW PLAN RESPONSE ===\n\(String(data: data, encoding: .utf8) ?? "nil")\n=== END RAW ===")
@@ -110,6 +121,26 @@ enum PlanGenerationService {
     }
 
     // MARK: Response parsing (pure, testable — no network, no key)
+
+    /// Feed the API's own cache accounting into the daily tally. Runs before
+    /// the text checks on purpose: a plan that comes back unparsable still
+    /// tells us whether the prefix cached, and that is exactly the run we'd
+    /// want the numbers from.
+    static func recordCacheUsage(from data: Data) {
+        struct UsageEnvelope: Decodable {
+            struct Usage: Decodable {
+                let input_tokens: Int?
+                let cache_read_input_tokens: Int?
+                let cache_creation_input_tokens: Int?
+            }
+            let usage: Usage?
+        }
+        guard let decoded = try? JSONDecoder().decode(UsageEnvelope.self, from: data),
+              let u = decoded.usage else { return }
+        PromptCacheStats.record(read: u.cache_read_input_tokens ?? 0,
+                                write: u.cache_creation_input_tokens ?? 0,
+                                uncached: u.input_tokens ?? 0)
+    }
 
     /// Pulls the assistant's text out of an Anthropic Messages API response body.
     /// The response shape is `{ "content": [ {"type":"text","text":"..."} ], ... }`;
@@ -166,7 +197,9 @@ enum PlanGenerationService {
     for the user's day as strict JSON and nothing else — no prose outside the JSON.
     """
 
-    private static func userPrompt(_ req: PlanRequest) -> String {
+    /// Internal, not private, so PromptCacheTests can assert the volatile half
+    /// stays volatile and the cached half stays byte-stable.
+    static func userPrompt(_ req: PlanRequest) -> String {
         var s = ""
 
         s += JeevesChatService.dateContext(for: req.referenceNow ?? Date()) + "\n\n"
@@ -192,28 +225,6 @@ enum PlanGenerationService {
         }
         if let adherence = req.adherenceNote {
             s += "\(adherence)\n"
-        }
-        s += "\n"
-
-        s += "PRIORITY RULES:\n"
-        s += "- Anchors (gym, events) are fixed commitments and sit above all tiers — never move or drop them.\n"
-        s += "- Tiers, drop order when things don't fit: Flexible first, then Important. NEVER drop Must-do.\n"
-        s += "- Lunch timing: NEVER before 12:30 (no late-morning brunch). Aim to FINISH lunch by 14:00; the hard latest start is 14:30. So the lunch window is 12:30–14:00 preferred, 14:30 at the very latest.\n"
-        s += "- Only after dropping should you shrink survivors so the day fits exactly.\n"
-        s += "- IMPORTANT-tier floor: never shrink an Important activity below 50% of its allocated time. If fitting the day would force any Important item below 50%, DROP one Important item entirely (vary which one day to day) so the rest run at full length. One activity done fully beats two done at 20 minutes each — you may even extend a surviving Important item into the freed time rather than leaving it idle.\n"
-        s += "- Photography is a FLEXIBLE, discretionary-level activity: place it in leftover time or drop it like any Flexible item. It is NOT pinned to the end of the day and has no special end-of-day slot.\n"
-        s += "- SPLITTING: an activity of 120 min or longer may be split into TWO parts around an anchor when it can't fit whole — e.g. Interview prep — practice 90 min, then Lunch, then the remaining 30 min. Label the parts (e.g. \"part 1 of 120\"). Never split shorter activities, and at most one split per activity. The GYM routine must NEVER be split: mobility → weightlifting → cardio run back-to-back as one contiguous sequence with nothing scheduled between them.\n"
-        s += "- Which item to drop/shrink first WITHIN a tier is your judgment (context-aware), not a fixed rule.\n"
-        s += "- Always report what you dropped and shrank. Never silently omit anything.\n\n"
-
-        s += "DAY WINDOW:\n"
-        s += "- The day STARTS at 07:00 (when sleep ends) — the FIRST block of every plan begins at 07:00. Cover 07:00–08:00 with a morning routine block (kind \"free\", e.g. \"Morning routine — wake, freshen up, breakfast\") unless a real commitment claims that hour. Never leave a gap between 07:00 and the first block.\n"
-        s += "- The productive window is 08:00 to the 20:30 hard boundary — EVERY day, including event days.\n"
-        s += "- Sleep is a FIXED 8-hour anchor from 23:00 to 07:00 (11 PM–7 AM) — always the final block of the day (kind \"sleep\", isAnchor true, startTime 23:00, endTime 07:00). No WORK is scheduled after the 20:30 boundary — but the gym routine, events, and their commutes follow their real times and may run later. Fill whatever remains of the evening (from the last block, or 20:30) up to 23:00 with a single wind-down / personal-time block (kind \"free\") leading into sleep.\n"
-        if !req.events.isEmpty {
-            s += "- Events are FIXED ANCHORS you schedule work AROUND, not a wall that ends the day. Each event is an out-and-back trip: leave in time, attend, return home. Fill EVERY free window with productive work — before the first event, between events, and (crucially) AFTER you return home from an event, right up to 20:30.\n"
-            s += "- Do NOT drop work just because it doesn't fit before an event. A midday event (e.g. a 2 PM appointment) leaves the whole afternoon and evening free after you return — use it. The ONLY time post-event hours are unavailable is when the event itself runs so late that you get home near or after 20:30.\n"
-            s += "- STRONGLY PREFER placing Interview prep — Reading early in the morning (the 08:00 peak-focus slot) when it's free — but it is a HIGH-PREFERENCE Important item, NOT an anchor: it may move later, or be dropped like any Important item when the day is genuinely too full. Do not lock it to 08:00.\n"
         }
         s += "\n"
 
@@ -255,6 +266,46 @@ enum PlanGenerationService {
                 s += "- \(route): \(mins) min\n"
             }
             s += "- For any route not listed, assume \(req.defaultCommuteMinutes) min.\n"
+        }
+        s += "\n"
+
+        return s
+    }
+
+    /// The half of the prompt that never varies: priorities, the day window,
+    /// the chaining doctrine and the response contract. It lives here rather
+    /// than inside `userPrompt` so it can be a stable cacheable prefix — the
+    /// day's own data (date, request, routine, anchors, commute) changes on
+    /// every call, and a single volatile byte ahead of the breakpoint takes
+    /// the hit rate to zero.
+    ///
+    /// `hasEvents` keeps the one conditional rule block conditional. Folding
+    /// it in unconditionally would have been simpler and would have given one
+    /// cache entry instead of two, but it would also feed event rules into
+    /// plans that have no events — a behaviour change smuggled in under a
+    /// performance change. Two stable variants, same instructions as before.
+    static func planningRules(hasEvents: Bool) -> String {
+        var s = systemPrompt + "\n\n"
+
+        s += "PRIORITY RULES:\n"
+        s += "- Anchors (gym, events) are fixed commitments and sit above all tiers — never move or drop them.\n"
+        s += "- Tiers, drop order when things don't fit: Flexible first, then Important. NEVER drop Must-do.\n"
+        s += "- Lunch timing: NEVER before 12:30 (no late-morning brunch). Aim to FINISH lunch by 14:00; the hard latest start is 14:30. So the lunch window is 12:30–14:00 preferred, 14:30 at the very latest.\n"
+        s += "- Only after dropping should you shrink survivors so the day fits exactly.\n"
+        s += "- IMPORTANT-tier floor: never shrink an Important activity below 50% of its allocated time. If fitting the day would force any Important item below 50%, DROP one Important item entirely (vary which one day to day) so the rest run at full length. One activity done fully beats two done at 20 minutes each — you may even extend a surviving Important item into the freed time rather than leaving it idle.\n"
+        s += "- Photography is a FLEXIBLE, discretionary-level activity: place it in leftover time or drop it like any Flexible item. It is NOT pinned to the end of the day and has no special end-of-day slot.\n"
+        s += "- SPLITTING: an activity of 120 min or longer may be split into TWO parts around an anchor when it can't fit whole — e.g. Interview prep — practice 90 min, then Lunch, then the remaining 30 min. Label the parts (e.g. \"part 1 of 120\"). Never split shorter activities, and at most one split per activity. The GYM routine must NEVER be split: mobility → weightlifting → cardio run back-to-back as one contiguous sequence with nothing scheduled between them.\n"
+        s += "- Which item to drop/shrink first WITHIN a tier is your judgment (context-aware), not a fixed rule.\n"
+        s += "- Always report what you dropped and shrank. Never silently omit anything.\n\n"
+
+        s += "DAY WINDOW:\n"
+        s += "- The day STARTS at 07:00 (when sleep ends) — the FIRST block of every plan begins at 07:00. Cover 07:00–08:00 with a morning routine block (kind \"free\", e.g. \"Morning routine — wake, freshen up, breakfast\") unless a real commitment claims that hour. Never leave a gap between 07:00 and the first block.\n"
+        s += "- The productive window is 08:00 to the 20:30 hard boundary — EVERY day, including event days.\n"
+        s += "- Sleep is a FIXED 8-hour anchor from 23:00 to 07:00 (11 PM–7 AM) — always the final block of the day (kind \"sleep\", isAnchor true, startTime 23:00, endTime 07:00). No WORK is scheduled after the 20:30 boundary — but the gym routine, events, and their commutes follow their real times and may run later. Fill whatever remains of the evening (from the last block, or 20:30) up to 23:00 with a single wind-down / personal-time block (kind \"free\") leading into sleep.\n"
+        if hasEvents {
+            s += "- Events are FIXED ANCHORS you schedule work AROUND, not a wall that ends the day. Each event is an out-and-back trip: leave in time, attend, return home. Fill EVERY free window with productive work — before the first event, between events, and (crucially) AFTER you return home from an event, right up to 20:30.\n"
+            s += "- Do NOT drop work just because it doesn't fit before an event. A midday event (e.g. a 2 PM appointment) leaves the whole afternoon and evening free after you return — use it. The ONLY time post-event hours are unavailable is when the event itself runs so late that you get home near or after 20:30.\n"
+            s += "- STRONGLY PREFER placing Interview prep — Reading early in the morning (the 08:00 peak-focus slot) when it's free — but it is a HIGH-PREFERENCE Important item, NOT an anchor: it may move later, or be dropped like any Important item when the day is genuinely too full. Do not lock it to 08:00.\n"
         }
         s += "\n"
 

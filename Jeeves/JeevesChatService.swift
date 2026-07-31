@@ -768,7 +768,24 @@ enum JeevesChatService {
                 // intelligence lives inside plan_day. Disabling thinking here
                 // keeps chat snappy and the tool-use echo simple.
                 "thinking": ["type": "disabled"],
-                "system": agenticSystemPrompt + "\n\n" + dateContext() + "\n\n" + stateNote,
+                // Split for prompt caching. The cache prefix runs tools →
+                // system → messages, so ONE breakpoint on the static system
+                // block covers the tool schemas too — ~9.1k tokens (6.8k
+                // tools + 2.3k prompt) that used to be re-sent, uncached, on
+                // every iteration of the loop below (up to 7 per message).
+                //
+                // The volatile half MUST stay in a second, unmarked block:
+                // dateContext() carries the minute, so folding it into the
+                // cached block would change the prefix on every call and the
+                // hit rate would be exactly zero. Order is unchanged from the
+                // old concatenation, so the model sees the same text.
+                "system": [
+                    ["type": "text",
+                     "text": agenticSystemPrompt,
+                     "cache_control": ["type": "ephemeral"]],
+                    ["type": "text",
+                     "text": dateContext() + "\n\n" + stateNote],
+                ],
                 "tools": toolSchemas,
                 "messages": messages,
             ]
@@ -960,6 +977,12 @@ enum JeevesChatService {
         let blocks: [Block]
         /// First text block, for the plain-chat path.
         var text: String? { blocks.first { $0.type == "text" }?.text }
+        /// Cache accounting straight from the API's `usage`. Without this we
+        /// would be doing exactly what the iCloud export did for days —
+        /// reporting a success we never actually measured.
+        var cacheRead: Int = 0
+        var cacheWrite: Int = 0
+        var uncachedInput: Int = 0
     }
 
     /// The user's key from Keychain — or, in DEBUG only, from the process
@@ -1005,7 +1028,13 @@ enum JeevesChatService {
                 input: c["input"] as? [String: Any]
             )
         }
+        let usage = obj["usage"] as? [String: Any]
+        let read = usage?["cache_read_input_tokens"] as? Int ?? 0
+        let write = usage?["cache_creation_input_tokens"] as? Int ?? 0
+        let plain = usage?["input_tokens"] as? Int ?? 0
+        PromptCacheStats.record(read: read, write: write, uncached: plain)
         return Response(stopReason: obj["stop_reason"] as? String ?? "end_turn",
-                        rawContent: content, blocks: blocks)
+                        rawContent: content, blocks: blocks,
+                        cacheRead: read, cacheWrite: write, uncachedInput: plain)
     }
 }

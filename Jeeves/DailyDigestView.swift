@@ -135,6 +135,11 @@ struct DailyDigestView: View {
                 recent.isEmpty ? "no runs recorded"
                 : "\(succeeded)/\(recent.count) recent runs succeeded"
                 + (last.map { " · last \($0.startedAt.formatted(.dateTime.month(.abbreviated).day().hour().minute()))" } ?? ""))
+            // A broken prompt cache never announces itself — the calls still
+            // succeed, they just cost 12.5x what a hit costs, forever.
+            row("Prompt cache", PromptCacheStats.summary(),
+                tint: PromptCacheStats.todayStats().hitRate.map { $0 < 0.3 ? Color.accentDeep : Color.textSoft }
+                    ?? Color.textSoft)
             // The export is what carries all of this to a laptop; when it's
             // failing, say so HERE rather than leaving the Mac to guess.
             if let failure = health.failure {
