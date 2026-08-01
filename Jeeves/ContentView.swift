@@ -145,7 +145,11 @@ struct ContentView: View {
     // Progress became the landing screen; Stats moved into the hamburger and
     // Jeeves became a floating bubble, so neither is a tab any more.
     enum Tab { case home, planner, tasks, fitness, library }
-    enum FitnessSheet: String, Identifiable { case run, lift, stretch; var id: String { rawValue } }
+    // `lift` used to be here, routing to a second lift logger (LiftView) that
+    // nothing ever set — one exercise per session, not linked to a Workout, so
+    // anything saved through it would never have appeared on the Today feed.
+    // WorkoutLiftView, reached from the feed itself, is the real one.
+    enum FitnessSheet: String, Identifiable { case run, stretch; var id: String { rawValue } }
 
     @State private var tab: Tab = .home
     @State private var fitnessSheet: FitnessSheet?
@@ -340,9 +344,13 @@ struct ContentView: View {
         }
         .sheet(item: $fitnessSheet) { sheet in
             switch sheet {
-            case .run:     RunView()
-            case .lift:    LiftView()
-            case .stretch: StretchView()
+            // Both flows already had a transition-cue hook — the seam a caller
+            // was meant to wire a beep or haptic into — and both were being
+            // constructed with the default empty closure, so the cue existed
+            // in the code and never once fired. On a screen you are not
+            // looking at mid-run, the haptic IS the cue.
+            case .run:     RunView(onTransitionCue: { Haptics.cue() })
+            case .stretch: StretchView(onCue: { Haptics.cue() })
             }
         }
     }
@@ -814,17 +822,32 @@ struct ContentView: View {
     }
 
     private func tabButton(_ target: Tab, _ icon: String, _ label: String) -> some View {
-        Button { tab = target } label: {
+        let selected = tab == target
+        return Button {
+            // A tab switch is a navigation event, not a data change — the
+            // lightest haptic there is, and only when it actually moves.
+            if !selected { Haptics.selection() }
+            tab = target
+        } label: {
             VStack(spacing: 3) {
                 Image(systemName: icon).font(.ui(17))
-                    .foregroundStyle(tab == target ? Color.accent : Color.textMuted)
-                Text(label).font(.ui(10.5, weight: tab == target ? .bold : .medium))
-                    .foregroundStyle(tab == target ? Color.textPrimary : Color.textMuted)
+                    .foregroundStyle(selected ? Color.accentDeep : Color.textMuted)
+                Text(label).font(.ui(10.5, weight: selected ? .bold : .medium))
+                    .foregroundStyle(selected ? Color.textPrimary : Color.textMuted)
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, minHeight: 44)
             .padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // This is a hand-rolled HStack, not a TabView, so none of the tab
+        // semantics come for free: without these VoiceOver reads five
+        // unlabelled buttons and never says which one you are on. Selection
+        // was signalled by colour and font weight alone.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityHint(selected ? "" : "Switches to \(label)")
     }
 
     // MARK: Data plumbing

@@ -25,6 +25,7 @@ struct PlannerSetupView: View {
     @State private var ticketError: String?
     @State private var detectedDraft: EventDraft?
     @State private var isImportingCalendar = false
+    @State private var calendarReview: CalendarReview?
 
     private var today: Date { Date().startOfDay }
     private var todayEvents: [DailyEvent] { events.filter { $0.date == today }.sorted { $0.startMinute < $1.startMinute } }
@@ -55,6 +56,9 @@ struct PlannerSetupView: View {
         }
         .sheet(item: $detectedDraft) { draft in
             EventEditSheet(draft: draft, onSave: saveEvent)
+        }
+        .sheet(item: $calendarReview) { review in
+            CalendarImportSheet(review: review, onAdd: addFromCalendar)
         }
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
@@ -166,6 +170,10 @@ struct PlannerSetupView: View {
         }
     }
 
+    /// Fetches the day's calendar and hands it to the SAME review sheet the
+    /// planner uses. This used to insert every event silently — which put two
+    /// import paths in the app with different contracts, and broke the promise
+    /// (PRD §5.3) that calendar events are reviewed before they land.
     private func importFromCalendar() {
         isImportingCalendar = true
         ticketError = nil
@@ -177,24 +185,34 @@ struct PlannerSetupView: View {
                 // resurrect tombstoned events (and imported them without
                 // their externalID, so later syncs duplicated them).
                 let dead = CalendarTombstone.ids(in: modelContext)
-                for c in calEvents {
-                    guard c.externalID.isEmpty || !dead.contains(c.externalID) else { continue }
-                    // Skip anything already imported (same title + start today).
-                    let dup = todayEvents.contains { $0.title == c.title && $0.startMinute == c.startMinute }
-                    guard !dup else { continue }
-                    modelContext.insert(DailyEvent(
-                        date: today, title: c.title,
-                        startMinute: c.startMinute, endMinute: c.endMinute,
-                        destinationAddress: c.location, outboundStart: .home, source: .calendar,
-                        isAllDay: c.isAllDay,
-                        externalID: c.externalID
-                    ))
+                let offerable = calEvents.filter { c in
+                    guard c.externalID.isEmpty || !dead.contains(c.externalID) else { return false }
+                    // Already on the day — nothing to offer.
+                    return !todayEvents.contains { $0.title == c.title && $0.startMinute == c.startMinute }
                 }
-                modelContext.saveOrLog()
+                if offerable.isEmpty {
+                    ticketError = "Nothing new in your calendar for today."
+                } else {
+                    calendarReview = CalendarReview(date: today, events: offerable)
+                }
             } catch {
                 ticketError = error.localizedDescription
             }
         }
+    }
+
+    /// Adds only what the user ticked in the review sheet.
+    private func addFromCalendar(_ chosen: [CalendarEvent]) {
+        for c in chosen {
+            modelContext.insert(DailyEvent(
+                date: today, title: c.title,
+                startMinute: c.startMinute, endMinute: c.endMinute,
+                destinationAddress: c.location, outboundStart: .home, source: .calendar,
+                isAllDay: c.isAllDay,
+                externalID: c.externalID
+            ))
+        }
+        modelContext.saveOrLog()
     }
 
     private func saveEvent(_ draft: EventDraft) {

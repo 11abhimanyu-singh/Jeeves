@@ -1138,19 +1138,31 @@ struct SegmentEditorView: View {
             Text(title).font(.ui(13.5)).foregroundStyle(Color.textSoft)
             Spacer()
             HStack(spacing: 10) {
+                // The circle stays 28 pt — it is the visual design — but the
+                // tappable area is 44. contentShape on the larger frame is
+                // what separates "looks small" from "is hard to hit".
                 Button { value.wrappedValue = max(0, value.wrappedValue - step) } label: {
                     Image(systemName: "minus").font(.ui(11, weight: .bold))
                         .frame(width: 28, height: 28)
                         .background(Circle().fill(Color.bg))
-                }.buttonStyle(.plain).foregroundStyle(Color.travelInk)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(Color.travelInk)
+                .accessibilityLabel("Decrease \(title)")
                 Text("\(value.wrappedValue) \(unit)")
                     .font(.ui(14, weight: .semibold)).monospacedDigit()
                     .frame(minWidth: 62)
+                    .accessibilityLabel("\(title): \(value.wrappedValue) \(unit)")
                 Button { value.wrappedValue += step } label: {
                     Image(systemName: "plus").font(.ui(11, weight: .bold))
                         .frame(width: 28, height: 28)
                         .background(Circle().fill(Color.bg))
-                }.buttonStyle(.plain).foregroundStyle(Color.travelInk)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(Color.travelInk)
+                .accessibilityLabel("Increase \(title)")
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)

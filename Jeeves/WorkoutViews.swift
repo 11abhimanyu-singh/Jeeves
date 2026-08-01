@@ -424,8 +424,12 @@ struct WorkoutLiftView: View {
                 } label: {
                     Image(systemName: "trash")
                         .font(.ui(13)).foregroundStyle(Color.textMuted)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Remove \(e.name)")
+                .accessibilityHint("Removes this exercise and all its sets")
             }
 
             ForEach(ex.sets) { $set in
@@ -468,8 +472,11 @@ struct WorkoutLiftView: View {
                     Image(systemName: "xmark")
                         .font(.ui(10, weight: .bold))
                         .foregroundStyle(Color.textMuted)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Remove set")
             }
             Picker("", selection: set.inputType) {
                 ForEach(LiftInputType.allCases, id: \.self) { t in Text(t.label).tag(t) }

@@ -293,6 +293,10 @@ struct TodosListView: View {
     private func complete(_ todo: Todo) {
         todo.doneAt = Date()
         modelContext.saveOrLog()
+        // Ticking something off is the moment worth confirming — the row also
+        // vanishes into the Done drawer, so without this the only feedback for
+        // a deliberate action is content disappearing.
+        Haptics.success()
     }
 
     private func uncomplete(_ todo: Todo) {

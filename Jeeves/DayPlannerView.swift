@@ -559,7 +559,16 @@ struct DayPlannerView: View {
             await NotificationService.notifyPlanReady(isOffline: result.isOffline)
             // Arm a background traffic re-check ~90 min before the next commute.
             CommuteBackgroundRefresh.scheduleNext(context: modelContext)
-            if result.isOffline { planError = "Couldn't reach the planning service — showing an offline plan.\(result.error.map { " (\($0))" } ?? "")" }
+            if result.isOffline {
+                planError = "Couldn't reach the planning service — showing an offline plan.\(result.error.map { " (\($0))" } ?? "")"
+                // A fallback plan is a real plan, but not the one that was
+                // asked for — say so with the hand as well as the text.
+                Haptics.warning()
+            } else {
+                // The peak-end moment of the whole app: minutes of waiting,
+                // then a day appears. It ended in silence before this.
+                Haptics.success()
+            }
             isPlanning = false
             planningTask = nil
         }
@@ -890,16 +899,22 @@ struct DayPlannerView: View {
                 Text("Day Planner").font(.heading(20)).foregroundStyle(Color.textPrimary)
             }
             Spacer()
-            // Travel mode: open the trip covering this day, or start one from it.
+            // Travel mode: open the trip covering this day, or start one from
+            // it. Those are very different consequences behind one glyph —
+            // creating a trip stands the planner down for the whole day — so
+            // the label says which one this tap will do.
+            let hasTrip = tripCovering(selectedDate) != nil
             Button { openOrCreateTrip() } label: {
                 Circle()
-                    .fill(tripCovering(selectedDate) != nil ? Color.travelBg : Color.surface)
-                    .frame(width: 38, height: 38)
+                    .fill(hasTrip ? Color.travelBg : Color.surface)
+                    .frame(width: 44, height: 44)
                     .overlay(Image(systemName: "airplane")
-                        .foregroundStyle(tripCovering(selectedDate) != nil ? Color.travelInk : Color.textSoft)
+                        .foregroundStyle(hasTrip ? Color.travelInk : Color.textSoft)
                         .font(.ui(15)))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(hasTrip ? "Open trip" : "Start a trip on this day")
+            .accessibilityHint(hasTrip ? "" : "Creates a trip covering this day and stands the planner down")
             // A calendar glyph means "pick a date" — it used to jump to today,
             // which does nothing visible on the day you are already on (the
             // default), so the button read as broken. The date dial handles
@@ -907,7 +922,7 @@ struct DayPlannerView: View {
             Button { showDateJump = true } label: {
                 Circle()
                     .fill(Color.surface)
-                    .frame(width: 38, height: 38)
+                    .frame(width: 44, height: 44)
                     .overlay(Image(systemName: isToday ? "calendar" : "calendar.badge.clock")
                         .foregroundStyle(Color.textSoft)
                         .font(.ui(15)))
@@ -975,7 +990,11 @@ struct CalendarReview: Identifiable {
 
 /// Lists calendar events for a day and lets the user choose which to add —
 /// the "ask whether to add" step, instead of a silent import.
-private struct CalendarImportSheet: View {
+///
+/// Internal, not private: PlannerSetupView had its own import path that
+/// inserted every event without asking, which contradicted both this screen
+/// and PRD §5.3. One review sheet, one contract.
+struct CalendarImportSheet: View {
     @Environment(\.dismiss) private var dismiss
     let review: CalendarReview
     let onAdd: ([CalendarEvent]) -> Void
