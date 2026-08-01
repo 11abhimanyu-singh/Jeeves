@@ -116,6 +116,30 @@ enum PlanValidation {
             }
         }
 
+        // 2d. A commute must deliver you to something. A plan that reads
+        //     "Commute Home → Gym · 18-min trip to arrive for mobility" and
+        //     then schedules interview prep — with no gym block anywhere —
+        //     satisfied every other rule here and still shipped, because
+        //     nothing checked that a journey's destination matched what came
+        //     next. Gym-bound commutes are the checkable case: the title names
+        //     the destination, so the block after it must be the gym.
+        let gymBound = timed.filter {
+            $0.block.kind.lowercased() == "commute"
+                && $0.block.title.localizedCaseInsensitiveContains("gym")
+                && !$0.block.title.localizedCaseInsensitiveContains("Gym →")
+                && !$0.block.title.localizedCaseInsensitiveContains("Gym—")
+        }
+        for leg in gymBound {
+            // Outbound only: "Gym → Home" legitimately precedes anything.
+            guard leg.block.title.localizedCaseInsensitiveContains("→ Gym")
+                    || leg.block.title.localizedCaseInsensitiveContains("to Gym") else { continue }
+            let next = timed.first { $0.start >= leg.end }
+            if next?.block.kind.lowercased() != "gym" {
+                out.append(Violation(severity: .severe,
+                    message: "\"\(leg.block.title)\" (\(leg.block.startTime)–\(leg.block.endTime)) is a journey to the gym, but the next block is \(next.map { "\"\($0.block.title)\"" } ?? "nothing") — a commute must arrive somewhere the day actually goes"))
+            }
+        }
+
         // 3. A Must-do (lunch) must never be dropped, and lunch must appear.
         //    (Interview-prep reading is now a high-preference Important item —
         //    it MAY be dropped when the day is too full, so it's not checked

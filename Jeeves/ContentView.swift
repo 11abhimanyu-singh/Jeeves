@@ -249,6 +249,10 @@ struct ContentView: View {
             StatsScreenView(screen: screen) { navigator.statsScreen = nil }
                 .environment(navigator)
         }
+        .sheet(isPresented: Binding(get: { navigator.showJourneys },
+                                    set: { navigator.showJourneys = $0 })) {
+            JourneysView().environment(navigator)
+        }
         .sheet(isPresented: Binding(get: { navigator.chatPresented },
                                     set: { navigator.chatPresented = $0 })) {
             JeevesChatView(onMinimise: { navigator.chatPresented = false })

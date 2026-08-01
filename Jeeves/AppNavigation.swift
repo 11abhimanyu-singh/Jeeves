@@ -37,6 +37,9 @@ final class AppNavigator {
     var showSettings = false
     /// The chat modal. Minimising sets this false and leaves the bubble.
     var chatPresented = false
+    /// Every journey in one list — the only place they can be seen together
+    /// and removed in bulk.
+    var showJourneys = false
 }
 
 /// The app-wide hamburger. Every screen's header renders exactly this, so the
@@ -59,6 +62,9 @@ struct AppMenuButton: View {
                 }
             } label: {
                 Label("Stats", systemImage: "chart.bar.fill")
+            }
+            Button { nav?.showJourneys = true } label: {
+                Label("Journeys", systemImage: "airplane.departure")
             }
             Button { nav?.showSettings = true } label: {
                 Label("Settings", systemImage: "gearshape")

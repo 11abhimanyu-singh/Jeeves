@@ -1458,7 +1458,13 @@ final class ChatToolExecutor {
         // (missed_blocks) and they're excluded from the locked set and told
         // to the planner as missed.
         let missed = (input["missed_blocks"] as? [Any])?.compactMap { $0 as? String } ?? []
-        var locked = PlanCoordinator.lockedBlocks(committed, endedBy: nowMinute)
+        // Same rule as the planner button: a commute survives a re-plan only
+        // while the arrival it was for is still on the day.
+        let arrivalAnchors = PlanCoordinator.arrivalAnchors(
+            gymMinute: state.hasGymToday ? state.gymMinute : nil,
+            eventStarts: eventsOn(today).filter { !$0.isAllDay }.map(\.startMinute))
+        var locked = PlanCoordinator.lockedBlocks(committed, endedBy: nowMinute,
+                                                  stillArrivingAt: arrivalAnchors)
         if !missed.isEmpty {
             locked = locked.filter { block in
                 !missed.contains { JeevesChatService.strictMatch(block.title, query: $0) }

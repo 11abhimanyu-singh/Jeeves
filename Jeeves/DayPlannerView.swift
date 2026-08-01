@@ -514,7 +514,14 @@ struct DayPlannerView: View {
         var doneNote: String? = nil
         replanNote = nil
         if date == today, let current = savedPlan {
-            let elapsed = PlanCoordinator.lockedBlocks(current, endedBy: nowMinute)
+            // Anchors from the NEW inputs, not the old plan: if the gym just
+            // moved to the evening, this morning's commute to it is no longer
+            // a journey the day makes, and must not be preserved as done.
+            let anchors = PlanCoordinator.arrivalAnchors(
+                gymMinute: gymMinute,
+                eventStarts: dayEvents.filter { !$0.isAllDay }.map(\.startMinute))
+            let elapsed = PlanCoordinator.lockedBlocks(current, endedBy: nowMinute,
+                                                       stillArrivingAt: anchors)
             if !elapsed.isEmpty {
                 replanFrom = nowMinute
                 lockedNow = elapsed

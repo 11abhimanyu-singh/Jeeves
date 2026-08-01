@@ -34,7 +34,7 @@ final class PlanCoordinatorTests: XCTestCase {
             blk("Sleep", "23:00", "07:00", kind: "sleep"),    // wraps midnight → never locked
         ], dropped: [], shrunk: [], summary: "", boundaryTime: nil)
 
-        let locked = PlanCoordinator.lockedBlocks(plan, endedBy: 14 * 60) // 14:00
+        let locked = PlanCoordinator.lockedBlocks(plan, endedBy: 14 * 60, stillArrivingAt: nil) // 14:00
         XCTAssertEqual(locked.map(\.title), ["Morning shower", "Massage", "Lunch"],
                        "only blocks fully ended by 14:00, excluding the wrap-around Sleep")
     }
@@ -42,7 +42,7 @@ final class PlanCoordinatorTests: XCTestCase {
     func testLockedBlocksEmptyEarlyInDay() {
         let plan = GeneratedPlan(blocks: [blk("Reading", "08:00", "09:30")],
                                  dropped: [], shrunk: [], summary: "", boundaryTime: nil)
-        XCTAssertTrue(PlanCoordinator.lockedBlocks(plan, endedBy: 7 * 60).isEmpty,
+        XCTAssertTrue(PlanCoordinator.lockedBlocks(plan, endedBy: 7 * 60, stillArrivingAt: nil).isEmpty,
                       "nothing has elapsed at 07:00")
     }
 

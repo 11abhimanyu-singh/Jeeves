@@ -179,10 +179,43 @@ enum PlanCoordinator {
     /// part of the day to PRESERVE verbatim across a mid-day re-plan. Excludes
     /// wrap-around blocks (Sleep 23:00→07:00, whose end < start) so they aren't
     /// mistaken for already-done. Pure + unit-tested.
-    static func lockedBlocks(_ plan: GeneratedPlan, endedBy minute: Int) -> [GeneratedBlock] {
-        plan.blocks.filter {
+    /// Minutes at which the day still expects you to ARRIVE somewhere — the
+    /// only thing a preserved commute can legitimately be delivering you to.
+    /// A Home→Gym commute meets MOBILITY, which starts 20 min before the
+    /// weightlifting time the user actually enters, so both count.
+    static func arrivalAnchors(gymMinute: Int?, eventStarts: [Int]) -> [Int] {
+        var out = eventStarts
+        if let g = gymMinute {
+            out.append(g)
+            out.append(g - 20)
+        }
+        return out
+    }
+
+    /// The blocks a mid-day re-plan may preserve verbatim.
+    ///
+    /// Elapsed is not automatically preservable. Moving the gym from morning
+    /// to evening used to leave the morning "Commute Home → Gym" locked in as
+    /// already-done — it had elapsed, so it locked — and the new plan then
+    /// built the evening gym *around* a journey to a gym it no longer visited
+    /// that morning. The day read "18-min trip to arrive for mobility"
+    /// followed by interview prep, with no gym anywhere near it.
+    ///
+    /// So a commute is preserved only while the arrival it was for is still on
+    /// the day. `stillArrivingAt` is that set (see `arrivalAnchors`); passing
+    /// an empty array means nothing is anchored today, which makes every
+    /// elapsed commute orphaned by definition. `nil` disables the check.
+    static func lockedBlocks(_ plan: GeneratedPlan, endedBy minute: Int,
+                             stillArrivingAt anchors: [Int]?,
+                             tolerance: Int = 25) -> [GeneratedBlock] {
+        let elapsed = plan.blocks.filter {
             guard let s = $0.startMinute, let e = $0.endMinute else { return false }
             return s <= e && e <= minute
+        }
+        guard let anchors else { return elapsed }
+        return elapsed.filter { block in
+            guard block.kind.lowercased() == "commute", let end = block.endMinute else { return true }
+            return anchors.contains { abs($0 - end) <= tolerance }
         }
     }
 
