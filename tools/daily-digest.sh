@@ -90,11 +90,22 @@ fi
 # change the exit code, which belongs to the health verdict alone.
 if [ "$(date +%u)" = "7" ]; then
   echo
-  echo "=== WEEKLY CROSS-CHECK (Sunday) ==="
-  if python3 "$TOOLS/diagnose.py" /tmp/jeeves-weekly --pull 2>&1; then
+  echo "=== WEEKLY CROSS-CHECK + SCENARIOS (Sunday) ==="
+  # --tier1 3 plays every permanent scenario against the real model three
+  # times and judges each artifact. It is here, not in the daily run, for one
+  # reason: the scenarios test the CODE, which changes on ship days, not on
+  # days the user simply used the app — so a daily sweep would spend real
+  # money re-answering a question nothing had changed. Sampling three times
+  # matters more than sampling often: single runs of a probabilistic system
+  # are noise (six runs once gave 25/21/14/11/23/11 tool calls).
+  #
+  # It does NOT need the phone: the scenarios build their own store in
+  # memory, so an uncabled Sunday still exercises them.
+  if python3 "$TOOLS/diagnose.py" /tmp/jeeves-weekly --pull --tier1 3 2>&1; then
     echo "cross-check: completed — compare its audit against the iCloud-based one above"
   else
-    echo "cross-check: skipped or failed (exit $?) — usually just means the phone isn't cabled, which is expected"
+    echo "cross-check: findings or partial (exit $?) — read the TIER 1 and SUMMARY sections above;"
+    echo "             a failed PULL alone is expected when the phone isn't cabled"
   fi
 fi
 

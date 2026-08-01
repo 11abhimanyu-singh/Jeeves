@@ -9,13 +9,23 @@ Order matters — deterministic first (free, exhaustive), judgment second:
   4. coherence coherence-eval.py — third party hunts unknown unknowns and
                proposes new invariants for the audit   (needs OPENAI_API_KEY)
   5. plans     plan-eval.py over ALL stored plans        (needs OPENAI_API_KEY)
+  6. tier1     the permanent scenarios in scenarios-chat/dialogues.json, run
+               against the real model and judged      (needs BOTH keys)
 
-Steps 4-5 are skipped with a loud note when no key is in the environment —
-skipped is reported, never silent.
+Steps 4-6 are skipped with a loud note when a key is missing — skipped is
+reported, never silent.
+
+WHY TIER 1 IS HERE: steps 2-5 all read the store the user's own use produced.
+None of them exercises the permanent scenarios, so for weeks the "permanent
+test plan" only ran when somebody remembered to invoke it by hand. A test
+plan nobody runs is a document, not a test.
 
 Usage:
-    python3 tools/diagnose.py <workdir> [--pull] [--device UDID]
-    OPENAI_API_KEY=... python3 tools/diagnose.py <workdir> --pull
+    python3 tools/diagnose.py <workdir> [--pull] [--device UDID] [--tier1 N]
+    OPENAI_API_KEY=... python3 tools/diagnose.py <workdir> --pull --tier1 3
+
+--tier1 N runs the whole scenario sweep N times (0 skips it). Sampling is the
+point: single runs of a probabilistic system are noise.
 """
 import os
 import subprocess
@@ -32,6 +42,52 @@ def run(label, cmd, env=None):
     r = subprocess.run(cmd, env=env)
     print(f"----- {label}: exit {r.returncode}")
     return r.returncode
+
+
+def keychain(service: str) -> str:
+    """The login Keychain, so a scheduled run needs no stash file."""
+    try:
+        return subprocess.run(["security", "find-generic-password", "-s", service, "-w"],
+                              capture_output=True, text=True, timeout=10).stdout.strip()
+    except Exception:
+        return ""
+
+
+def run_tier1(workdir: Path, repeats: int, openai_key: str) -> int:
+    """Play every permanent scenario `repeats` times against the real model,
+    then judge each artifact. Returns non-zero if any run had a deterministic
+    failure or any judge raised a zero-tolerance finding."""
+    anthropic = os.environ.get("ANTHROPIC_API_KEY", "").strip() or keychain("jeeves-anthropic")
+    if not anthropic:
+        print("\n===== TIER 1 SCENARIOS: SKIPPED — no Anthropic key =====")
+        print("      The scenarios drive the REAL chat model; without a key they cannot run.")
+        print("      security add-generic-password -s jeeves-anthropic -a jeeves -w")
+        return 0
+
+    out = workdir / "tier1"
+    env = dict(os.environ, ANTHROPIC_API_KEY=anthropic)
+    rc = run(f"TIER 1 SCENARIOS (x{repeats}, real model)",
+             [str(TOOLS / "run-trajectories.sh"), "-n", str(repeats), "-o", str(out)], env=env)
+
+    artifacts = sorted(p for p in out.glob("tier1-*.json") if ".judged" not in p.name)
+    if not artifacts:
+        print("      No artifact produced — the sweep did not complete.")
+        return rc or 1
+
+    # Judge only what this sweep produced, newest `repeats` artifacts.
+    judge_env = dict(env)
+    if openai_key:
+        judge_env["OPENAI_API_KEY"] = openai_key
+    else:
+        oa = keychain("jeeves-openai")
+        if oa: judge_env["OPENAI_API_KEY"] = oa
+    worst = rc
+    for artifact in artifacts[-repeats:]:
+        code = run(f"JUDGE {artifact.name}",
+                   [sys.executable, str(TOOLS / "trajectory-judge.py"), str(artifact)],
+                   env=judge_env)
+        worst = max(worst, code)
+    return worst
 
 
 def main() -> None:
@@ -54,33 +110,53 @@ def main() -> None:
                 "--destination", str(workdir / f)]).returncode
             if rc != 0 and f == "default.store":
                 sys.exit("Pull failed — is the phone cabled and unlocked?")
-    if not store.exists():
-        sys.exit(f"No store at {store}; run with --pull or copy one in.")
-
-    results = {}
-    results["audit"] = run("AUDIT (deterministic, all history)",
-                           [sys.executable, str(TOOLS / "store-audit.py"), str(store)])
-    dump = workdir / "dump.json"
-    results["dump"] = run("DUMP (whole state)",
-                          [sys.executable, str(TOOLS / "store-dump.py"), str(store), str(dump)])
-    results["trajectory"] = run("TRAJECTORY (story vs state, all sessions)",
-                                [sys.executable, str(TOOLS / "trajectory-audit.py"), str(store)])
+    repeats = 0
+    if "--tier1" in sys.argv:
+        try:
+            repeats = int(sys.argv[sys.argv.index("--tier1") + 1])
+        except (IndexError, ValueError):
+            sys.exit("--tier1 needs a number of repetitions, e.g. --tier1 3")
 
     key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if key:
-        results["coherence"] = run("COHERENCE (third party, whole state)",
-                                   [sys.executable, str(TOOLS / "coherence-eval.py"), str(dump)])
-        # plan-eval expects a data dir with plans.json + state-latest.json; it
-        # judges every plan it is given — the caller prepares those from the
-        # dump when running the full quality pass.
-        if (workdir / "plans.json").exists():
-            results["plans"] = run("PLAN QUALITY (all stored plans)",
-                                   [sys.executable, str(TOOLS / "plan-eval.py"), str(workdir)])
+    results = {}
+
+    # The store-based layers need a store; Tier 1 does NOT — it builds its own
+    # in memory. Gating the scenarios behind a successful pull would mean the
+    # permanent test plan silently stops running on every day the phone isn't
+    # cabled, which is most of them.
+    if store.exists():
+        results["audit"] = run("AUDIT (deterministic, all history)",
+                               [sys.executable, str(TOOLS / "store-audit.py"), str(store)])
+        dump = workdir / "dump.json"
+        results["dump"] = run("DUMP (whole state)",
+                              [sys.executable, str(TOOLS / "store-dump.py"), str(store), str(dump)])
+        results["trajectory"] = run("TRAJECTORY (story vs state, all sessions)",
+                                    [sys.executable, str(TOOLS / "trajectory-audit.py"), str(store)])
+        if key:
+            results["coherence"] = run("COHERENCE (third party, whole state)",
+                                       [sys.executable, str(TOOLS / "coherence-eval.py"), str(dump)])
+            # plan-eval expects a data dir with plans.json + state-latest.json;
+            # it judges every plan it is given — the caller prepares those from
+            # the dump when running the full quality pass.
+            if (workdir / "plans.json").exists():
+                results["plans"] = run("PLAN QUALITY (all stored plans)",
+                                       [sys.executable, str(TOOLS / "plan-eval.py"), str(workdir)])
+            else:
+                print("\n===== PLAN QUALITY: SKIPPED (no plans.json in workdir) =====")
         else:
-            print("\n===== PLAN QUALITY: SKIPPED (no plans.json in workdir) =====")
+            print("\n===== COHERENCE + PLAN QUALITY: SKIPPED — no OPENAI_API_KEY set =====")
+            print("      Deterministic layers ran; judgment layers did NOT. Not a clean bill.")
+    elif repeats > 0:
+        print(f"\n===== STORE LAYERS: SKIPPED — no store at {store} =====")
+        print("      Running the scenarios anyway; they don't need one.")
     else:
-        print("\n===== COHERENCE + PLAN QUALITY: SKIPPED — no OPENAI_API_KEY set =====")
-        print("      Deterministic layers ran; judgment layers did NOT. Not a clean bill.")
+        sys.exit(f"No store at {store}; run with --pull, copy one in, or pass --tier1 N.")
+
+    # ---- 6. The permanent scenarios ----
+    if repeats > 0:
+        results["tier1"] = run_tier1(workdir, repeats, key)
+    else:
+        print("\n===== TIER 1 SCENARIOS: not requested (pass --tier1 N) =====")
 
     print("\n===== SUMMARY =====")
     for k, v in results.items():
