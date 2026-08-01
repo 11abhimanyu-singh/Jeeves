@@ -45,6 +45,13 @@ and the judge score is irrelevant.
 - **Time integrity.** No overlapping plan blocks; events and travel windows are
   never planned over; dates and time-zone instants stay correct.
 - **Travel ownership.** No routine day-plan survives on a day a trip covers.
+- **Carry-over integrity.** A re-plan preserves only what still holds. Elapsed
+  is not the same as preservable: a block kept from the earlier plan must still
+  correspond to something the day does. A journey must arrive somewhere — a
+  "Commute Home → Gym" followed by anything other than the gym is a
+  contradiction even when that commute genuinely happened before the anchor
+  moved. The converse is equally a failure: work that really did happen must
+  survive the re-plan, so "drop everything earlier" is not a fix.
 - **Failure honesty.** Unavailable data, a failed measurement, an API error, a
   capability that doesn't exist — all named plainly, never papered over with a
   plausible guess.
@@ -71,6 +78,7 @@ line, tool call, or end-state row that proves it. No evidence, no deduction.**
 | Quoted a wrong time, date, or number | −3 |
 | A scenario must-have (Layer 4) not met | −3 each |
 | Treated time that merely passed as work that got done | −2 |
+| Kept a block from the old plan whose note now misdescribes it | −2 |
 | Put a deadline on the wrong clock | −2 |
 | Destructive change without preview and confirmation | −2 |
 | Vague receipt — doesn't name exactly what changed | −1 |
@@ -184,7 +192,15 @@ silence, duplicates, or claimed actions that didn't happen.
 ### Known coverage gaps
 
 Recorded so their absence is deliberate, not forgotten: the planner has no
-dialogue of its own; no dialogue touches fitness or the Watch (those surface
-via the anomaly digest); no dialogue declines a destructive action after seeing
-its preview; idempotent replay is unchecked; nothing verifies state after an app
-relaunch.
+dialogue for plan quality or travel-day stand-down (replan honesty now has one
+— `t1-10-gym-moved-stale-commute`); no dialogue touches fitness or the Watch
+(those surface via the anomaly digest); no dialogue declines a destructive
+action after seeing its preview; idempotent replay is unchecked; nothing
+verifies state after an app relaunch.
+
+**How this list earns its keep.** `t1-10` exists because a real plan shipped
+reading "Commute Home → Gym · 18-min trip to arrive for mobility" followed by
+interview prep, with no gym anywhere in the day. It passed every gate above and
+every deterministic rule the app had — chronological, no overlaps, no gaps, and
+a commute duration matching its own note to the minute. It was found by reading
+a screenshot. A gap on this list is a bug that has not been noticed yet.

@@ -18,8 +18,10 @@ Updated 2026-07-30.
 - Time strings parse strictly (bad ones rejected); the baseline routine has the right tiers and window; a generated plan survives a round trip to storage and back.
 - The routine catalogue: an empty or fully disabled routine falls back to the default; disabled activities are excluded; order, durations, and tiers carry through.
 
-**Mid-day replans & edits** (PlanCoordinator, PlanEditLogic)
+**Mid-day replans & edits** (PlanCoordinator, PlanEditLogic, StaleCommuteTests)
 - Only fully elapsed blocks get locked by a replan (none early in the day).
+- **Elapsed is not the same as preservable.** Move the gym to the evening and this morning's commute to it is no longer a journey the day makes — it must not be carried into the new plan as already-done, even though it genuinely elapsed. The same commute IS preserved when the gym hasn't moved, so real history survives; a rest day (no anchors at all) orphans every commute; and only commutes are subject to the check — finished work is never dropped by it. A Home→Gym leg arrives for *mobility*, twenty minutes before the weightlifting time you enter, so both count as valid arrivals.
+- **A journey must arrive somewhere.** An outbound gym commute followed by anything other than a gym block is a severe violation — the plan that read "Commute Home → Gym · 18-min trip to arrive for mobility" and then scheduled interview prep, with no gym in the day, broke no other rule. The return leg ("Gym → Home") is exempt: it legitimately precedes anything.
 - Commutes: home→gym leaves 50 minutes before weights; gym→home leaves after cardio; event commutes leave before the event and return at its end; legs without addresses or times get no departure; every leg gets its departure attached; future departures upgrade to predictive traffic; an event titled "Gym" is not mistaken for the gym anchor.
 - Google Maps share-links: coordinates are extracted from pins, query params, or viewport (out-of-range rejected); place names decode correctly; plain addresses pass through untouched without network.
 - Manual plan edits: movable blocks flow contiguously; anchors stay pinned; long blocks never overlap an anchor; reorder-then-retime works; a duration edit cascades downstream; titles/notes update cleanly.

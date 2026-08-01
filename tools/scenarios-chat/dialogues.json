@@ -103,6 +103,15 @@
         "Yes, delete it"
       ],
       "expect": "Each modification lands via the matching key the user chose — hotel name, date, location — with a preview/confirm on the destructive ones, receipts naming exactly what changed, and zero duplicates created by any of the four turns."
+    },
+    {
+      "id": "t1-10-gym-moved-stale-commute",
+      "turns": [
+        "Move my gym to 5pm today",
+        "Replan the rest of my day around that"
+      ],
+      "answers": [],
+      "expect": "The gym moves to 17:00 and the plan is rebuilt around it. CRITICAL: no morning commute to the gym survives. A commute preserved from the earlier plan is only legitimate while the arrival it was for still stands — a 'Commute Home → Gym' block followed by anything other than the gym is a contradiction, even when that commute genuinely elapsed before the change. Blocks that really did happen (reading, job applications) ARE preserved, so the fix must not be 'drop all history'. The evening plan carries its own Home→Gym leg arriving for mobility 20 min before 17:00, the gym runs 20/70/35 contiguous, and the receipt says what moved."
     }
   ],
   "tier2": {
@@ -124,7 +133,7 @@
   "gaps": {
     "note": "Known coverage gaps in Tier 1 — these do not exist yet and their absence is deliberate, not forgotten.",
     "missing": [
-      "the planner itself: plan quality, replan honesty and travel-day stand-down have no dialogue of their own",
+      "the planner itself: plan quality and travel-day stand-down still have no dialogue of their own (replan honesty is now covered by t1-10)",
       "fitness/Watch: no dialogue touches workouts (those bugs surface via the anomaly digest instead)",
       "refusal path: no dialogue declines a destructive action after seeing its preview",
       "idempotent replay: running a dialogue twice must not double anything",

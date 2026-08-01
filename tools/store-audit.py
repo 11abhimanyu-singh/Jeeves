@@ -373,6 +373,38 @@ def main():
     check("no zero-length blocks in stored plans", bad,
           lambda p: f"{day(p[0])}: {p[1]}")
 
+    # A journey has to arrive somewhere. A stored plan once read
+    #   10:22 Commute Home -> Gym  "18-min trip to arrive for mobility"
+    #   10:40 Interview prep - practice
+    # with no gym block anywhere in the day: the gym had moved to the evening
+    # and the mid-day replan preserved the elapsed commute to it. Every other
+    # invariant passed — ordering, durations, even the commute's own note
+    # matching its length to the minute — because nothing checked that a
+    # commute's destination matched what followed it.
+    bad = []
+    for r in db.execute("SELECT ZDATE, ZGENERATEDPLANJSON FROM ZDAILYPLANSTATE WHERE ZGENERATEDPLANJSON IS NOT NULL"):
+        try:
+            blocks = _json.loads(r["ZGENERATEDPLANJSON"]).get("blocks", [])
+        except Exception:
+            continue
+        ordered = sorted((b for b in blocks if b.get("startTime")),
+                         key=lambda b: b.get("startTime"))
+        for i, b in enumerate(ordered):
+            title = (b.get("title") or "")
+            low = title.lower()
+            if (b.get("kind") or "").lower() != "commute":
+                continue
+            # Outbound legs only — "Gym -> Home" may precede anything.
+            outbound = ("→ gym" in low or "-> gym" in low or "to gym" in low)
+            if not outbound:
+                continue
+            nxt = ordered[i + 1] if i + 1 < len(ordered) else None
+            if (nxt or {}).get("kind", "").lower() != "gym":
+                bad.append((ts(r["ZDATE"]), title, b.get("startTime"),
+                            (nxt or {}).get("title", "nothing")))
+    check("no commute to a gym the day never reaches", bad,
+          lambda p: f"{day(p[0])}: '{p[1]}' at {p[2]} is followed by '{p[3]}', not the gym")
+
     book_rows = [dict(title=r["ZTITLE"] or "", author=r["ZAUTHOR"] or "", isbn=r["ZISBN"],
                       fiction=r["ZISFICTION"])
                  for r in db.execute("SELECT * FROM ZBOOK")]
