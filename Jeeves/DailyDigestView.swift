@@ -23,6 +23,7 @@ struct DailyDigestView: View {
     @State private var anomalies: [Anomaly] = []
     @State private var metrics: ProductMetricsSnapshot?
     @State private var loaded = false
+    @State private var showRepair = false
 
     private var high: [Anomaly] { anomalies.filter { $0.severity == "high" } }
     private var medium: [Anomaly] { anomalies.filter { $0.severity == "medium" } }
@@ -32,6 +33,7 @@ struct DailyDigestView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 verdictCard
+                repairEntry
                 if let metrics { metricsSection(metrics) }
                 planHealthCard
                 if anomalies.isEmpty {
@@ -218,6 +220,31 @@ struct DailyDigestView: View {
                     .foregroundStyle(Color.textMuted)
             }
         }
+    }
+
+    /// Fixing the code that wrote a bad row doesn't clean the row — without
+    /// this the digest re-reports the same fossils every morning and real new
+    /// findings drown in them.
+    private var repairEntry: some View {
+        Button { showRepair = true } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "wrench.and.screwdriver.fill")
+                    .font(.ui(15)).foregroundStyle(Color.accentDeep).frame(width: 26)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Clean up old data").font(Font.serif(15, weight: .semibold))
+                        .foregroundStyle(Color.textPrimary)
+                    Text("Duplicates and broken rows this report keeps repeating")
+                        .font(.ui(11.5)).foregroundStyle(Color.textMuted)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.ui(13, weight: .semibold))
+                    .foregroundStyle(Color.textMuted)
+            }
+            .padding(13)
+            .background(RoundedRectangle(cornerRadius: 15).fill(Color.surface))
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showRepair) { DataRepairSheet() }
     }
 
     private var footnote: some View {
