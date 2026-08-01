@@ -93,11 +93,24 @@ line, tool call, or end-state row that proves it. No evidence, no deduction.**
 | 6–7 | Partial — works, something needs fixing |
 | 0–5 | Fail — a user would feel this |
 
-### Dimensions to walk before scoring
+### Scored criteria (0–2 each) — required, not optional
 
-Deductions are the output; these are the lenses that find them. Walk each one —
-a scenario that never scored below 8 on the table above but reads badly on one
-of these is telling you the table is missing a row.
+Score every criterion below and report the totals. The deduction table says how
+badly one thing went; these say whether the whole outcome was any good, and they
+catch the case a deduction list misses — a scenario with no single big failure
+that is nonetheless a poor answer.
+
+**0 = poor · 1 = adequate · 2 = excellent.**
+
+**Chat threshold: 15/18 or higher, AND 2/2 on each of Tool selection, State
+change, Receipt, and Safety & limits.** Anything less is a fail even when the
+deduction score is 8+.
+
+**Planner threshold: 15/18 or higher, AND 2/2 on each of Commitment fidelity,
+Chronology & feasibility, Priority handling, and Replan integrity.**
+
+Score the planner block only when the scenario produced or changed a plan; say
+"n/a" otherwise rather than inventing a number.
 
 **Chat.** Intent and entity resolution · tool selection (smallest correct
 sequence, valid arguments) · clarification (one focused question, only for
@@ -125,6 +138,18 @@ refuses).
   reply. Check the end state before scoring the prose.
 - **Bias to action is the product's rule too**: asking three questions and
   building nothing is worse than acting and being corrected.
+
+### The record each run leaves
+
+A verdict nobody can re-check is an opinion. Every judged scenario records:
+the scenario name; the device clock the run used; the starting store; the
+literal user messages; the tool sequence that was EXPECTED and the one that
+actually ran; the resulting state diff; any notifications scheduled or
+cancelled; the hard-gate outcome; the chat and planner scores; and a link to
+the artifact holding all of it. The artifact exported by `TrajectoryTests`
+carries the transcript, every tool call with its result, the end state and the
+expectations — the judge's report is written beside it as
+`<artifact>.judged.json`.
 
 ---
 

@@ -1,8 +1,8 @@
 {
-  "about": "Permanent chat trajectory test plan, written by the user. Tier 1 dialogues run VERBATIM — on the device (type each user turn into Jeeves chat) or headlessly via JeevesTests/TrajectoryTests. Tier 2 escalations are generated per run by scenario-eval.py against briefs/chat-trajectories.md; Tier 3 injects failures. After any run: pull the store, run trajectory-audit.py (deterministic) and the story-vs-state judges. A scenario passes only when BOTH agree.",
+  "about": "Permanent chat trajectory test plan, written by the user. Tier 1 dialogues run VERBATIM \u2014 on the device (type each user turn into Jeeves chat) or headlessly via JeevesTests/TrajectoryTests. Tier 2 escalations are generated per run by scenario-eval.py against briefs/chat-trajectories.md; Tier 3 injects failures. After any run: pull the store, run trajectory-audit.py (deterministic) and the story-vs-state judges. A scenario passes only when BOTH agree.",
   "fields": {
-    "turns": "The scenario in the user's own words. Never paraphrase these — they are the specification.",
-    "answers": "Replies fed ONLY after every scripted turn is done and the assistant is still asking something, in order. Real users answer; a one-way script made the app's (correct) request for a missing checkout date look like a failure to act. Answers never interleave with the script — injecting them mid-scenario once answered 'a hotel for the Singapore stay?' with 'two nights at Wayanad' and derailed the run.",
+    "turns": "The scenario in the user's own words. Never paraphrase these \u2014 they are the specification.",
+    "answers": "Replies fed ONLY after every scripted turn is done and the assistant is still asking something, in order. Real users answer; a one-way script made the app's (correct) request for a missing checkout date look like a failure to act. Answers never interleave with the script \u2014 injecting them mid-scenario once answered 'a hotel for the Singapore stay?' with 'two nights at Wayanad' and derailed the run.",
     "expect": "What a correct build must leave behind."
   },
   "sequencing": "Scenarios share one store and run in order: 2 and 3 modify the event 1 created, 7 modifies the trip 5 built, 8 continues that itinerary, and 10 modifies whatever 8 and 9 left. Running one alone tests less than running the sequence.",
@@ -21,16 +21,16 @@
     {
       "id": "t1-2-extend-while-at-event",
       "turns": [
-        "I'm at the dinner, it's running long — extend it by an hour"
+        "I'm at the dinner, it's running long \u2014 extend it by an hour"
       ],
-      "expect": "The SAME event's end moves +60 minutes — via extend_by_minutes, never a computed clock time, and never a shrink. No duplicate. The receipt quotes the old and the new range. If the event is today, a replan of the remainder is OFFERED, not silently skipped, and elapsed blocks before it are not marked missed."
+      "expect": "The SAME event's end moves +60 minutes \u2014 via extend_by_minutes, never a computed clock time, and never a shrink. No duplicate. The receipt quotes the old and the new range. If the event is today, a replan of the remainder is OFFERED, not silently skipped, and elapsed blocks before it are not marked missed."
     },
     {
       "id": "t1-3-extend-while-commuting",
       "turns": [
         "Stuck in traffic on the way to the dinner, push it 30 minutes"
       ],
-      "expect": "Start AND end move +30 together (shift_by_minutes — the duration is preserved, not stretched). Any replan uses resume_at = new start and marks blocks the delay swallowed via missed_blocks — ELAPSED IS NOT DONE."
+      "expect": "Start AND end move +30 together (shift_by_minutes \u2014 the duration is preserved, not stretched). Any replan uses resume_at = new start and marks blocks the delay swallowed via missed_blocks \u2014 ELAPSED IS NOT DONE."
     },
     {
       "id": "t1-4-timezone-trip-both-legs",
@@ -41,7 +41,7 @@
       "answers": [
         "Leaving from home in Indiranagar, Bengaluru airport both ways"
       ],
-      "expect": "One trip, 4 days. Exactly TWO flight journeys — no duplicates from restating a leg: outbound origin-clock IST, return origin-clock Asia/Colombo (+5:30 — same offset, zones still stamped on BOTH legs). Leave-by chains on the right days; two nudges; no second trip from the second turn."
+      "expect": "One trip, 4 days. Exactly TWO flight journeys \u2014 no duplicates from restating a leg: outbound origin-clock IST, return origin-clock Asia/Colombo (+5:30 \u2014 same offset, zones still stamped on BOTH legs). Leave-by chains on the right days; two nudges; no second trip from the second turn."
     },
     {
       "id": "t1-5-back-to-back-international-then-mysore",
@@ -53,7 +53,7 @@
         "Driving from home in Indiranagar",
         "Yes, that's right"
       ],
-      "expect": "TWO trips sharing the handover day, never merged — the Mysore itinerary must NOT be absorbed into the Singapore trip. Radisson Blu Mysore stay of 2 nights, one measured drive from home to Mysore, and the return flight stamped with Asia/Singapore. One journey per leg. The handover day shows both trips' cards."
+      "expect": "TWO trips sharing the handover day, never merged \u2014 the Mysore itinerary must NOT be absorbed into the Singapore trip. Radisson Blu Mysore stay of 2 nights, one measured drive from home to Mysore, and the return flight stamped with Asia/Singapore. One journey per leg. The handover day shows both trips' cards."
     },
     {
       "id": "t1-7-modify-trip-add-and-remove-day",
@@ -64,7 +64,7 @@
       "answers": [
         "Yes, go ahead"
       ],
-      "expect": "update_trip/update_stay both times — no new trip, no duplicate, and the SHRINK must actually happen (a reply saying it went back with no tool call behind it is a fabrication). Growth sweeps plans on the new day; shrink says days go back to the planner. Receipts quote the old AND the new ranges. Any knock-on effect the reply mentions (a moved check-in) must itself be a real tool call."
+      "expect": "update_trip/update_stay both times \u2014 no new trip, no duplicate, and the SHRINK must actually happen (a reply saying it went back with no tool call behind it is a fabrication). Growth sweeps plans on the new day; shrink says days go back to the planner. Receipts quote the old AND the new ranges. Any knock-on effect the reply mentions (a moved check-in) must itself be a real tool call."
     },
     {
       "id": "t1-8-wayanad-then-home-by-six",
@@ -75,20 +75,20 @@
       "answers": [
         "Checkout the morning of the third day, driving home to Indiranagar"
       ],
-      "expect": "CGH Earth Wayanad stay of three nights on the SAME trip as Mysore, a measured Radisson → CGH Earth drive transition, and a return drive whose leave-by works BACKWARDS from arriving home at 18:00 on the DESTINATION clock. Exactly one journey per leg; the trip window grows to cover the Wayanad days."
+      "expect": "CGH Earth Wayanad stay of three nights on the SAME trip as Mysore, a measured Radisson \u2192 CGH Earth drive transition, and a return drive whose leave-by works BACKWARDS from arriving home at 18:00 on the DESTINATION clock. Exactly one journey per leg; the trip window grows to cover the Wayanad days."
     },
     {
       "id": "t1-9-weekend-chain-with-hotel-policies",
       "turns": [
         "Plan this: I drive to Wayanad on Friday and stay at CGH Earth Wayanad",
         "I check out from CGH Earth on Monday morning and drive to Western Valley Resort near Ooty, staying there the next two days, then home before 6 pm",
-        "Checkout at all the hotels is before 11:30 am, check-in starts after 2 pm, and breakfast is served 7:30 to 10:30 am — work the drives around that"
+        "Checkout at all the hotels is before 11:30 am, check-in starts after 2 pm, and breakfast is served 7:30 to 10:30 am \u2014 work the drives around that"
       ],
       "answers": [
         "This coming Friday, driving from home in Indiranagar",
         "Yes, two nights at Western Valley, home on the third day"
       ],
-      "expect": "Day-of-week arithmetic is right: Friday check-in, Monday checkout = THREE nights at CGH Earth. Then a measured Wayanad → Western Valley drive that LEAVES after breakfast and before the 11:30 checkout, and ARRIVES after the 14:00 check-in — if the drive can't satisfy both, say so rather than silently picking one. Two nights at Western Valley, then a return drive working backwards from 18:00 at home. Exactly one stay per hotel and one journey per leg despite three turns of constraints."
+      "expect": "Day-of-week arithmetic is right: Friday check-in, Monday checkout = THREE nights at CGH Earth. Then a measured Wayanad \u2192 Western Valley drive that LEAVES after breakfast and before the 11:30 checkout, and ARRIVES after the 14:00 check-in \u2014 if the drive can't satisfy both, say so rather than silently picking one. Two nights at Western Valley, then a return drive working backwards from 18:00 at home. Exactly one stay per hotel and one journey per leg despite three turns of constraints."
     },
     {
       "id": "t1-10-modify-by-date-location-hotel",
@@ -102,7 +102,7 @@
         "Yes, confirm it",
         "Yes, delete it"
       ],
-      "expect": "Each modification lands via the matching key the user chose — hotel name, date, location — with a preview/confirm on the destructive ones, receipts naming exactly what changed, and zero duplicates created by any of the four turns."
+      "expect": "Each modification lands via the matching key the user chose \u2014 hotel name, date, location \u2014 with a preview/confirm on the destructive ones, receipts naming exactly what changed, and zero duplicates created by any of the four turns."
     },
     {
       "id": "t1-10-gym-moved-stale-commute",
@@ -111,11 +111,41 @@
         "Replan the rest of my day around that"
       ],
       "answers": [],
-      "expect": "The gym moves to 17:00 and the plan is rebuilt around it. CRITICAL: no morning commute to the gym survives. A commute preserved from the earlier plan is only legitimate while the arrival it was for still stands — a 'Commute Home → Gym' block followed by anything other than the gym is a contradiction, even when that commute genuinely elapsed before the change. Blocks that really did happen (reading, job applications) ARE preserved, so the fix must not be 'drop all history'. The evening plan carries its own Home→Gym leg arriving for mobility 20 min before 17:00, the gym runs 20/70/35 contiguous, and the receipt says what moved."
+      "expect": "The gym moves to 17:00 and the plan is rebuilt around it. CRITICAL: no morning commute to the gym survives. A commute preserved from the earlier plan is only legitimate while the arrival it was for still stands \u2014 a 'Commute Home \u2192 Gym' block followed by anything other than the gym is a contradiction, even when that commute genuinely elapsed before the change. Blocks that really did happen (reading, job applications) ARE preserved, so the fix must not be 'drop all history'. The evening plan carries its own Home\u2192Gym leg arriving for mobility 20 min before 17:00, the gym runs 20/70/35 contiguous, and the receipt says what moved."
+    },
+    {
+      "id": "t1-11-everyday-data-and-voice-typo",
+      "turns": [
+        "What was my longest walk this month?",
+        "What page am I on in Atomic Habits?",
+        "What is my best squat?",
+        "Remind me when I get hime"
+      ],
+      "expect": "Each answer comes from the RIGHT collection: walks live in workouts (answering from runs is the exact bug this catches), the page from the library, the squat from lift sets. Every number is quoted from a tool result \u2014 a collection with nothing in it gets a plain 'nothing logged', never an invented figure and never 'I can't see that'. 'hime' is read as home without a needless question."
+    },
+    {
+      "id": "t1-12-ambiguous-delete-declined-then-corrected",
+      "turns": [
+        "Move my Wayanad hotel booking by one day",
+        "Delete the Mysore trip",
+        "No, I meant the older Mysore one, not the one after Singapore",
+        "Yes, delete that older one"
+      ],
+      "expect": "The stay move lands on the Wayanad booking, not a neighbouring one. 'Delete the Mysore trip' is AMBIGUOUS when more than one matches: it previews the candidates and deletes NOTHING. The correcting turn still deletes nothing \u2014 it only re-aims. Only the final yes removes exactly one trip, and its receipt names which trip went, its dates, and what happened to its journeys and nudges. Zero rows change before that confirmation."
+    },
+    {
+      "id": "t1-13-ooty-replaces-the-drive-home",
+      "turns": [
+        "Instead of driving home from Wayanad, take me to Western Valley Resort near Ooty for two nights, then get me home before 6 pm"
+      ],
+      "answers": [
+        "Driving straight from CGH Earth Wayanad"
+      ],
+      "expect": "Exactly ONE new Western Valley stay of two nights, a measured Wayanad \u2192 Ooty drive, and the EXISTING Wayanad \u2192 home drive updated or removed \u2014 never left alongside a second one. The trip window extends over the Ooty nights, and the new drive home still works backwards from 18:00 on the destination clock."
     }
   ],
   "tier2": {
-    "generate": "OPENAI_API_KEY=... python3 tools/scenario-eval.py generate tools/briefs/chat-trajectories.md <outdir> — regenerates escalations each run; never hand-pick them.",
+    "generate": "OPENAI_API_KEY=... python3 tools/scenario-eval.py generate tools/briefs/chat-trajectories.md <outdir> \u2014 regenerates escalations each run; never hand-pick them.",
     "axes": [
       "clock seams: +5:45/+6:00 offsets, red-eyes crossing midnight, deadline in destination clock",
       "order of operations: stay before trip, calendar sync after chat built the same trip, flight before its trip",
@@ -124,22 +154,23 @@
       "failure injection: measure timeout then manual estimate then re-measure; planner API down (fallback must respect the trip); a dropped turn (apology must surface)",
       "interleaving: a gym replan interrupts trip planning, then 'anyway, back to the trip'",
       "long horizon: build 3 weeks out, resync calendar twice, modify once, audit must stay clean",
-      "policy constraints: checkout/check-in windows and meal times that make a leg infeasible — the refusal must be explicit"
+      "policy constraints: checkout/check-in windows and meal times that make a leg infeasible \u2014 the refusal must be explicit"
     ]
   },
   "tier3": {
-    "note": "Chaos runs — execute a Tier 1 dialogue while: airplane mode toggled mid-conversation, app backgrounded mid-tool-call, watch delivering a workout summary simultaneously. Pass = graceful receipts or honest apologies; FAIL = silence, duplicates, or claimed actions that didn't happen."
+    "note": "Chaos runs \u2014 execute a Tier 1 dialogue while: airplane mode toggled mid-conversation, app backgrounded mid-tool-call, watch delivering a workout summary simultaneously. Pass = graceful receipts or honest apologies; FAIL = silence, duplicates, or claimed actions that didn't happen."
   },
   "gaps": {
-    "note": "Known coverage gaps in Tier 1 — these do not exist yet and their absence is deliberate, not forgotten.",
+    "note": "Known coverage gaps in Tier 1 \u2014 these do not exist yet and their absence is deliberate, not forgotten.",
     "missing": [
       "the planner itself: plan quality and travel-day stand-down still have no dialogue of their own (replan honesty is now covered by t1-10)",
       "fitness/Watch: no dialogue touches workouts (those bugs surface via the anomaly digest instead)",
       "refusal path: no dialogue declines a destructive action after seeing its preview",
       "idempotent replay: running a dialogue twice must not double anything",
       "relaunch survival: nothing checks state after the app restarts",
-      "there is no scenario 6 — the numbering has always run 1,2,3,4,5,7,8,9,10"
+      "there is no scenario 6 \u2014 the numbering has always run 1,2,3,4,5,7,8,9,10"
     ]
   },
-  "verification": "Every run: python3 tools/diagnose.py <workdir> --pull  (store-audit + trajectory-audit deterministic layer), then tools/trajectory-judge.py on the artifact (Claude + GPT, strictest verdict wins, Fable 5 breaks ties). Pass requires: zero duplicate trips/stays/journeys, every assistant number traceable to a tool result, every claimed action present in the store, no unanswered turns. Run-to-run variance is large — six runs on near-identical code produced 25/21/14/11/23/11 tool calls — so a single run is a smoke test, not a verdict: repeat each dialogue 3-5 times, require the deterministic invariants at 100%, and report judged scores as a mean with its spread."
+  "verification": "Every run: python3 tools/diagnose.py <workdir> --pull  (store-audit + trajectory-audit deterministic layer), then tools/trajectory-judge.py on the artifact (Claude + GPT, strictest verdict wins, Fable 5 breaks ties). Pass requires: zero duplicate trips/stays/journeys, every assistant number traceable to a tool result, every claimed action present in the store, no unanswered turns. Run-to-run variance is large \u2014 six runs on near-identical code produced 25/21/14/11/23/11 tool calls \u2014 so a single run is a smoke test, not a verdict: repeat each dialogue 3-5 times, require the deterministic invariants at 100%, and report judged scores as a mean with its spread.",
+  "fixture": "The headless runner seeds a small starting store so the data questions have right answers to be wrong about: one walk, one book with a current page, and one squat set. Without it 'what was my longest walk' cannot distinguish a correct answer from a lucky empty one."
 }

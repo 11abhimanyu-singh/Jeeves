@@ -53,10 +53,22 @@ Score EVERY scenario in the artifact separately, exactly as the rubric
 specifies. Set zeroTolerance true when a hard gate was breached (a fabrication,
 a silent failure) — those are score 0 regardless of everything else.
 
+Report BOTH scores the rubric asks for: the 0-10 deduction score, and the
+0-2-per-criterion chat score out of 18 (plus the planner score out of 18 when
+the scenario produced or changed a plan — omit `planner` entirely when it did
+not, rather than inventing a number).
+
 JSON ONLY:
 {"scenarios": [{"id": "...", "score": 0-10, "verdict": "pass|fail",
   "zeroTolerance": true|false,
-  "deductions": [{"rule": "...", "points": -1, "evidence": "exact quote"}]}],
+  "deductions": [{"rule": "...", "points": -1, "evidence": "exact quote"}],
+  "chat": {"intent": 0-2, "toolSelection": 0-2, "clarification": 0-2,
+           "stateChange": 0-2, "receipt": 0-2, "context": 0-2,
+           "dataGrounding": 0-2, "safetyLimits": 0-2, "efficiency": 0-2},
+  "planner": {"commitmentFidelity": 0-2, "chronology": 0-2, "priority": 0-2,
+              "routineContract": 0-2, "contextAdaptation": 0-2,
+              "commuteIntegrity": 0-2, "replanIntegrity": 0-2,
+              "explanation": 0-2, "resilience": 0-2}}],
  "suiteNotes": "1-3 sentences on patterns across scenarios"}"""
 
 
@@ -74,6 +86,45 @@ def load_rubric() -> str:
 
 
 RUBRIC = load_rubric() + OUTPUT_CONTRACT
+
+
+CHAT_CRITICAL = ["toolSelection", "stateChange", "receipt", "safetyLimits"]
+PLANNER_CRITICAL = ["commitmentFidelity", "chronology", "priority", "replanIntegrity"]
+
+
+def block_verdict(block, critical, label):
+    """A 0-2 criterion block against the rubric's thresholds: 15/18 overall and
+    2/2 on the ones that carry safety. A block the judge OMITTED is not a
+    failure — a scenario that produced no plan has no planner score — but a
+    block it filled in badly is."""
+    if not isinstance(block, dict) or not block:
+        return True, None
+    values = [v for v in block.values() if isinstance(v, (int, float))]
+    if not values:
+        return True, None
+    total = sum(values)
+    weak = [k for k in critical
+            if isinstance(block.get(k), (int, float)) and block[k] < 2]
+    if total < 15:
+        return False, f"{label} {total}/18 (needs 15)"
+    if weak:
+        return False, f"{label} {total}/18 but {', '.join(weak)} below 2/2"
+    return True, f"{label} {total}/18"
+
+
+def criteria_verdict(per):
+    """Strictest across judges: if either says the criteria failed, they failed."""
+    ok, notes = True, {}
+    for name, scenario in per.items():
+        if not scenario:
+            continue
+        chat_ok, chat_note = block_verdict(scenario.get("chat"), CHAT_CRITICAL, "chat")
+        plan_ok, plan_note = block_verdict(scenario.get("planner"), PLANNER_CRITICAL, "planner")
+        ok = ok and chat_ok and plan_ok
+        parts = [n for n in (chat_note, plan_note) if n]
+        if parts:
+            notes[name] = " · ".join(parts)
+    return ok, notes
 
 
 def parse_json(text: str) -> dict:
@@ -215,8 +266,12 @@ def main() -> None:
                 sc = s.get("score")
                 scores[n] = sc if isinstance(sc, (int, float)) else None
         zero = any(s.get("zeroTolerance") for s in per.values() if s)
+        # The rubric's criterion thresholds are part of the verdict, not
+        # decoration: 15/18 overall AND 2/2 on the four that carry safety.
+        # A scenario can clear the deduction bar and still fail these.
+        criteria_ok, criteria_notes = criteria_verdict(per)
         passed = all(isinstance(sc, (int, float)) and sc >= 8 for sc in scores.values()) \
-            and len(scores) == len(verdicts) and not zero
+            and len(scores) == len(verdicts) and not zero and criteria_ok
         if zero:
             suite_fail = True
         vals = [sc for sc in scores.values() if isinstance(sc, (int, float))]
@@ -224,6 +279,7 @@ def main() -> None:
         if len(vals) == 2 and (abs(vals[0] - vals[1]) > 2 or split):
             disagreements.append(sid)
         rows.append({"id": sid, "scores": scores, "pass": passed, "zeroTolerance": zero,
+                     "criteria": criteria_notes,
                      "deductions": {n: (s or {}).get("deductions", []) for n, s in per.items()}})
 
     # ---- Tiebreaker: the most capable model, only where the two split ----
@@ -259,6 +315,8 @@ def main() -> None:
         flag = "ZERO-TOLERANCE" if r["zeroTolerance"] else ("PASS" if r["pass"] else "fail")
         mark = "  << DISAGREE" if r["id"] in disagreements else ""
         print(f"{r['id'][:44]:44} {cells}  {flag}{mark}")
+        for judge, note in (r.get("criteria") or {}).items():
+            print(f"{'':44} {judge}: {note}")
     if suite_fail:
         print("\nSUITE FAILED: a zero-tolerance finding (fabrication or silent "
               "failure) was raised — one occurrence fails the whole run.")
