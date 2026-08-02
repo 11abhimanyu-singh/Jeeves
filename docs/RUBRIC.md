@@ -187,7 +187,7 @@ A scripted test cannot fake these; they need actual behaviour.
 
 ## Layer 4 — Per-scenario must-haves
 
-The eight permanent Tier 1 scenarios live in
+The permanent Tier 1 scenarios live in
 `tools/scenarios-chat/dialogues.json`, each with its verbatim turns and its
 `expect`. **That file is authoritative for what each scenario must leave
 behind** — this section only states the shape they share:

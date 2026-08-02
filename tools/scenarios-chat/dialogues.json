@@ -5,7 +5,7 @@
     "answers": "Replies fed ONLY after every scripted turn is done and the assistant is still asking something, in order. Real users answer; a one-way script made the app's (correct) request for a missing checkout date look like a failure to act. Answers never interleave with the script \u2014 injecting them mid-scenario once answered 'a hotel for the Singapore stay?' with 'two nights at Wayanad' and derailed the run.",
     "expect": "What a correct build must leave behind."
   },
-  "sequencing": "Scenarios share one store and run in order: 2 and 3 modify the event 1 created, 7 modifies the trip 5 built, 8 reroutes the end of that same itinerary, and 9 modifies whatever 5, 7 and 8 left. Running one alone tests less than running the sequence. The numbering is the user's and skips 6.",
+  "sequencing": "Scenarios share one store and run in order: 2 and 3 modify the event 1 created. 7, 8 and 9 were written against the itinerary scenario 5 built (Mysore/Radisson, CGH Earth Wayanad, the drive home); with 5 removed they have nothing to act on until they are given their own setup or rewritten. The numbering is the user's and skips 6.",
   "tier1": [
     {
       "id": "t1-1-event-with-destination",
@@ -42,21 +42,6 @@
         "Leaving from home in Indiranagar, Bengaluru airport both ways"
       ],
       "expect": "One trip, 4 days, its end date AFTER its start. Exactly TWO flight journeys \u2014 no duplicates from restating a leg: outbound origin-clock IST, return origin-clock Asia/Colombo (+5:30 \u2014 same offset, zones still stamped on BOTH legs). Leave-by chains on the right days; two nudges; no second trip from the second turn."
-    },
-    {
-      "id": "t1-5-back-to-back-mysore-wayanad-home-by-six",
-      "turns": [
-        "I'm in Singapore till the 10th of next month, flying back SQ 510 departing 19:40 SGT, landing BLR 21:10",
-        "Next morning I drive to Mysore, staying at Radisson hotel Mysore for 2 days",
-        "Then checkout and drive to Wayanad, staying at CGH Earth Wayanad",
-        "Then checkout from Wayanad and drive back home, I want to reach home by 6 pm"
-      ],
-      "answers": [
-        "Driving from home in Indiranagar",
-        "Two nights at Wayanad, then home",
-        "Yes, that's right"
-      ],
-      "expect": "TWO trips sharing the handover day, never merged \u2014 the Mysore/Wayanad itinerary must NOT be absorbed into the Singapore trip. Radisson Blu Mysore stay (2 nights) AND a CGH Earth Wayanad stay, a measured Radisson \u2192 CGH Earth drive transition, and a return drive whose leave-by works BACKWARDS from arriving home at 18:00 on the DESTINATION clock. One journey per leg despite four turns; the handover day shows both trips' cards."
     },
     {
       "id": "t1-7-modify-trip-add-and-remove-day",
