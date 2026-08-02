@@ -20,10 +20,44 @@ final class AdherenceEngineTests: XCTestCase {
         GeneratedPlan(blocks: blocks, dropped: [], shrunk: [], summary: "", boundaryTime: nil)
     }
 
-    func testReadingDoneWhenReadToday() {
+    // MARK: prep reading vs the reading habit — two activities, two logs
+    //
+    // These used to share one branch: anything containing "reading" was judged
+    // by the ReadingLog. So the 90-minute must-do "Interview prep — Reading"
+    // block was marked skipped unless a library book had been opened — 19
+    // times out of 19 in the real store.
+
+    func testReadingHabitTracksTheReadingLogAndPrepReadingDoesNot() {
         let p = plan([b("Interview prep — Reading"), b("Reading habit")])
         var e = DayEvidence(); e.readToday = true
-        XCTAssertEqual(AdherenceEngine.infer(plan: p, evidence: e), [.done, .done])
+        XCTAssertEqual(AdherenceEngine.infer(plan: p, evidence: e), [.skipped, .done],
+                       "a library book says nothing about product reading for the interview")
+    }
+
+    func testPrepReadingTracksItsOwnPrepCategory() {
+        let p = plan([b("Interview prep — Reading"), b("Reading habit")])
+        var e = DayEvidence(); e.prepCategoriesLogged = [.reading]
+        XCTAssertEqual(AdherenceEngine.infer(plan: p, evidence: e), [.done, .skipped])
+    }
+
+    /// The same conflation pointing the other way: reading about product must
+    /// not tick off the block where questions were meant to be answered.
+    func testPrepReadingDoesNotSatisfyThePracticeBlock() {
+        let p = plan([b("Interview prep — practice")])
+        var e = DayEvidence(); e.prepCategoriesLogged = [.reading]
+        XCTAssertEqual(AdherenceEngine.infer(plan: p, evidence: e), [.skipped])
+
+        e.prepCategoriesLogged = [.reading, .productSense]
+        XCTAssertEqual(AdherenceEngine.infer(plan: p, evidence: e), [.done])
+    }
+
+    func testEachPracticeCategoryCountsAsPractice() {
+        let p = plan([b("Interview prep — practice")])
+        for category in [PrepCategory.productSense, .execution, .strategy, .behavioral] {
+            var e = DayEvidence(); e.prepCategoriesLogged = [category]
+            XCTAssertEqual(AdherenceEngine.infer(plan: p, evidence: e), [.done],
+                           "\(category.rawValue) is practice")
+        }
     }
 
     func testReadingSkippedWhenNoReadingLog() {

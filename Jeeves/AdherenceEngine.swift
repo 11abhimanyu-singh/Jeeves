@@ -23,6 +23,13 @@ struct DayEvidence {
     var workedOut: Bool = false
     var prepCategoriesLogged: Set<PrepCategory> = []
     var anyPrepLogged: Bool { !prepCategoriesLogged.isEmpty }
+    /// Interview prep — Reading: product reading FOR the interview. A distinct
+    /// activity from the reading habit, with its own log and its own block.
+    var prepReadingLogged: Bool { prepCategoriesLogged.contains(.reading) }
+    /// The four question categories. Reading is NOT practice — an hour of
+    /// reading about product should never tick off the block where you were
+    /// meant to answer questions.
+    var practiceLogged: Bool { prepCategoriesLogged.contains { $0 != .reading } }
     var appliedToJobs: Bool = false
     var readToday: Bool = false
     var leisureLogged: Set<DiscretionaryActivity> = []
@@ -49,7 +56,17 @@ enum AdherenceEngine {
         let t = block.title.lowercased()
         let kind = block.kind.lowercased()
 
-        // Reading (peak-focus interview reading OR the reading habit).
+        // Interview prep — Reading FIRST, because it also contains "reading"
+        // and used to fall into the habit branch below. These are two
+        // different activities: one is product reading for the interview,
+        // logged as a PrepSession in the .reading category; the other is the
+        // reading habit against the library. Judging the 90-minute must-do
+        // morning block by whether a library book was opened marked it skipped
+        // 19 times out of 19.
+        if t.contains("interview prep"), t.contains("reading") {
+            return evidence.prepReadingLogged ? .done : .skipped
+        }
+        // The reading habit.
         if t.contains("reading") {
             return evidence.readToday ? .done : .skipped
         }
@@ -57,9 +74,12 @@ enum AdherenceEngine {
         if kind == "gym" {
             return evidence.workedOut ? .done : .skipped
         }
-        // Interview practice.
+        // Interview practice — the four question categories only. This used to
+        // read `anyPrepLogged`, so an hour of prep READING ticked off the block
+        // where questions were meant to be answered. The same conflation,
+        // pointing the other way.
         if t.contains("interview prep") || t.contains("practice") {
-            return evidence.anyPrepLogged ? .done : .skipped
+            return evidence.practiceLogged ? .done : .skipped
         }
         // Job applications.
         if t.contains("job application") {
