@@ -93,7 +93,19 @@ final class TrajectoryTests: XCTestCase {
         var history: [ChatMessage] = []
         var failures: [String] = []
 
+        // Progress goes to stdout as it happens. A run that died reported
+        // "Test crashed with signal kill" and nothing else — no artifact, no
+        // last turn, no way to tell scenario 2 from scenario 12. A suite whose
+        // failure mode is silence cannot diagnose itself.
+        let suiteStart = Date()
+        func mark(_ text: String) {
+            let secs = Int(Date().timeIntervalSince(suiteStart))
+            print("[t+\(secs)s] \(text)")
+            fflush(stdout)
+        }
+
         for dialogue in plan.tier1 {
+            mark("▶ \(dialogue.id)")
             // Setup turns first (they create the scenario's preconditions —
             // "I'm at the dinner" only means something if the dinner is TODAY),
             // then the scenario's own turns verbatim, and ONLY THEN any answers
@@ -110,6 +122,7 @@ final class TrajectoryTests: XCTestCase {
             while !script.isEmpty || (lastReplyAsked && !answers.isEmpty) {
                 let message = script.isEmpty ? answers.removeFirst() : script.removeFirst()
                 transcript.append(RecordedTurn(dialogue: dialogue.id, role: "user", text: message))
+                mark("  → \(message.prefix(60))")
                 do {
                     let reply = try await JeevesChatService.sendAgentic(
                         history: history, newMessage: message,
@@ -136,8 +149,10 @@ final class TrajectoryTests: XCTestCase {
                     // Only a question still open once the script is done draws
                     // an answer out of the queue.
                     lastReplyAsked = reply.text.contains("?")
+                    mark("  ← \(calls.count) tool call(s) so far · \(reply.text.prefix(50))")
                 } catch {
                     lastReplyAsked = false
+                    mark("  ✗ \(error.localizedDescription)")
                     failures.append("\(dialogue.id): turn '\(message.prefix(40))' errored: \(error.localizedDescription)")
                     transcript.append(RecordedTurn(dialogue: dialogue.id, role: "error",
                                                    text: error.localizedDescription))
