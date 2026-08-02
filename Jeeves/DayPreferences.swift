@@ -25,6 +25,18 @@ enum DayPreferences {
     static let defaultDayStartMinute = 8 * 60      // 8:00 AM
     static let defaultBodyWeightKg = 120.0
 
+    /// When sleep ends. The day cannot begin producing before this — the hour
+    /// between waking and the productive start is the morning routine.
+    static let wakeMinute = 7 * 60                 // 7:00 AM, sleep 23:00 + 8h
+
+    /// The morning-routine window: wake until work begins. Empty when the
+    /// productive day starts at or before waking, in which case there is no
+    /// routine block to place and the first block IS the first activity.
+    static var morningRoutineWindow: (start: Int, end: Int)? {
+        let start = dayStartMinute
+        return start > wakeMinute ? (wakeMinute, start) : nil
+    }
+
     /// When the productive day begins, in minutes past midnight.
     static var dayStartMinute: Int {
         let stored = UserDefaults.standard.integer(forKey: dayStartKey)

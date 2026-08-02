@@ -222,6 +222,28 @@ final class PlanRulesTests: XCTestCase {
         XCTAssertEqual(PlanValidation.dayStart, 390, "and so does the validator")
     }
 
+    /// Waking and starting work are different times. The prompt used to
+    /// hardcode both — "cover 07:00–08:00" — so moving the start left an hour
+    /// nobody owned, or put work before the sleep anchor ended.
+    func testMorningRoutineWindowFollowsTheSetting() {
+        let d = UserDefaults.standard
+        let saved = d.object(forKey: DayPreferences.dayStartKey)
+        defer { saved == nil ? d.removeObject(forKey: DayPreferences.dayStartKey)
+                             : d.set(saved, forKey: DayPreferences.dayStartKey) }
+
+        d.set(8 * 60, forKey: DayPreferences.dayStartKey)
+        XCTAssertEqual(DayPreferences.morningRoutineWindow?.start, 7 * 60)
+        XCTAssertEqual(DayPreferences.morningRoutineWindow?.end, 8 * 60)
+
+        d.set(9 * 60 + 30, forKey: DayPreferences.dayStartKey)
+        XCTAssertEqual(DayPreferences.morningRoutineWindow?.end, 9 * 60 + 30,
+                       "the routine stretches to meet the new start — no orphaned hour")
+
+        // Starting work the moment you wake leaves no routine to place.
+        d.set(DayPreferences.wakeMinute, forKey: DayPreferences.dayStartKey)
+        XCTAssertNil(DayPreferences.morningRoutineWindow)
+    }
+
     func testBodyWeightDefaultsTo120() {
         let d = UserDefaults.standard
         let saved = d.object(forKey: DayPreferences.bodyWeightKey)

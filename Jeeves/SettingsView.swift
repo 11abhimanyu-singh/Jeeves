@@ -162,10 +162,11 @@ struct SettingsView: View {
     /// 75 kg regardless of who was lifting.
     private var personalSection: some View {
         Section {
-            Picker("Day starts at", selection: $dayStartMinute) {
-                // Half-hours from 05:00 to 11:00 — the range a productive day
-                // plausibly begins in. Finer than that is false precision.
-                ForEach(Array(stride(from: 5 * 60, through: 11 * 60, by: 30)), id: \.self) { m in
+            Picker("Work starts at", selection: $dayStartMinute) {
+                // From waking to 11:00, in half-hours. It cannot start before
+                // you are awake: sleep is a fixed 23:00–07:00 anchor, and an
+                // earlier choice would schedule work into it.
+                ForEach(Array(stride(from: DayPreferences.wakeMinute, through: 11 * 60, by: 30)), id: \.self) { m in
                     Text(DayPreferences.clock(m)).tag(m)
                 }
             }
@@ -182,7 +183,7 @@ struct SettingsView: View {
         } header: {
             Text("You")
         } footer: {
-            Text("The day start is where the planner begins filling — everything before it is your morning routine. Body weight pre-fills bodyweight-loaded sets in the lift logger; you can still override it per set.")
+            Text("You wake at \(DayPreferences.clock(DayPreferences.wakeMinute)) when sleep ends; work starts when you set it here, and the gap between the two is your morning routine. Body weight pre-fills bodyweight-loaded sets in the lift logger; you can still override it per set.")
         }
     }
 

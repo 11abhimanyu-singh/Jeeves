@@ -322,7 +322,16 @@ enum PlanGenerationService {
         s += "- Always report what you dropped and shrank. Never silently omit anything.\n\n"
 
         s += "DAY WINDOW:\n"
-        s += "- The day STARTS at 07:00 (when sleep ends) — the FIRST block of every plan begins at 07:00. Cover 07:00–08:00 with a morning routine block (kind \"free\", e.g. \"Morning routine — wake, freshen up, breakfast\") unless a real commitment claims that hour. Never leave a gap between 07:00 and the first block.\n"
+        // The wake hour and the productive start are two different times, and
+        // the second one is a setting now. This sentence used to hardcode both
+        // as 07:00 and 08:00, so moving the start to 09:00 left an hour nobody
+        // owned — and moving it to 06:30 had work beginning before waking.
+        let wake = hhmm(DayPreferences.wakeMinute)
+        if let window = DayPreferences.morningRoutineWindow {
+            s += "- The day STARTS at \(wake) (when sleep ends) — the FIRST block of every plan begins at \(wake). Cover \(hhmm(window.start))–\(hhmm(window.end)) with a morning routine block (kind \"free\", e.g. \"Morning routine — wake, freshen up, breakfast\") unless a real commitment claims that time. Never leave a gap between \(wake) and the first block.\n"
+        } else {
+            s += "- The day STARTS at \(wake) (when sleep ends) — the FIRST block of every plan begins at \(wake), and it is the first real activity: the productive day starts then too, so there is no morning-routine gap to fill. Never leave a gap between \(wake) and the first block.\n"
+        }
         s += "- The productive window is \(hhmm(Baseline.dayStartMinute)) to the 20:30 hard boundary — EVERY day, including event days.\n"
         s += "- Sleep is a FIXED 8-hour anchor from 23:00 to 07:00 (11 PM–7 AM) — always the final block of the day (kind \"sleep\", isAnchor true, startTime 23:00, endTime 07:00). No WORK is scheduled after the 20:30 boundary — but the gym routine, events, and their commutes follow their real times and may run later. Fill whatever remains of the evening (from the last block, or 20:30) up to 23:00 with a single wind-down / personal-time block (kind \"free\") leading into sleep.\n"
         if hasEvents {
