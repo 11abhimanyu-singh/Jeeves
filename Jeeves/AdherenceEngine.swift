@@ -74,10 +74,17 @@ enum AdherenceEngine {
         if kind == "gym" {
             return evidence.workedOut ? .done : .skipped
         }
-        // Interview practice — the four question categories only. This used to
-        // read `anyPrepLogged`, so an hour of prep READING ticked off the block
-        // where questions were meant to be answered. The same conflation,
-        // pointing the other way.
+        // A named category block — "Interview prep — Product Sense" — is judged
+        // by ITS OWN session, not by whether any prep happened. Once the four
+        // categories are independently scheduled, one shared verdict would mark
+        // all four done because you did one.
+        if let named = Baseline.practiceCategories.first(where: { t.contains($0.rawValue.lowercased()) }) {
+            return evidence.prepCategoriesLogged.contains(named) ? .done : .skipped
+        }
+        // An unsplit practice block — the four question categories collectively.
+        // This used to read `anyPrepLogged`, so an hour of prep READING ticked
+        // off the block where questions were meant to be answered. The same
+        // conflation, pointing the other way.
         if t.contains("interview prep") || t.contains("practice") {
             return evidence.practiceLogged ? .done : .skipped
         }

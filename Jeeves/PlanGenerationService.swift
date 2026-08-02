@@ -30,6 +30,9 @@ struct PlanRequest {
     var replanFromMinute: Int? = nil   // set on a mid-day re-plan: schedule ONLY from here forward
     var alreadyDoneNote: String? = nil // "Morning shower, Photography, Massage" — done earlier, don't re-add
     var routine: [BaselineActivity]? = nil  // the user's editable routine; nil = the hardcoded default
+    /// The gym's parts and their minutes, as configured. Defaults to the
+    /// historical fixed session so an old caller still produces the old plan.
+    var gymSession: [(name: String, minutes: Int)] = Baseline.gymParts
     var referenceNow: Date? = nil      // pinned "now" for evals; nil = real device clock
 }
 
@@ -240,7 +243,15 @@ enum PlanGenerationService {
 
         s += "TODAY'S ANCHORS:\n"
         if req.hasGymToday, let g = req.gymMinute {
-            s += "- Gym: weightlifting starts at \(hhmm(g)). Gym routine is mobility, weightlifting, cardio, with FIXED durations: Mobility 20 min, Weightlifting 70 min, Cardio 35 min. NEVER compress or extend these — the workout is the workout; a late gym runs past 20:30 rather than shrinking (the 20:30 boundary applies to WORK, and the gym is a fixed personal commitment like an event). The shower is at HOME after returning from the gym (20 min) — NOT at the gym — unless you're chaining directly from the gym to an event (then shower at the gym to skip the trip home). Gym routing is always Home → Gym → Home unless chaining to an adjacent event makes Gym → Event sensible.\n"
+            // The parts and their minutes come from the user's routine now —
+            // they used to be three numbers written into this sentence and
+            // repeated in DayPlanner. The instruction NOT to compress them
+            // still stands; only the figures moved.
+            let session = req.gymSession
+            let anchorName = session.first(where: { $0.name.localizedCaseInsensitiveContains("weight") })?.name
+                ?? session.first?.name ?? "Weightlifting"
+            let parts = session.map { "\($0.name) \($0.minutes) min" }.joined(separator: ", ")
+            s += "- Gym: \(anchorName.lowercased()) starts at \(hhmm(g)). Gym routine is \(session.map(\.name.localizedLowercase).joined(separator: ", ")), with FIXED durations: \(parts). NEVER compress or extend these — the workout is the workout; a late gym runs past 20:30 rather than shrinking (the 20:30 boundary applies to WORK, and the gym is a fixed personal commitment like an event). Title each gym block \"Gym — <part>\". The shower is at HOME after returning from the gym (20 min) — NOT at the gym — unless you're chaining directly from the gym to an event (then shower at the gym to skip the trip home). Gym routing is always Home → Gym → Home unless chaining to an adjacent event makes Gym → Event sensible.\n"
             let midpoint = (Baseline.dayStartMinute + Baseline.normalBoundaryMinute) / 2   // 14:15
             if g >= midpoint {
                 s += "- The gym is in the SECOND half of the day (weightlifting at/after \(hhmm(midpoint))), so ALSO add a 20-min morning shower in the morning routine — the user shouldn't go the whole day unshowered. The main shower still happens at home in the evening after the gym (also 20 min).\n"
@@ -259,14 +270,22 @@ enum PlanGenerationService {
         s += "\n"
 
         s += "COMMUTE:\n"
+        // Parking is real time, and it only happens on arrival. The measured
+        // minutes and the buffer stay separate in the text so the plan can say
+        // "42 min drive + 10 min parking" rather than quoting an inflated 52
+        // as though Maps had measured it.
+        let park = CommuteBuffer.parkingMinutes
         if req.commuteEstimates.isEmpty {
             s += "- No live traffic data available. Assume \(req.defaultCommuteMinutes) min each way for any trip. Treat these as estimates.\n"
         } else {
             for (route, mins) in req.commuteEstimates.sorted(by: { $0.key < $1.key }) {
-                s += "- \(route): \(mins) min\n"
+                let buffered = CommuteBuffer.needsParking(route: route)
+                s += "- \(route): \(mins) min"
+                s += buffered ? " + \(park) min parking = \(mins + park) min door to door\n" : "\n"
             }
             s += "- For any route not listed, assume \(req.defaultCommuteMinutes) min.\n"
         }
+        s += "- OUTBOUND trips (to the gym, to an event) include \(park) min for parking and walking in — budget the total. Trips ENDING at home do NOT: you park and you're there. Say the two parts separately in the block note.\n"
         s += "\n"
 
         return s
@@ -295,12 +314,13 @@ enum PlanGenerationService {
         s += "- IMPORTANT-tier floor: never shrink an Important activity below 50% of its allocated time. If fitting the day would force any Important item below 50%, DROP one Important item entirely (vary which one day to day) so the rest run at full length. One activity done fully beats two done at 20 minutes each — you may even extend a surviving Important item into the freed time rather than leaving it idle.\n"
         s += "- Photography is a FLEXIBLE, discretionary-level activity: place it in leftover time or drop it like any Flexible item. It is NOT pinned to the end of the day and has no special end-of-day slot.\n"
         s += "- SPLITTING: an activity of 120 min or longer may be split into TWO parts around an anchor when it can't fit whole — e.g. Interview prep — practice 90 min, then Lunch, then the remaining 30 min. Label the parts (e.g. \"part 1 of 120\"). Never split shorter activities, and at most one split per activity. The GYM routine must NEVER be split: mobility → weightlifting → cardio run back-to-back as one contiguous sequence with nothing scheduled between them.\n"
+        s += "- BREATHER: leave a \(PlanRules.prepBreatherMinutes)-minute gap between any TWO interview-prep blocks that would otherwise run back to back (prep reading and the four practice categories all count). It is a breather and time to switch subject — do not fill it, do not schedule anything in it, and do not remove it to make something else fit. This applies only between prep blocks; every other pair of activities still runs contiguously.\n"
         s += "- Which item to drop/shrink first WITHIN a tier is your judgment (context-aware), not a fixed rule.\n"
         s += "- Always report what you dropped and shrank. Never silently omit anything.\n\n"
 
         s += "DAY WINDOW:\n"
         s += "- The day STARTS at 07:00 (when sleep ends) — the FIRST block of every plan begins at 07:00. Cover 07:00–08:00 with a morning routine block (kind \"free\", e.g. \"Morning routine — wake, freshen up, breakfast\") unless a real commitment claims that hour. Never leave a gap between 07:00 and the first block.\n"
-        s += "- The productive window is 08:00 to the 20:30 hard boundary — EVERY day, including event days.\n"
+        s += "- The productive window is \(hhmm(Baseline.dayStartMinute)) to the 20:30 hard boundary — EVERY day, including event days.\n"
         s += "- Sleep is a FIXED 8-hour anchor from 23:00 to 07:00 (11 PM–7 AM) — always the final block of the day (kind \"sleep\", isAnchor true, startTime 23:00, endTime 07:00). No WORK is scheduled after the 20:30 boundary — but the gym routine, events, and their commutes follow their real times and may run later. Fill whatever remains of the evening (from the last block, or 20:30) up to 23:00 with a single wind-down / personal-time block (kind \"free\") leading into sleep.\n"
         if hasEvents {
             s += "- Events are FIXED ANCHORS you schedule work AROUND, not a wall that ends the day. Each event is an out-and-back trip: leave in time, attend, return home. Fill EVERY free window with productive work — before the first event, between events, and (crucially) AFTER you return home from an event, right up to 20:30.\n"

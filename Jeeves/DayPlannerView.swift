@@ -544,6 +544,7 @@ struct DayPlannerView: View {
                     locations: locations,
                     prepSessions: prepSessions,
                     routine: Baseline.routine(from: routineActivities),
+                    gymSession: Baseline.gymSession(from: routineActivities),
                     adherenceNote: AdherenceHistory.planningNote(context: modelContext, for: date),
                     replanFromMinute: replanFrom,
                     alreadyDoneNote: doneNote,

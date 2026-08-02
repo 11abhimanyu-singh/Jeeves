@@ -21,6 +21,9 @@ enum PlanCoordinator {
         var locations: [SavedLocation]
         var prepSessions: [PrepSession]
         var routine: [BaselineActivity] = Baseline.activities  // the user's editable routine
+        /// The gym's parts as configured — mobility/weightlifting/cardio are
+        /// switchable and independently timed now, not three frozen numbers.
+        var gymSession: [(name: String, minutes: Int)] = Baseline.gymParts
         var adherenceNote: String? = nil // recent done/skip history, so the plan adapts to what sticks
         var replanFromMinute: Int? = nil // mid-day re-plan: schedule only from here forward
         var alreadyDoneNote: String? = nil // titles done earlier today, so the re-plan doesn't re-add them
@@ -274,6 +277,7 @@ enum PlanCoordinator {
             replanFromMinute: i.replanFromMinute,
             alreadyDoneNote: i.alreadyDoneNote,
             routine: i.routine,
+            gymSession: i.gymSession,
             referenceNow: i.referenceNow
         )
     }

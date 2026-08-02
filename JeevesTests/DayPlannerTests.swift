@@ -139,10 +139,32 @@ final class DayPlannerTests: XCTestCase {
 
     func testGymBlockAnchorsWeightsAtEnteredTime() {
         let blocks = DayPlanner.generate(gymMinute: 11 * 60, prepSessions: [], leisureLogs: [])
-        XCTAssertEqual(block("Weightlifting", in: blocks)?.startMinute, 11 * 60)
-        XCTAssertEqual(block("Commute to gym", in: blocks)?.startMinute, 11 * 60 - 50)
-        XCTAssertEqual(block("Mobility", in: blocks)?.startMinute, 11 * 60 - 20)
-        XCTAssertEqual(block("Cardio", in: blocks)?.startMinute, 11 * 60 + 70)
+        XCTAssertEqual(block("Gym — Weightlifting", in: blocks)?.startMinute, 11 * 60)
+        // 30 min drive + 10 min parking + 20 min mobility, worked backward.
+        XCTAssertEqual(block("Commute to gym", in: blocks)?.startMinute, 11 * 60 - 60)
+        XCTAssertEqual(block("Gym — Mobility", in: blocks)?.startMinute, 11 * 60 - 20)
+        XCTAssertEqual(block("Gym — Cardio", in: blocks)?.startMinute, 11 * 60 + 70)
+    }
+
+    /// Switching a part off shortens the session and moves the departure —
+    /// the anchor must still land on the time the user entered.
+    func testDisablingAPartKeepsTheAnchorAndMovesTheDeparture() {
+        let session = [(name: "Weightlifting", minutes: 70), (name: "Cardio", minutes: 35)]
+        let blocks = DayPlanner.generate(gymMinute: 11 * 60, prepSessions: [], leisureLogs: [],
+                                         gymSession: session)
+        XCTAssertEqual(block("Gym — Weightlifting", in: blocks)?.startMinute, 11 * 60)
+        XCTAssertNil(block("Gym — Mobility", in: blocks), "mobility is off")
+        // Nothing before the anchor now, so leaving is just drive + parking.
+        XCTAssertEqual(block("Commute to gym", in: blocks)?.startMinute, 11 * 60 - 40)
+    }
+
+    func testOutboundGymCommuteCarriesTheParkingBufferAndTheWayHomeDoesNot() {
+        let blocks = DayPlanner.generate(gymMinute: 11 * 60, prepSessions: [], leisureLogs: [])
+        XCTAssertEqual(block("Commute to gym", in: blocks)?.durationMinutes, 40)
+        XCTAssertEqual(block("Commute home", in: blocks)?.durationMinutes, 30)
+        XCTAssertEqual(block("Commute to gym", in: blocks)?.note,
+                       "30 min drive + 10 min parking",
+                       "the two parts stay legible instead of one inflated number")
     }
 
     func testGymDaysHaveNoOverlaps() {

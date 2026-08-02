@@ -291,7 +291,10 @@ struct WorkoutLiftView: View {
         var reps: Int = 8
         var weightKg: Double = 40
         var addedKg: Double = 0
-        var bodyweightKg: Double = 75
+        /// Yours, from Settings — this used to open at a flat 75 kg for
+        /// everyone, so every bodyweight-loaded set started with a number that
+        /// was nobody's.
+        var bodyweightKg: Double = DayPreferences.bodyWeightKg
         var holdSeconds: Int = 30
 
         var tonnage: Double {

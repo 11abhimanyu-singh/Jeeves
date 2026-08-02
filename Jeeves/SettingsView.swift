@@ -20,6 +20,8 @@ struct SettingsView: View {
 
     @AppStorage(NotificationService.enabledKey) private var remindersEnabled = true
     @AppStorage(VoiceNoteSync.syncEnabledKey) private var syncVoiceNotes = true
+    @AppStorage(DayPreferences.dayStartKey) private var dayStartMinute = DayPreferences.defaultDayStartMinute
+    @AppStorage(DayPreferences.bodyWeightKey) private var bodyWeightKg = DayPreferences.defaultBodyWeightKg
 
     @State private var claudeInput = ""
     @State private var hasClaude = KeychainService.hasAPIKey
@@ -99,6 +101,7 @@ struct SettingsView: View {
             }
             .listRowBackground(Color.surface)
 
+            personalSection
             remindersSection
                 .listRowBackground(Color.surface)
 
@@ -114,7 +117,7 @@ struct SettingsView: View {
         .jeevesFormChrome()
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { seedLocationsIfNeeded(); Baseline.seed(into: modelContext) }
+        .onAppear { seedLocationsIfNeeded(); Baseline.seed(into: modelContext); Baseline.regroup(in: modelContext) }
     }
 
     // MARK: Diagnostics — how the planner is performing
@@ -148,6 +151,38 @@ struct SettingsView: View {
             Text(label).font(.ui(14)).foregroundStyle(Color.textSoft)
             Spacer()
             Text(value).font(.ui(14, weight: .semibold)).foregroundStyle(Color.textPrimary)
+        }
+    }
+
+    // MARK: You
+
+    /// Two numbers that used to be constants: the day start was a `static let`
+    /// in Baseline AND DayPlanner with a third derivation in the prompt, and
+    /// bodyweight had no home at all — every bodyweight-loaded set opened at
+    /// 75 kg regardless of who was lifting.
+    private var personalSection: some View {
+        Section {
+            Picker("Day starts at", selection: $dayStartMinute) {
+                // Half-hours from 05:00 to 11:00 — the range a productive day
+                // plausibly begins in. Finer than that is false precision.
+                ForEach(Array(stride(from: 5 * 60, through: 11 * 60, by: 30)), id: \.self) { m in
+                    Text(DayPreferences.clock(m)).tag(m)
+                }
+            }
+            HStack {
+                Text("Body weight")
+                Spacer()
+                Text("\(Int(bodyWeightKg.rounded())) kg")
+                    .font(.ui(14, weight: .semibold))
+                    .foregroundStyle(Color.textPrimary)
+                    .monospacedDigit()
+                Stepper("Body weight", value: $bodyWeightKg, in: 30...250, step: 1)
+                    .labelsHidden()
+            }
+        } header: {
+            Text("You")
+        } footer: {
+            Text("The day start is where the planner begins filling — everything before it is your morning routine. Body weight pre-fills bodyweight-loaded sets in the lift logger; you can still override it per set.")
         }
     }
 

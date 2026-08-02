@@ -20,7 +20,7 @@ enum PlanValidation {
         let message: String
     }
 
-    static let dayStart = 8 * 60
+    static var dayStart: Int { DayPreferences.dayStartMinute }
     static let boundary = 20 * 60 + 30
 
     /// Returns every rule violation in the plan. Empty == valid.
@@ -191,6 +191,13 @@ enum PlanValidation {
                 out.append(Violation(severity: .severe,
                     message: "Event ends by \(hhmm(lastEventEnd)) and work was dropped, but nothing productive is scheduled after it — the afternoon/evening is wasted"))
             }
+        }
+
+        // Two prep blocks butted together. A rule that lives only in the prompt
+        // is a request — the gym durations were "FIXED" for months with nothing
+        // checking whether the model agreed.
+        for message in PlanRules.prepBreatherViolations(plan.blocks) {
+            out.append(Violation(severity: .quality, message: message))
         }
 
         return out

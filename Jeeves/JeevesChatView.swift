@@ -659,6 +659,7 @@ struct JeevesChatView: View {
                     locations: locations,
                     prepSessions: prepSessions,
                     routine: Baseline.routine(from: routineActivities),
+                    gymSession: Baseline.gymSession(from: routineActivities),
                     adherenceNote: AdherenceHistory.planningNote(context: modelContext, for: today),
                     planDate: today
                 ), context: modelContext, trigger: .chat)

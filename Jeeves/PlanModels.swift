@@ -39,7 +39,7 @@ enum Baseline {
         BaselineActivity(name: "Photography", durationMinutes: 30, tier: .flexible, note: nil),
     ]
 
-    static let dayStartMinute = 8 * 60       // 8:00 AM
+    static var dayStartMinute: Int { DayPreferences.dayStartMinute }
     static let normalBoundaryMinute = 20 * 60 + 30  // 8:30 PM
 }
 

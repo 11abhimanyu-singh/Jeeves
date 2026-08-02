@@ -39,7 +39,10 @@ struct PlanBlock: Identifiable {
 }
 
 enum DayPlanner {
-    static let dayStartMinute = 8 * 60          // 8:00 AM
+    /// Set in Settings; 8:00 until it is. One source, because this used to be
+    /// a `static let` here AND in Baseline, with a third derivation in the
+    /// prompt builder.
+    static var dayStartMinute: Int { DayPreferences.dayStartMinute }
     static let dayEndMinute = 20 * 60 + 30       // 8:30 PM — end of the productive window
     static let sleepMinute = 23 * 60             // 11:00 PM — fixed bedtime anchor
     static let photographyMinutes = 30
@@ -51,13 +54,32 @@ enum DayPlanner {
     static let minDiscretionaryMinutes = 20
     // commute + mobility + weights + cardio + commute + shower — the full span
     // from leaving for the gym to being ready afterward.
-    static let gymToShowerDuration = 30 + 20 + 70 + 35 + 30 + 20
+    static let commuteToGymMinutes = 30
+    static let commuteHomeMinutes = 30
+    static let showerMinutes = 20
+
+    /// The gym trip's shape, derived from whichever parts are switched on.
+    /// `outbound` carries the parking buffer; the trip home does not.
+    /// `beforeAnchor` is how long the parts ahead of the anchored one run, so
+    /// the departure can be worked backward from the time the user entered.
+    static func gymSpan(_ session: [(name: String, minutes: Int)])
+        -> (outbound: Int, beforeAnchor: Int, total: Int) {
+        let outbound = commuteToGymMinutes + CommuteBuffer.parkingMinutes
+        let anchorIndex = session.firstIndex { $0.name.localizedCaseInsensitiveContains("weight") } ?? 0
+        let beforeAnchor = session.prefix(anchorIndex).map(\.minutes).reduce(0, +)
+        let workout = session.map(\.minutes).reduce(0, +)
+        return (outbound, beforeAnchor, outbound + workout + commuteHomeMinutes + showerMinutes)
+    }
+
+    /// The historical fixed session, kept for callers that don't configure one.
+    static var gymToShowerDuration: Int { gymSpan(Baseline.gymParts).total }
 
     private typealias QueueItem = (title: String, minutes: Int, note: String?, category: PrepCategory?)
 
     /// - Parameters:
     ///   - gymMinute: minutes-since-midnight for today's weightlifting start, or nil for a rest day.
-    static func generate(gymMinute: Int?, prepSessions: [PrepSession], leisureLogs: [LeisureLog]) -> [PlanBlock] {
+    static func generate(gymMinute: Int?, prepSessions: [PrepSession], leisureLogs: [LeisureLog],
+                         gymSession: [(name: String, minutes: Int)] = Baseline.gymParts) -> [PlanBlock] {
         var blocks: [PlanBlock] = []
         var cursor = dayStartMinute
 
@@ -71,8 +93,25 @@ enum DayPlanner {
             blocks.append(PlanBlock(title: "Shower", startMinute: cursor, durationMinutes: 20, note: "Morning shower — gym is later today", isAnchor: false))
             cursor += 20
         }
-        blocks.append(PlanBlock(title: "Chores", startMinute: cursor, durationMinutes: 40, note: nil, isAnchor: false))
-        cursor += 40
+        // Chores are Flexible and the gym time is a user-entered anchor, so
+        // when the fixed morning would run past the departure it is the chores
+        // that give way. Adding the parking buffer moved the departure ten
+        // minutes earlier, and without this the whole gym slid ten minutes late
+        // — the anchor quietly losing to a flexible block.
+        let choresMinutes = 40
+        var choresFit = choresMinutes
+        if let gymMinute {
+            let span = gymSpan(gymSession)
+            let leave = gymMinute - span.beforeAnchor - span.outbound
+            choresFit = max(0, min(choresMinutes, leave - cursor))
+        }
+        if choresFit > 0 {
+            blocks.append(PlanBlock(title: "Chores", startMinute: cursor, durationMinutes: choresFit,
+                                    note: choresFit < choresMinutes
+                                        ? "trimmed to leave for the gym on time" : nil,
+                                    isAnchor: false))
+            cursor += choresFit
+        }
         let choresEnd = cursor
 
         // Movable, fixed-duration queue — order matters, it's the fill order.
@@ -102,12 +141,18 @@ enum DayPlanner {
             return blocks
         }
 
-        let leaveTime = gymMinute - 20 - 30 // mobility + commute, worked backward from weights start
+        // Worked backward from the anchor part's start: the outbound commute
+        // (with its parking buffer) plus whatever parts come before it. These
+        // used to be the literals 30 and 20 — the same numbers the gym session
+        // now owns, so they have to be derived or the anchor drifts the moment
+        // a part is switched off.
+        let span = gymSpan(gymSession)
+        let leaveTime = gymMinute - span.beforeAnchor - span.outbound
         let preGymPool = max(0, leaveTime - choresEnd)
 
         // Where the post-gym region begins. If that's already past lunch's 2:30 PM
         // deadline, lunch can't live after the gym — it must be seated pre-gym.
-        let postGymStart = leaveTime + gymToShowerDuration
+        let postGymStart = leaveTime + span.total
         let lunchMustBePreGym = postGymStart > lunchDeadlineMinute
 
         let packed = packQueue(queue, cursor: choresEnd, pool: preGymPool, lunchMustFitInPool: lunchMustBePreGym)
@@ -132,28 +177,50 @@ enum DayPlanner {
         // fixed morning finishes) starting at leaveTime would overlap them, so the
         // gym slides to the earliest slot that keeps the day in chronological order.
         var gymCursor = max(leaveTime, preGymCursor)
-        blocks.append(PlanBlock(title: "Commute to gym", startMinute: gymCursor, durationMinutes: 30, note: nil, isAnchor: false))
-        gymCursor += 30
-        blocks.append(PlanBlock(title: "Mobility", startMinute: gymCursor, durationMinutes: 20, note: nil, isAnchor: false))
-        gymCursor += 20
-        blocks.append(PlanBlock(title: "Weightlifting", startMinute: gymCursor, durationMinutes: 70, note: "Anchor time", isAnchor: true))
-        gymCursor += 70
-        blocks.append(PlanBlock(title: "Cardio", startMinute: gymCursor, durationMinutes: 35, note: nil, isAnchor: false))
-        gymCursor += 35
-        blocks.append(PlanBlock(title: "Commute home", startMinute: gymCursor, durationMinutes: 30, note: nil, isAnchor: false))
-        gymCursor += 30
+        // Outbound carries the parking buffer; the trip home does not.
+        blocks.append(PlanBlock(title: "Commute to gym", startMinute: gymCursor, durationMinutes: span.outbound,
+                                note: "\(commuteToGymMinutes) min drive + \(CommuteBuffer.parkingMinutes) min parking", isAnchor: false))
+        gymCursor += span.outbound
+        // The parts and their minutes come from the routine now. The anchor is
+        // whichever part the gym time was set against — weightlifting when it
+        // exists, otherwise the first enabled part.
+        let session = gymSession
+        let anchorIndex = session.firstIndex { $0.name.localizedCaseInsensitiveContains("weight") } ?? 0
+        for (i, part) in session.enumerated() {
+            blocks.append(PlanBlock(title: "Gym — \(part.name)", startMinute: gymCursor,
+                                    durationMinutes: part.minutes,
+                                    note: i == anchorIndex ? "Anchor time" : nil,
+                                    isAnchor: i == anchorIndex))
+            gymCursor += part.minutes
+        }
+        blocks.append(PlanBlock(title: "Commute home", startMinute: gymCursor, durationMinutes: commuteHomeMinutes, note: nil, isAnchor: false))
+        gymCursor += commuteHomeMinutes
 
         blocks.append(PlanBlock(title: "Shower", startMinute: gymCursor, durationMinutes: 20, note: nil, isAnchor: false))
         gymCursor += 20
 
+        // The post-gym region places overflow itself rather than going back
+        // through packQueue, so the breather has to be honoured here too —
+        // this is where the prep blocks land on a gym day.
+        var lastWasPrep = false
         for item in overflow {
             // Lunch is never seated before 12:30, even when the gym ended early.
             var placeAt = gymCursor
             if item.title == "Lunch", placeAt < lunchEarliestMinute { placeAt = lunchEarliestMinute }
+            let isPrep = PlanRules.isPrepBlock(title: item.title)
+            if lastWasPrep, isPrep, placeAt == gymCursor {
+                let breather = PlanRules.prepBreatherMinutes
+                guard placeAt + breather + item.minutes <= dayEndMinute else { continue }
+                blocks.append(PlanBlock(title: "Breather", startMinute: placeAt,
+                                        durationMinutes: breather,
+                                        note: "switching subject", isAnchor: false))
+                placeAt += breather
+            }
             // Don't pack past the 20:30 boundary — drop what won't fit.
             guard placeAt + item.minutes <= dayEndMinute else { continue }
             blocks.append(PlanBlock(title: item.title, startMinute: placeAt, durationMinutes: item.minutes, note: item.note, isAnchor: false, prepCategory: item.category))
             gymCursor = placeAt + item.minutes
+            lastWasPrep = isPrep
         }
 
         let postGymSlack = dayEndMinute - gymCursor
@@ -212,6 +279,7 @@ enum DayPlanner {
         var remaining = queue
         let lunchMinutes = queue.first { $0.title == "Lunch" }?.minutes ?? 0
         var lunchPlaced = !queue.contains { $0.title == "Lunch" }
+        var lastWasPrep = false
 
         while !remaining.isEmpty {
             var item = remaining.removeFirst()
@@ -227,9 +295,23 @@ enum DayPlanner {
                 }
             }
 
-            if let pool, filled + item.minutes > pool {
+            // A breather between back-to-back prep blocks. The rule lived in
+            // the prompt and in PlanValidation, but the offline planner packed
+            // Product Sense straight into Execution — a rule the fallback
+            // didn't know about is a rule the fallback breaks.
+            let needsBreather = lastWasPrep && PlanRules.isPrepBlock(title: item.title)
+            let breather = needsBreather ? PlanRules.prepBreatherMinutes : 0
+
+            if let pool, filled + breather + item.minutes > pool {
                 overflow.append(item)
             } else {
+                if breather > 0 {
+                    blocks.append(PlanBlock(title: "Breather", startMinute: cursor,
+                                            durationMinutes: breather,
+                                            note: "switching subject", isAnchor: false))
+                    cursor += breather
+                    filled += breather
+                }
                 // Lunch is never eaten before 12:30. On rest days (unbounded pool)
                 // hold with a short breather so lunch lands in its window; on gym
                 // days the pre-gym packing already seats it around the gym.
@@ -240,6 +322,7 @@ enum DayPlanner {
                 blocks.append(PlanBlock(title: item.title, startMinute: cursor, durationMinutes: item.minutes, note: item.note, isAnchor: false, prepCategory: item.category))
                 cursor += item.minutes
                 filled += item.minutes
+                lastWasPrep = PlanRules.isPrepBlock(title: item.title)
             }
             if item.title == "Lunch" { lunchPlaced = true }
         }

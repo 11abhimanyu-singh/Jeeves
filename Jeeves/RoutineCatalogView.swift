@@ -27,10 +27,25 @@ struct RoutineCatalogView: View {
         }
     }
 
+    /// Standalone rows keep the reorderable list; grouped ones get their own
+    /// section per parent. Interview prep and the gym are single things made of
+    /// parts you tune separately — four practice categories inside one
+    /// 100-minute row, or three gym durations frozen in a prompt, could say
+    /// neither.
+    private var ungrouped: [RoutineActivity] {
+        activities.filter { $0.group == .none }.sorted { $0.sortOrder < $1.sortOrder }
+    }
+    private func children(_ g: RoutineGroup) -> [RoutineActivity] {
+        activities.filter { $0.group == g }.sorted { $0.sortOrder < $1.sortOrder }
+    }
+    private var groupsPresent: [RoutineGroup] {
+        RoutineGroup.allCases.filter { $0 != .none && !children($0).isEmpty }
+    }
+
     var body: some View {
         Form {
             Section {
-                ForEach(activities) { activity in
+                ForEach(ungrouped) { activity in
                     Button { sheet = .edit(activity) } label: { row(activity) }
                         .buttonStyle(.plain)
                 }
@@ -43,6 +58,35 @@ struct RoutineCatalogView: View {
             }
             .listRowBackground(Color.surface)
 
+            ForEach(groupsPresent, id: \.self) { group in
+                Section {
+                    ForEach(children(group)) { activity in
+                        Button { sheet = .edit(activity) } label: { row(activity) }
+                            .buttonStyle(.plain)
+                    }
+                } header: {
+                    HStack {
+                        Text(group.title)
+                        Spacer()
+                        // The parent switch is derived, not stored: on when any
+                        // child is on, and turning it off silences all of them.
+                        Toggle("", isOn: Binding(
+                            get: { children(group).contains(where: \.enabled) },
+                            set: { on in
+                                for c in children(group) { c.enabled = on }
+                                context.saveOrLog("routine.group.toggle")
+                            }))
+                        .labelsHidden()
+                        .tint(Color.accent)
+                    }
+                } footer: {
+                    Text(group == .gym
+                         ? "The parts of a gym session, each with its own length. Switch one off to skip it; the gym's start time is still set per day in Today's anchors."
+                         : "Each category is its own block with its own length, and is logged separately. Reading is prep, but it isn't practice — it's tracked apart from the four question categories.")
+                }
+                .listRowBackground(Color.surface)
+            }
+
             Section {
                 Button { sheet = .add } label: {
                     Label("Add activity", systemImage: "plus.circle.fill").foregroundStyle(Color.accentDeep)
@@ -54,7 +98,7 @@ struct RoutineCatalogView: View {
         .navigationTitle("Daily routine")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { EditButton().tint(Color.accent) }
-        .onAppear { Baseline.seed(into: context) }
+        .onAppear { Baseline.seed(into: context); Baseline.regroup(in: context) }
         .sheet(item: $sheet) { s in
             switch s {
             case .add: RoutineActivityEditor(existing: nil, nextSort: (activities.map(\.sortOrder).max() ?? -1) + 1)
@@ -82,15 +126,25 @@ struct RoutineCatalogView: View {
         .padding(.vertical, 2)
     }
 
+    // Both index into `ungrouped`, which is what the list actually shows.
+    // Indexing the full `activities` array would delete or reorder whichever
+    // grouped row happened to sit at that position — the wrong activity, and
+    // silently.
     private func delete(_ offsets: IndexSet) {
-        for i in offsets { context.delete(activities[i]) }
+        let rows = ungrouped
+        for i in offsets where rows.indices.contains(i) { context.delete(rows[i]) }
         context.saveOrLog()
     }
 
     private func move(_ offsets: IndexSet, _ destination: Int) {
-        var reordered = activities
+        var reordered = ungrouped
         reordered.move(fromOffsets: offsets, toOffset: destination)
-        for (i, a) in reordered.enumerated() { a.sortOrder = i }
+        // Renumber only these rows, into the slots they already occupy, so a
+        // reorder here can't renumber a group's children out from under it.
+        let slots = ungrouped.map(\.sortOrder).sorted()
+        for (i, a) in reordered.enumerated() where slots.indices.contains(i) {
+            a.sortOrder = slots[i]
+        }
         context.saveOrLog()
     }
 }
