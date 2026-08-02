@@ -118,6 +118,8 @@ struct FlightStatusLine: View {
                 : "No \(flightNumber) update since \(clock(last!))"
         case .cancelled:
             return "\(flightNumber) is cancelled"
+        case .departed(let at):
+            return "\(flightNumber) left at \(clock(at))"
         }
     }
 
@@ -131,6 +133,7 @@ struct FlightStatusLine: View {
         case .lateSettled(_, let leaveBy): return "leave-by \(clock(leaveBy)) ›"
         case .stale(let last):             return last.map { "\(ago($0)) ›" } ?? nil
         case .cancelled:                   return "what now ›"
+        case .departed:                    return nil
         }
     }
 
@@ -162,7 +165,7 @@ struct FlightStatusLine: View {
         case .onTime:                    return Color.sageDeep
         case .notYetWatching:            return Color.textMuted
         case .stale:                     return Color.textSoft
-        case .lateSettled:               return Color.textPrimary
+        case .lateSettled, .departed:    return Color.textPrimary
         }
     }
 

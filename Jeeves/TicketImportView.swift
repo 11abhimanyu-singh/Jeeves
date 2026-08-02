@@ -13,6 +13,7 @@
 
 import SwiftUI
 import SwiftData
+import PhotosUI
 import UniformTypeIdentifiers
 
 struct TicketImportView: View {
@@ -31,6 +32,7 @@ struct TicketImportView: View {
 
     @State private var phase: Phase = .choosing
     @State private var showPicker = false
+    @State private var photoItem: PhotosPickerItem?
     @State private var removeRedundant = true
 
     var body: some View {
@@ -56,9 +58,22 @@ struct TicketImportView: View {
                 }
             }
             .fileImporter(isPresented: $showPicker,
-                          allowedContentTypes: [.pdf],
+                          allowedContentTypes: [.pdf, .image],
                           allowsMultipleSelection: false) { result in
                 handle(result)
+            }
+            .onChange(of: photoItem) { _, item in
+                guard let item else { return }
+                phase = .reading
+                Task {
+                    defer { photoItem = nil }
+                    guard let data = try? await item.loadTransferable(type: Data.self),
+                          let image = UIImage(data: data) else {
+                        phase = .failed("Couldn't load that image.")
+                        return
+                    }
+                    await extractImage(image)
+                }
             }
         }
     }
@@ -76,17 +91,31 @@ struct TicketImportView: View {
             Button { showPicker = true } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "doc.text")
-                    Text("Choose a PDF").font(.ui(15, weight: .semibold))
+                    Text("Choose a file").font(.ui(15, weight: .semibold))
                 }
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity).padding(.vertical, 14)
                 .background(RoundedRectangle(cornerRadius: 14).fill(Color.accent))
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Choose a ticket PDF")
+            .accessibilityLabel("Choose a ticket PDF or image")
 
-            Text("A scanned or photographed ticket has no text to read — I'll say so rather than guess.")
+            // Most tickets arrive as a screenshot, not a file.
+            PhotosPicker(selection: $photoItem, matching: .images) {
+                HStack(spacing: 8) {
+                    Image(systemName: "photo")
+                    Text("Choose a photo or screenshot").font(.ui(15, weight: .semibold))
+                }
+                .foregroundStyle(Color.accentDeep)
+                .frame(maxWidth: .infinity).frame(minHeight: 44).padding(.vertical, 10)
+                .overlay(RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(Color.accentDeep.opacity(0.45), lineWidth: 1.3))
+            }
+            .accessibilityLabel("Choose a ticket photo")
+
+            Text("PDF, photo or screenshot. A PDF with real text is read directly — anything else is looked at, which is slower and less certain.")
                 .font(.ui(11)).foregroundStyle(Color.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -269,22 +298,47 @@ struct TicketImportView: View {
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
                 let data = try Data(contentsOf: url)
-                let (legs, booking) = try await TicketExtractionService.extract(from: data)
-                let (itinerary, problems) = TicketItinerary.resolve(legs: legs, booking: booking)
-                guard let itinerary else {
-                    phase = .failed(problems.first?.message ?? "I couldn't read the flights.")
+                // A PDF gets the text path with an image fallback; anything
+                // else picked here is an image already.
+                let isPDF = url.pathExtension.lowercased() == "pdf"
+                let extracted: (legs: [TicketLeg], booking: TicketBooking)
+                if isPDF {
+                    extracted = try await TicketExtractionService.extract(from: data)
+                } else if let image = UIImage(data: data) {
+                    extracted = try await TicketExtractionService.extract(fromImage: image)
+                } else {
+                    phase = .failed("Couldn't open that file.")
                     return
                 }
-                let existing = overlappingTrip(start: itinerary.startUTC, end: itinerary.endUTC)
-                guard let plan = TicketImportPlanner.plan(from: itinerary, existing: existing) else {
-                    phase = .failed("That ticket had no usable flights.")
-                    return
-                }
-                phase = .review(plan, problems)
+                present(extracted)
             } catch {
                 phase = .failed(error.localizedDescription)
             }
         }
+    }
+
+    private func extractImage(_ image: UIImage) async {
+        do {
+            present(try await TicketExtractionService.extract(fromImage: image))
+        } catch {
+            phase = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Shared tail: resolve, look for a collision, show the plan.
+    private func present(_ extracted: (legs: [TicketLeg], booking: TicketBooking)) {
+        let (itinerary, problems) = TicketItinerary.resolve(legs: extracted.legs,
+                                                            booking: extracted.booking)
+        guard let itinerary else {
+            phase = .failed(problems.first?.message ?? "I couldn't read the flights.")
+            return
+        }
+        let existing = overlappingTrip(start: itinerary.startUTC, end: itinerary.endUTC)
+        guard let plan = TicketImportPlanner.plan(from: itinerary, existing: existing) else {
+            phase = .failed("That ticket had no usable flights.")
+            return
+        }
+        phase = .review(plan, problems)
     }
 
     /// The trip, if any, whose window overlaps the ticket's.

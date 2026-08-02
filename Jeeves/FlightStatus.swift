@@ -34,8 +34,14 @@ struct FlightStatusReport: Equatable, Sendable {
     var departureTerminal: String?
     var arrivalTerminal: String?
     var isCancelled: Bool = false
+    /// Set once the aircraft actually leaves. This is the terminal condition
+    /// for watching: there is nothing further to tell anyone, and continuing
+    /// to poll a departed flight is pure battery.
+    var actualDeparture: Date? = nil
     /// When the provider last knew this to be true.
     var observedAt: Date
+
+    nonisolated var hasDeparted: Bool { actualDeparture != nil }
 
     /// Floor, not truncation. `Int(_:)` rounds toward zero, so a 119-second
     /// early re-time read as −1 minute instead of −2 — wrong in the direction
@@ -82,6 +88,8 @@ enum FlightWatchState: Equatable, Sendable {
     /// A check was expected and hasn't succeeded. Never rendered as on time.
     case stale(lastSuccess: Date?)
     case cancelled(observedAt: Date)
+    /// Gone. Watching stops here.
+    case departed(at: Date)
 
     nonisolated var isActionable: Bool {
         if case .lateUndecided = self { return true }
@@ -136,11 +144,13 @@ enum FlightWatch {
                       decision: LeaveByDecision? = nil,
                       now: Date = Date()) -> FlightWatchState {
 
-        // A cancellation is checked BEFORE the watch window. Airlines cancel
-        // days ahead, and that is the one fact worth knowing early — gating it
-        // behind a 12-hour window hid it for as long as it was most useful.
-        if let report, report.isCancelled, !isFutureDated(report, now: now) {
-            return .cancelled(observedAt: report.observedAt)
+        // Departed and cancelled are both checked BEFORE the watch window.
+        // Airlines cancel days ahead, and that is the one fact worth knowing
+        // early — gating it behind a 12-hour window hid it while it was most
+        // useful. Departure is terminal: nothing after it changes.
+        if let report, !isFutureDated(report, now: now) {
+            if let off = report.actualDeparture { return .departed(at: off) }
+            if report.isCancelled { return .cancelled(observedAt: report.observedAt) }
         }
 
         let windowOpens = scheduledDeparture.addingTimeInterval(-Double(windowHours) * 3600)

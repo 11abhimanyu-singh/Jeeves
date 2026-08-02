@@ -67,10 +67,78 @@ enum TicketExtractionService {
 
     // MARK: Text → legs
 
+    /// A PDF: read its text layer if it has one, otherwise render page 1 and
+    /// look at it. A scanned or photographed ticket saved as a PDF used to
+    /// dead-end here with "no readable text"; now it just takes the slower
+    /// road.
     static func extract(from data: Data) async throws -> (legs: [TicketLeg], booking: TicketBooking) {
-        guard let raw = text(from: data) else { throw TicketExtractionError.unreadablePDF }
-        guard hasUsableText(raw) else { throw TicketExtractionError.noTextLayer }
-        return try await extract(fromText: raw)
+        let raw = text(from: data)
+        if hasUsableText(raw), let raw {
+            return try await extract(fromText: raw)
+        }
+        guard let image = firstPageImage(from: data) else {
+            throw TicketExtractionError.unreadablePDF
+        }
+        return try await extract(fromImage: image)
+    }
+
+    /// A photo or screenshot of a ticket.
+    static func extract(fromImage image: UIImage) async throws -> (legs: [TicketLeg], booking: TicketBooking) {
+        guard let apiKey = KeychainService.loadAPIKey(), !apiKey.isEmpty else {
+            throw TicketExtractionError.missingAPIKey
+        }
+        guard let jpeg = downscaled(image).jpegData(compressionQuality: 0.7) else {
+            throw TicketExtractionError.unreadablePDF
+        }
+        let payload: [String: Any] = [
+            "model": model,
+            "max_tokens": 2048,
+            "system": [[
+                "type": "text",
+                "text": systemPrompt,
+                "cache_control": ["type": "ephemeral"],
+            ]],
+            "messages": [[
+                "role": "user",
+                "content": [
+                    ["type": "image",
+                     "source": ["type": "base64", "media_type": "image/jpeg",
+                                "data": jpeg.base64EncodedString()]],
+                    ["type": "text", "text": "Transcribe every flight on this ticket."],
+                ],
+            ]],
+        ]
+        return try await send(payload, apiKey: apiKey)
+    }
+
+    /// Renders the first page of a PDF at a legible size for vision.
+    static func firstPageImage(from data: Data) -> UIImage? {
+        guard let doc = PDFDocument(data: data), let page = doc.page(at: 0) else { return nil }
+        let bounds = page.bounds(for: .mediaBox)
+        guard bounds.width > 0, bounds.height > 0 else { return nil }
+        // 2x so small print survives; the downscale below caps the long edge.
+        let scale: CGFloat = 2
+        let size = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            UIColor.white.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+            ctx.cgContext.translateBy(x: 0, y: size.height)
+            ctx.cgContext.scaleBy(x: scale, y: -scale)
+            page.draw(with: .mediaBox, to: ctx.cgContext)
+        }
+    }
+
+    /// Caps the long edge so a 12-megapixel photo doesn't become a huge
+    /// base64 payload for no extra legibility.
+    static func downscaled(_ image: UIImage, maxEdge: CGFloat = 1800) -> UIImage {
+        let longest = max(image.size.width, image.size.height)
+        guard longest > maxEdge, longest > 0 else { return image }
+        let ratio = maxEdge / longest
+        let size = CGSize(width: image.size.width * ratio, height: image.size.height * ratio)
+        return UIGraphicsImageRenderer(size: size).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
     }
 
     static func extract(fromText raw: String) async throws -> (legs: [TicketLeg], booking: TicketBooking) {
@@ -91,7 +159,13 @@ enum TicketExtractionService {
             ]],
             "messages": [["role": "user", "content": body]],
         ]
+        return try await send(payload, apiKey: apiKey)
+    }
 
+    /// One request path for both text and image, so the parsing contract and
+    /// the error handling can't drift apart between them.
+    private static func send(_ payload: [String: Any],
+                             apiKey: String) async throws -> (legs: [TicketLeg], booking: TicketBooking) {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = 90
