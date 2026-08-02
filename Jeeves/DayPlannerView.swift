@@ -963,7 +963,7 @@ struct DayPlannerView: View {
 
             if hasGymToday {
                 HStack {
-                    Text("Weightlifting starts").font(.ui(13.5)).foregroundStyle(Color.textSoft)
+                    Text("Gym starts").font(.ui(13.5)).foregroundStyle(Color.textSoft)
                     Spacer()
                     DatePicker("", selection: $gymTime, displayedComponents: .hourAndMinute)
                         .labelsHidden()

@@ -58,17 +58,16 @@ enum DayPlanner {
     static let commuteHomeMinutes = 30
     static let showerMinutes = 20
 
-    /// The gym trip's shape, derived from whichever parts are switched on.
-    /// `outbound` carries the parking buffer; the trip home does not.
-    /// `beforeAnchor` is how long the parts ahead of the anchored one run, so
-    /// the departure can be worked backward from the time the user entered.
+    /// The gym trip's shape. `outbound` carries the parking buffer; the trip
+    /// home does not. `workout` is one block: mobility, weightlifting and
+    /// cardio are logged in Fitness, so splitting them across the day plan
+    /// only added rows the planner had to reason about and the user never
+    /// used. The routine still holds the parts — they set the LENGTH.
     static func gymSpan(_ session: [(name: String, minutes: Int)])
-        -> (outbound: Int, beforeAnchor: Int, total: Int) {
+        -> (outbound: Int, workout: Int, total: Int) {
         let outbound = commuteToGymMinutes + CommuteBuffer.parkingMinutes
-        let anchorIndex = session.firstIndex { $0.name.localizedCaseInsensitiveContains("weight") } ?? 0
-        let beforeAnchor = session.prefix(anchorIndex).map(\.minutes).reduce(0, +)
         let workout = session.map(\.minutes).reduce(0, +)
-        return (outbound, beforeAnchor, outbound + workout + commuteHomeMinutes + showerMinutes)
+        return (outbound, workout, outbound + workout + commuteHomeMinutes + showerMinutes)
     }
 
     /// The historical fixed session, kept for callers that don't configure one.
@@ -101,8 +100,7 @@ enum DayPlanner {
         let choresMinutes = 40
         var choresFit = choresMinutes
         if let gymMinute {
-            let span = gymSpan(gymSession)
-            let leave = gymMinute - span.beforeAnchor - span.outbound
+            let leave = gymMinute - gymSpan(gymSession).outbound
             choresFit = max(0, min(choresMinutes, leave - cursor))
         }
         if choresFit > 0 {
@@ -141,13 +139,11 @@ enum DayPlanner {
             return blocks
         }
 
-        // Worked backward from the anchor part's start: the outbound commute
-        // (with its parking buffer) plus whatever parts come before it. These
-        // used to be the literals 30 and 20 — the same numbers the gym session
-        // now owns, so they have to be derived or the anchor drifts the moment
-        // a part is switched off.
+        // The gym time is when the SESSION starts, so leaving is just the drive
+        // plus parking worked backward from it. Neither is negotiable: the day
+        // gets shorter before the trip does.
         let span = gymSpan(gymSession)
-        let leaveTime = gymMinute - span.beforeAnchor - span.outbound
+        let leaveTime = gymMinute - span.outbound
         let preGymPool = max(0, leaveTime - choresEnd)
 
         // Where the post-gym region begins. If that's already past lunch's 2:30 PM
@@ -181,18 +177,13 @@ enum DayPlanner {
         blocks.append(PlanBlock(title: "Commute to gym", startMinute: gymCursor, durationMinutes: span.outbound,
                                 note: "\(commuteToGymMinutes) min drive + \(CommuteBuffer.parkingMinutes) min parking", isAnchor: false))
         gymCursor += span.outbound
-        // The parts and their minutes come from the routine now. The anchor is
-        // whichever part the gym time was set against — weightlifting when it
-        // exists, otherwise the first enabled part.
-        let session = gymSession
-        let anchorIndex = session.firstIndex { $0.name.localizedCaseInsensitiveContains("weight") } ?? 0
-        for (i, part) in session.enumerated() {
-            blocks.append(PlanBlock(title: "Gym — \(part.name)", startMinute: gymCursor,
-                                    durationMinutes: part.minutes,
-                                    note: i == anchorIndex ? "Anchor time" : nil,
-                                    isAnchor: i == anchorIndex))
-            gymCursor += part.minutes
-        }
+        // ONE block. What happens inside the session is logged in Fitness.
+        let parts = gymSession.map { "\($0.name) \($0.minutes)m" }.joined(separator: " · ")
+        blocks.append(PlanBlock(title: "Gym", startMinute: gymCursor,
+                                durationMinutes: span.workout,
+                                note: parts.isEmpty ? "Anchor time" : parts,
+                                isAnchor: true))
+        gymCursor += span.workout
         blocks.append(PlanBlock(title: "Commute home", startMinute: gymCursor, durationMinutes: commuteHomeMinutes, note: nil, isAnchor: false))
         gymCursor += commuteHomeMinutes
 

@@ -137,24 +137,24 @@ final class DayPlannerTests: XCTestCase {
         )
     }
 
-    func testGymBlockAnchorsWeightsAtEnteredTime() {
+    func testGymIsOneAnchorBlockAtTheEnteredTime() {
         let blocks = DayPlanner.generate(gymMinute: 11 * 60, prepSessions: [], leisureLogs: [])
-        XCTAssertEqual(block("Gym — Weightlifting", in: blocks)?.startMinute, 11 * 60)
-        // 30 min drive + 10 min parking + 20 min mobility, worked backward.
-        XCTAssertEqual(block("Commute to gym", in: blocks)?.startMinute, 11 * 60 - 60)
-        XCTAssertEqual(block("Gym — Mobility", in: blocks)?.startMinute, 11 * 60 - 20)
-        XCTAssertEqual(block("Gym — Cardio", in: blocks)?.startMinute, 11 * 60 + 70)
+        XCTAssertEqual(block("Gym", in: blocks)?.startMinute, 11 * 60)
+        XCTAssertEqual(block("Gym", in: blocks)?.durationMinutes, 125, "20 + 70 + 35, as one block")
+        // 30 min drive + 10 min parking, worked backward. Nothing else runs
+        // before the session now that it isn't split.
+        XCTAssertEqual(block("Commute to gym", in: blocks)?.startMinute, 11 * 60 - 40)
+        XCTAssertNil(block("Gym — Mobility", in: blocks), "the parts are logged in Fitness")
+        XCTAssertNil(block("Gym — Cardio", in: blocks))
     }
 
-    /// Switching a part off shortens the session and moves the departure —
-    /// the anchor must still land on the time the user entered.
-    func testDisablingAPartKeepsTheAnchorAndMovesTheDeparture() {
+    /// Switching a part off shortens the one block; the start doesn't move.
+    func testDisablingAPartShortensTheBlockWithoutMovingIt() {
         let session = [(name: "Weightlifting", minutes: 70), (name: "Cardio", minutes: 35)]
         let blocks = DayPlanner.generate(gymMinute: 11 * 60, prepSessions: [], leisureLogs: [],
                                          gymSession: session)
-        XCTAssertEqual(block("Gym — Weightlifting", in: blocks)?.startMinute, 11 * 60)
-        XCTAssertNil(block("Gym — Mobility", in: blocks), "mobility is off")
-        // Nothing before the anchor now, so leaving is just drive + parking.
+        XCTAssertEqual(block("Gym", in: blocks)?.startMinute, 11 * 60)
+        XCTAssertEqual(block("Gym", in: blocks)?.durationMinutes, 105)
         XCTAssertEqual(block("Commute to gym", in: blocks)?.startMinute, 11 * 60 - 40)
     }
 

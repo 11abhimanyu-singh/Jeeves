@@ -72,7 +72,7 @@ struct PlannerSetupView: View {
         Section("Today's gym") {
             Toggle("Gym today", isOn: gymToggle)
             if gymToggle.wrappedValue {
-                DatePicker("Weightlifting starts", selection: gymTime, displayedComponents: .hourAndMinute)
+                DatePicker("Gym starts", selection: gymTime, displayedComponents: .hourAndMinute)
             }
         }
     }

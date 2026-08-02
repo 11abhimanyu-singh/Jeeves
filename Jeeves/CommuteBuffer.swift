@@ -41,6 +41,41 @@ enum CommuteBuffer {
         return nil
     }
 
+    /// Which measured route a plan block describes, if any. Block titles are
+    /// prose ("Commute Home → Gym", "Commute to gym", "Commute home") while
+    /// estimate keys are compact ("Home→Gym"), so match on the meaningful
+    /// words rather than the exact string.
+    static func matchRoute(blockTitle: String, in estimates: [String: Int]) -> (route: String, minutes: Int)? {
+        let title = blockTitle.lowercased()
+        guard title.contains("commute") || title.contains("drive") || title.contains("travel") else { return nil }
+        var best: (route: String, minutes: Int, score: Int)?
+        for (route, minutes) in estimates {
+            guard let to = destination(of: route) else { continue }
+            let from = String(route[route.startIndex..<(route.range(of: "→")?.lowerBound
+                ?? route.range(of: "->")?.lowerBound ?? route.endIndex)])
+            // The destination must be named; the origin adds confidence.
+            guard mentions(title, to) else { continue }
+            let score = 1 + (mentions(title, from) ? 1 : 0)
+            if score > (best?.score ?? 0) { best = (route, minutes, score) }
+        }
+        return best.map { ($0.route, $0.minutes) }
+    }
+
+    /// What a block for this route must be AT LEAST. Commute time and parking
+    /// are physical facts, not preferences — a plan that shaves either one is
+    /// a plan that makes you late.
+    static func minimumMinutes(route: String, measured: Int) -> Int {
+        measured + (needsParking(route: route) ? parkingMinutes : 0)
+    }
+
+    private static func mentions(_ title: String, _ place: String) -> Bool {
+        let p = place.trimmingCharacters(in: .whitespaces).lowercased()
+        guard p.count >= 3 else { return false }
+        if title.contains(p) { return true }
+        // "Home → Gym" vs "Commute to gym": match on the distinctive word.
+        return p.split(separator: " ").contains { $0.count >= 3 && title.contains($0.lowercased()) }
+    }
+
     /// "Home", "home in Indiranagar", or a saved home address all count.
     static func isHome(_ place: String, homeAddress: String = "") -> Bool {
         let p = place.trimmingCharacters(in: .whitespaces).lowercased()

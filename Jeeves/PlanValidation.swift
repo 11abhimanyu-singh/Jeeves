@@ -200,6 +200,23 @@ enum PlanValidation {
             out.append(Violation(severity: .quality, message: message))
         }
 
+        // A shaved commute is severe, not cosmetic: it is the one kind of error
+        // that makes the user physically late. Travel time and parking are
+        // facts; when the day is too full an ACTIVITY gives way, never these.
+        for entry in timed {
+            guard let match = CommuteBuffer.matchRoute(blockTitle: entry.block.title,
+                                                       in: request.commuteEstimates) else { continue }
+            let floor = CommuteBuffer.minimumMinutes(route: match.route, measured: match.minutes)
+            let actual = entry.end - entry.start
+            if actual < floor {
+                let parking = CommuteBuffer.needsParking(route: match.route)
+                out.append(Violation(severity: .severe,
+                    message: "'\(entry.block.title)' is \(actual) min but \(match.route) measures \(match.minutes) min"
+                        + (parking ? " + \(CommuteBuffer.parkingMinutes) min parking" : "")
+                        + " = \(floor). Commute and parking are never trimmed to fit something else."))
+            }
+        }
+
         return out
     }
 

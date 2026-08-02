@@ -247,11 +247,13 @@ enum PlanGenerationService {
             // they used to be three numbers written into this sentence and
             // repeated in DayPlanner. The instruction NOT to compress them
             // still stands; only the figures moved.
+            // ONE block. What happens inside the session is logged in Fitness,
+            // so the day plan doesn't need mobility/weights/cardio as separate
+            // rows — it needs to know the gym is occupied for this long.
             let session = req.gymSession
-            let anchorName = session.first(where: { $0.name.localizedCaseInsensitiveContains("weight") })?.name
-                ?? session.first?.name ?? "Weightlifting"
-            let parts = session.map { "\($0.name) \($0.minutes) min" }.joined(separator: ", ")
-            s += "- Gym: \(anchorName.lowercased()) starts at \(hhmm(g)). Gym routine is \(session.map(\.name.localizedLowercase).joined(separator: ", ")), with FIXED durations: \(parts). NEVER compress or extend these — the workout is the workout; a late gym runs past 20:30 rather than shrinking (the 20:30 boundary applies to WORK, and the gym is a fixed personal commitment like an event). Title each gym block \"Gym — <part>\". The shower is at HOME after returning from the gym (20 min) — NOT at the gym — unless you're chaining directly from the gym to an event (then shower at the gym to skip the trip home). Gym routing is always Home → Gym → Home unless chaining to an adjacent event makes Gym → Event sensible.\n"
+            let workout = session.map(\.minutes).reduce(0, +)
+            let parts = session.map { "\($0.name) \($0.minutes) min" }.joined(separator: " + ")
+            s += "- Gym: ONE block titled exactly \"Gym\", kind \"gym\", isAnchor true, starting at \(hhmm(g)) and running \(workout) min (\(parts)). Do NOT split it into mobility/weightlifting/cardio blocks — those are logged elsewhere. NEVER compress or extend the \(workout) min — the workout is the workout; a late gym runs past 20:30 rather than shrinking (the 20:30 boundary applies to WORK, and the gym is a fixed personal commitment like an event). The shower is at HOME after returning from the gym (20 min) — NOT at the gym — unless you're chaining directly from the gym to an event (then shower at the gym to skip the trip home). Gym routing is always Home → Gym → Home unless chaining to an adjacent event makes Gym → Event sensible.\n"
             let midpoint = (Baseline.dayStartMinute + Baseline.normalBoundaryMinute) / 2   // 14:15
             if g >= midpoint {
                 s += "- The gym is in the SECOND half of the day (weightlifting at/after \(hhmm(midpoint))), so ALSO add a 20-min morning shower in the morning routine — the user shouldn't go the whole day unshowered. The main shower still happens at home in the evening after the gym (also 20 min).\n"
@@ -286,6 +288,7 @@ enum PlanGenerationService {
             s += "- For any route not listed, assume \(req.defaultCommuteMinutes) min.\n"
         }
         s += "- OUTBOUND trips (to the gym, to an event) include \(park) min for parking and walking in — budget the total. Trips ENDING at home do NOT: you park and you're there. Say the two parts separately in the block note.\n"
+        s += "- COMMUTE TIME AND PARKING ARE NON-NEGOTIABLE. They are physical facts, not preferences: never shorten a commute, never drop the parking buffer, and never trim either one to make something else fit. When the day is too full, drop or shrink an ACTIVITY — a commute that has been shaved is a plan that makes the user late.\n"
         s += "\n"
 
         return s

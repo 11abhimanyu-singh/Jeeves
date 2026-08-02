@@ -128,6 +128,78 @@ final class PlanRulesTests: XCTestCase {
         XCTAssertNil(CommuteBuffer.destination(of: "Gym"))
     }
 
+    // MARK: commute + parking are non-negotiable
+
+    private func plan(_ blocks: [GeneratedBlock]) -> GeneratedPlan {
+        GeneratedPlan(blocks: blocks, dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+    }
+    private func request(_ estimates: [String: Int]) -> PlanRequest {
+        PlanRequest(userMessage: "", hasGymToday: false, gymMinute: nil, events: [],
+                    locations: [], defaultCommuteMinutes: 30, commuteEstimates: estimates,
+                    prepNeglectNote: nil)
+    }
+
+    /// A one-block plan trips other rules too (no lunch, nothing after an
+    /// event). Only the travel-floor violations are under test here.
+    private func travelViolations(_ blocks: [GeneratedBlock], _ estimates: [String: Int]) -> [String] {
+        PlanValidation.severe(plan(blocks), request: request(estimates))
+            .map(\.message)
+            .filter { $0.contains("never trimmed") }
+    }
+
+    func testAShavedCommuteIsSevere() {
+        let v = travelViolations([b("Commute Home → Gym", "10:00", "10:30")], ["Home→Gym": 30])
+        XCTAssertEqual(v.count, 1, "30 measured + 10 parking = 40; 30 is short")
+        XCTAssertTrue(v[0].contains("+ 10 min parking"), v[0])
+    }
+
+    func testAFullOutboundCommutePasses() {
+        XCTAssertTrue(travelViolations([b("Commute Home → Gym", "10:00", "10:40")],
+                                       ["Home→Gym": 30]).isEmpty)
+    }
+
+    func testTheTripHomeNeedsNoParkingAllowance() {
+        XCTAssertTrue(travelViolations([b("Commute Gym → Home", "12:00", "12:30")],
+                                       ["Gym→Home": 30]).isEmpty)
+        XCTAssertEqual(travelViolations([b("Commute Gym → Home", "12:00", "12:20")],
+                                        ["Gym→Home": 30]).count, 1,
+                       "no parking on the way home, but the drive itself still can't shrink")
+    }
+
+    func testProseBlockTitlesStillMatchTheirRoute() {
+        XCTAssertEqual(CommuteBuffer.matchRoute(blockTitle: "Commute to gym",
+                                                in: ["Home→Gym": 42])?.minutes, 42)
+        XCTAssertEqual(CommuteBuffer.matchRoute(blockTitle: "Commute home",
+                                                in: ["Gym→Home": 38])?.minutes, 38)
+        XCTAssertNil(CommuteBuffer.matchRoute(blockTitle: "Lunch", in: ["Home→Gym": 42]),
+                     "only commute blocks are held to a travel floor")
+    }
+
+    // MARK: the gym is one block
+
+    func testTheGymIsASingleAnchorBlock() {
+        let blocks = DayPlanner.generate(gymMinute: 11 * 60, prepSessions: [], leisureLogs: [])
+        let gym = blocks.filter { $0.title.localizedCaseInsensitiveContains("gym")
+                                  && !$0.title.localizedCaseInsensitiveContains("commute") }
+        XCTAssertEqual(gym.count, 1, "mobility/weights/cardio are logged in Fitness, not planned separately")
+        XCTAssertEqual(gym.first?.title, "Gym")
+        XCTAssertEqual(gym.first?.startMinute, 11 * 60, "it starts when the user said")
+        XCTAssertEqual(gym.first?.durationMinutes, 125, "20 + 70 + 35")
+        XCTAssertTrue(gym.first?.isAnchor ?? false)
+        XCTAssertEqual(gym.first?.note, "Mobility 20m · Weightlifting 70m · Cardio 35m",
+                       "the parts still show, as a note")
+    }
+
+    func testDisablingAPartShortensTheOneBlock() {
+        let blocks = DayPlanner.generate(gymMinute: 11 * 60, prepSessions: [], leisureLogs: [],
+                                         gymSession: [(name: "Weightlifting", minutes: 70)])
+        let gym = blocks.first { $0.title == "Gym" }
+        XCTAssertEqual(gym?.durationMinutes, 70)
+        XCTAssertEqual(gym?.startMinute, 11 * 60)
+        // Departure is now just drive + parking — nothing runs before the gym.
+        XCTAssertEqual(blocks.first { $0.title == "Commute to gym" }?.startMinute, 11 * 60 - 40)
+    }
+
     // MARK: preferences
 
     func testDayStartFallsBackTo8amWhenUnset() {
