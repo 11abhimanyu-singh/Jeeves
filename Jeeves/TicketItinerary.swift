@@ -5,18 +5,37 @@
 //  Turning a parsed ticket into a trip — and refusing to when the numbers
 //  don't add up.
 //
-//  THE FREE VALIDATOR
+//  THE DURATION CHECK — AND EXACTLY WHAT IT PROVES
 //
-//  A ticket is redundant on purpose: it prints the local departure time, the
-//  local arrival time, AND the duration. Those three over-determine each
-//  other. Convert both endpoints to UTC using the airports' zones and the
-//  elapsed time MUST equal the printed duration.
+//  A ticket prints the local departure, the local arrival AND the duration.
+//  Converting both endpoints to UTC and comparing the elapsed time to the
+//  printed duration catches a class of timezone error for free.
 //
-//  That means the riskiest step in the whole feature — mapping an airport code
-//  to a timezone, which nothing on the page states — checks itself with no
-//  network and no second source. If BLR were read as UTC+8 instead of +5:30,
-//  leg 1 would compute as 1h 35m against a printed 4h 35m and the import stops
-//  rather than quietly producing a leave-by three hours wrong.
+//  It is important to be precise about which class, because an earlier version
+//  of this comment claimed far more than the arithmetic delivers. Elapsed UTC
+//  equals (arriveLocal − departLocal) − (offset_to − offset_from). The check
+//  therefore constrains ONE quantity: the DIFFERENCE between the two offsets.
+//  It says nothing about either zone on its own. Concretely:
+//
+//    • Same-zone legs are not checked at all. The difference is zero for every
+//      possible assignment, so a Bengaluru→Delhi leg validates against any
+//      pair of same-offset zones. Nine of this directory's airports are
+//      Asia/Kolkata, so most domestic flights get no verification here.
+//    • A wrong zone with the same offset is invisible — Asia/Colombo for
+//      Asia/Kolkata, Asia/Makassar for Asia/Singapore.
+//    • Correlated errors cancel: any pair preserving the offset difference
+//      passes.
+//
+//  What it does catch is a wrong zone that changes the offset difference on a
+//  cross-zone leg — including reading BLR as UTC+8, which makes leg 1 compute
+//  7h 05m against a printed 4h 35m. (Not 1h 35m: a larger origin offset moves
+//  the departure EARLIER in UTC, so the leg looks longer. The original comment
+//  had the direction backwards, which is what happens when nobody runs the
+//  number.)
+//
+//  So `verified` is recorded per leg and "unverifiable" is a first-class
+//  outcome rather than silence — the same rule the airport directory follows
+//  for an unknown code.
 //
 //  Everything here is pure. No SwiftData, no network, no UIKit — so the whole
 //  thing is testable against the real ticket as a fixture.
@@ -90,6 +109,11 @@ struct ResolvedLeg: Equatable, Sendable {
     var arriveUTC: Date
     var fromZoneID: String
     var toZoneID: String
+    /// Whether the printed duration actually constrained this leg's zones.
+    /// False when no duration was printed, and false for a same-zone leg where
+    /// the check is arithmetically vacuous. A caller that wants to say "these
+    /// times are verified" must read this rather than assume.
+    var zonesVerified: Bool = false
 
     var elapsedMinutes: Int { Int(arriveUTC.timeIntervalSince(departUTC) / 60) }
     var fromName: String { AirportDirectory.name(leg.from) }
@@ -119,6 +143,7 @@ enum ItineraryProblem: Equatable, Sendable {
     case durationMismatch(flight: String, printed: Int, computed: Int)
     case arrivesBeforeDeparts(flight: String)
     case legsOutOfOrder(earlier: String, later: String)
+    case brokenChain(landed: String, departed: String, after: String)
     case impossibleConnection(at: String, minutes: Int)
     case noLegs
 
@@ -128,7 +153,7 @@ enum ItineraryProblem: Equatable, Sendable {
     var isFatal: Bool {
         switch self {
         case .unknownAirport, .unreadableTime, .durationMismatch,
-             .arrivesBeforeDeparts, .legsOutOfOrder, .noLegs:
+             .arrivesBeforeDeparts, .legsOutOfOrder, .brokenChain, .noLegs:
             return true
         case .impossibleConnection:
             return false
@@ -147,6 +172,8 @@ enum ItineraryProblem: Equatable, Sendable {
             return "\(flight) arrives before it departs."
         case .legsOutOfOrder(let a, let b):
             return "\(b) starts before \(a) has landed."
+        case .brokenChain(let landed, let departed, let after):
+            return "\(after) lands at \(landed) but the next flight leaves from \(departed) — a leg is missing."
         case .impossibleConnection(let at, let minutes):
             return "Only \(fmt(minutes)) at \(at) between flights."
         case .noLegs:
@@ -208,9 +235,16 @@ enum TicketItinerary {
                 continue
             }
 
+            // The check only proves something when a duration was printed AND
+            // the two zones differ at this instant. Same offset means the
+            // comparison is satisfied by every possible assignment.
+            let offsetsDiffer = fromZone.secondsFromGMT(for: dep) != toZone.secondsFromGMT(for: arr)
+            let verified = leg.printedMinutes != nil && offsetsDiffer
+
             resolved.append(ResolvedLeg(leg: leg, departUTC: dep, arriveUTC: arr,
                                         fromZoneID: fromZone.identifier,
-                                        toZoneID: toZone.identifier))
+                                        toZoneID: toZone.identifier,
+                                        zonesVerified: verified))
         }
 
         guard resolved.count == legs.count else { return (nil, problems) }
@@ -219,6 +253,16 @@ enum TicketItinerary {
         // which legs on three different clocks can be compared at all.
         for (a, b) in zip(resolved, resolved.dropFirst()) where b.departUTC < a.arriveUTC {
             problems.append(.legsOutOfOrder(earlier: a.leg.flightNumber, later: b.leg.flightNumber))
+        }
+
+        // The chain must actually join up. Chronology alone let a DROPPED leg
+        // through: BLR→SIN followed by CGK→DPS resolved cleanly and invented a
+        // "connection at SIN" the traveller never makes. Losing a leg is a
+        // realistic extraction failure, so it gets its own check.
+        for (a, b) in zip(resolved, resolved.dropFirst())
+        where a.leg.to.uppercased() != b.leg.from.uppercased() {
+            problems.append(.brokenChain(landed: a.leg.to, departed: b.leg.from,
+                                         after: a.leg.flightNumber))
         }
         guard !problems.contains(where: \.isFatal) else { return (nil, problems) }
 

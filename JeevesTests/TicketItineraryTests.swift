@@ -61,17 +61,78 @@ final class TicketItineraryTests: XCTestCase {
         }
     }
 
-    func testAWrongTimezoneIsCaughtByTheDurationNotByAHuman() {
-        // Read BLR as UTC+8 instead of +5:30 and leg 1 computes to 1h 35m
-        // against a printed 4h 35m. Nothing on the ticket says the offset, so
-        // this arithmetic is the only thing standing between a typo in a
-        // lookup table and a leave-by three hours wrong.
+    func testAnOffsetChangingZoneErrorIsCaughtByTheDuration() {
+        // The class the check DOES catch: a wrong zone that changes the
+        // difference between the two offsets. BKK is +7, so leg 1's printed
+        // 4h 35m no longer reconciles.
         var leg = realTicket[0]
-        leg.from = "SIN"   // stands in for "BLR resolved to the wrong zone"
+        leg.from = "BKK"
         let (itin, problems) = TicketItinerary.resolve(legs: [leg])
         XCTAssertNil(itin, "an itinerary that fails its own arithmetic must not be produced")
         XCTAssertTrue(problems.contains { if case .durationMismatch = $0 { return true }; return false },
                       "expected a duration mismatch, got \(problems.map(\.message))")
+    }
+
+    func testTheDurationCheckIsBlindToASameOffsetZoneError() {
+        // The class it does NOT catch, pinned so nobody re-reads the check as
+        // stronger than it is. Colombo is also +5:30, so substituting it for
+        // Bengaluru reconciles perfectly against the same printed duration.
+        var leg = realTicket[0]
+        leg.from = "CMB"
+        let (itin, problems) = TicketItinerary.resolve(legs: [leg])
+        XCTAssertNotNil(itin, "same-offset substitution passes — this is a real blind spot")
+        XCTAssertFalse(problems.contains { if case .durationMismatch = $0 { return true }; return false })
+    }
+
+    func testASameZoneLegIsMarkedUnverifiedRatherThanTrusted() {
+        // BLR→DEL is entirely inside Asia/Kolkata, so the duration constrains
+        // nothing. The leg still resolves; it just must not claim to be checked.
+        let domestic = TicketLeg(flightNumber: "6E 2044", carrier: "IndiGo",
+                                 from: "BLR", to: "DEL",
+                                 departLocal: dc(2026, 9, 3, 23, 5),
+                                 arriveLocal: dc(2026, 9, 4, 2, 5),
+                                 printedMinutes: 180)
+        let (itin, _) = TicketItinerary.resolve(legs: [domestic])
+        XCTAssertEqual(itin?.legs.first?.zonesVerified, false,
+                       "a same-offset leg is not verified by its duration")
+    }
+
+    func testHalfOfTheRealTicketCannotBeVerifiedAtAll() {
+        // Worth stating plainly, because it is the honest measure of how much
+        // the duration check buys on a real booking:
+        //   BLR(+5:30) → SIN(+8)   offsets differ  → verified
+        //   SIN(+8)    → DPS(+8)   SAME offset     → NOT verified
+        //   DPS(+8)    → SIN(+8)   SAME offset     → NOT verified
+        //   SIN(+8)    → BLR(+5:30) offsets differ → verified
+        // Singapore and Makassar are both UTC+8, so two of these four legs are
+        // arithmetically unverifiable however carefully the check is written.
+        let (itin, _) = TicketItinerary.resolve(legs: realTicket)
+        let verified = itin?.legs.map(\.zonesVerified)
+        XCTAssertEqual(verified, [true, false, false, true])
+    }
+
+    func testALegWithNoPrintedDurationIsNotSilentlyTreatedAsChecked() {
+        var leg = realTicket[0]
+        leg.printedMinutes = nil
+        let (itin, _) = TicketItinerary.resolve(legs: [leg])
+        XCTAssertNotNil(itin, "a ticket without durations is still importable")
+        XCTAssertEqual(itin?.legs.first?.zonesVerified, false,
+                       "unverifiable must be visible, not silent")
+    }
+
+    func testADroppedLegIsCaughtRatherThanBecomingAPhantomConnection() {
+        // Chronology alone let this through: BLR→SIN then CGK→DPS resolved
+        // cleanly and invented a connection at Singapore.
+        let legs = [
+            realTicket[0],
+            TicketLeg(flightNumber: "TR 8600", carrier: "Scoot", from: "CGK", to: "DPS",
+                      departLocal: dc(2026, 9, 4, 10, 0), arriveLocal: dc(2026, 9, 4, 12, 50),
+                      printedMinutes: 110),
+        ]
+        let (itin, problems) = TicketItinerary.resolve(legs: legs)
+        XCTAssertNil(itin)
+        XCTAssertTrue(problems.contains { if case .brokenChain = $0 { return true }; return false },
+                      "got \(problems.map(\.message))")
     }
 
     func testUnknownAirportStopsTheImportRatherThanGuessing() {

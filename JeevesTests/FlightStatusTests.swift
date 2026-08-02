@@ -84,7 +84,8 @@ final class FlightStatusTests: XCTestCase {
         let decided = scheduled.addingTimeInterval(-2 * 3600)
         let state = FlightWatch.state(report: report(delayMinutes: 180, now: now),
                                       scheduledDeparture: scheduled,
-                                      decidedLeaveBy: decided, now: now)
+                                      decision: .init(leaveBy: decided, forDelayMinutes: 180),
+                                      now: now)
         guard case .lateSettled(let minutes, let leaveBy) = state else { return XCTFail("got \(state)") }
         XCTAssertEqual(minutes, 180)
         XCTAssertEqual(leaveBy, decided)
@@ -97,6 +98,88 @@ final class FlightStatusTests: XCTestCase {
                                       scheduledDeparture: scheduled, now: now)
         guard case .cancelled = state else { return XCTFail("got \(state)") }
         XCTAssertTrue(state.isActionable)
+    }
+
+    // MARK: The four ways .onTime used to be reachable by accident
+
+    func testAFlightBroughtForwardIsNotOnTime() {
+        // The dangerous direction: the flight moved EARLIER, so the existing
+        // leave-by is now too late and you miss it. This reported .onTime.
+        let now = scheduled.addingTimeInterval(-6 * 3600)
+        let state = FlightWatch.state(report: report(delayMinutes: -40, now: now),
+                                      scheduledDeparture: scheduled, now: now)
+        guard case .lateUndecided(let minutes, _) = state else {
+            return XCTFail("a flight brought forward needs the same decision as a delay, got \(state)")
+        }
+        XCTAssertEqual(minutes, -40)
+        XCTAssertTrue(state.isActionable)
+    }
+
+    func testAFlightBroughtForwardStillGetsAProposal() {
+        let now = scheduled.addingTimeInterval(-6 * 3600)
+        let p = LeaveByRevision.propose(currentLeaveBy: scheduled.addingTimeInterval(-315 * 60),
+                                        report: report(delayMinutes: -40, now: now),
+                                        bufferMinutes: 240, journeyMinutes: 75,
+                                        journeyRemeasured: true)
+        XCTAssertEqual(p?.shiftMinutes, -40, "you must be told to leave EARLIER")
+    }
+
+    func testAReadingStampedInTheFutureIsStaleNotOnTime() {
+        // Provider clock skew, or a zone bug parsing observedAt, slipped past
+        // a one-sided freshness test and produced a green state.
+        let now = scheduled.addingTimeInterval(-3 * 3600)
+        let future = report(delayMinutes: 0, observedMinutesAgo: -10 * 24 * 60, now: now)
+        let state = FlightWatch.state(report: future, scheduledDeparture: scheduled, now: now)
+        guard case .stale = state else {
+            return XCTFail("a reading from the future is not a current 'on time', got \(state)")
+        }
+    }
+
+    func testACancellationIsShownDaysAheadNotHiddenByTheWatchWindow() {
+        // Airlines cancel days out. Gating this behind the 12h window hid the
+        // one fact worth knowing early for 36 hours.
+        let now = scheduled.addingTimeInterval(-48 * 3600)
+        let state = FlightWatch.state(report: report(delayMinutes: 0, now: now, cancelled: true),
+                                      scheduledDeparture: scheduled, now: now)
+        guard case .cancelled = state else { return XCTFail("got \(state)") }
+        XCTAssertTrue(state.isActionable)
+    }
+
+    func testADecisionOnlySettlesTheDelayItWasMadeFor() {
+        // Settle at 60 minutes, then the flight slips to 300. The old decision
+        // must not keep a four-hour-wrong leave-by on screen with the row
+        // silent.
+        let now = scheduled.addingTimeInterval(-9 * 3600)
+        let decided = scheduled.addingTimeInterval(-255 * 60)
+        let state = FlightWatch.state(report: report(delayMinutes: 300, now: now),
+                                      scheduledDeparture: scheduled,
+                                      decision: .init(leaveBy: decided, forDelayMinutes: 60),
+                                      now: now)
+        guard case .lateUndecided(let minutes, _) = state else {
+            return XCTFail("a decision must not cover a delay five times larger, got \(state)")
+        }
+        XCTAssertEqual(minutes, 300)
+        XCTAssertTrue(state.isActionable)
+    }
+
+    func testASmallFurtherSlipDoesNotReopenASettledDecision() {
+        // The other side: re-asking on every two-minute re-time would be noise.
+        let now = scheduled.addingTimeInterval(-9 * 3600)
+        let decided = scheduled.addingTimeInterval(-135 * 60)
+        let state = FlightWatch.state(report: report(delayMinutes: 185, now: now),
+                                      scheduledDeparture: scheduled,
+                                      decision: .init(leaveBy: decided, forDelayMinutes: 180),
+                                      now: now)
+        guard case .lateSettled = state else { return XCTFail("got \(state)") }
+    }
+
+    func testACancelledFlightGetsNoLeaveByProposal() {
+        let now = scheduled.addingTimeInterval(-5 * 3600)
+        XCTAssertNil(LeaveByRevision.propose(currentLeaveBy: scheduled,
+                                             report: report(delayMinutes: 180, now: now, cancelled: true),
+                                             bufferMinutes: 240, journeyMinutes: 75,
+                                             journeyRemeasured: true),
+                     "proposing a leave-by for a journey that isn't happening is an assertion, not a help")
     }
 
     func testSmallDelaysAreShownButDoNotInterrupt() {

@@ -87,6 +87,23 @@ enum FlightWatchState: Equatable, Sendable {
     }
 }
 
+/// A leave-by the user confirmed, and the delay it was confirmed FOR.
+///
+/// Recording only the new time was not enough: a decision taken at 60 minutes
+/// late kept applying when the flight slipped to 300, so the row showed a
+/// leave-by four hours wrong and had stopped asking. A decision covers the
+/// delay it was made for, give or take.
+struct LeaveByDecision: Equatable, Sendable {
+    var leaveBy: Date
+    var forDelayMinutes: Int
+    /// How much further the flight may slip before the decision is re-opened.
+    var toleranceMinutes: Int = 10
+
+    func covers(delayMinutes: Int) -> Bool {
+        abs(delayMinutes - forDelayMinutes) <= toleranceMinutes
+    }
+}
+
 enum FlightWatch {
 
     /// How long before departure the app starts caring. Outside this, a delay
@@ -113,8 +130,15 @@ enum FlightWatch {
     ///   - now: injected
     static func state(report: FlightStatusReport?,
                       scheduledDeparture: Date,
-                      decidedLeaveBy: Date? = nil,
+                      decision: LeaveByDecision? = nil,
                       now: Date = Date()) -> FlightWatchState {
+
+        // A cancellation is checked BEFORE the watch window. Airlines cancel
+        // days ahead, and that is the one fact worth knowing early — gating it
+        // behind a 12-hour window hid it for as long as it was most useful.
+        if let report, report.isCancelled, !isFutureDated(report, now: now) {
+            return .cancelled(observedAt: report.observedAt)
+        }
 
         let windowOpens = scheduledDeparture.addingTimeInterval(-Double(windowHours) * 3600)
         if now < windowOpens {
@@ -127,20 +151,36 @@ enum FlightWatch {
             return .stale(lastSuccess: nil)
         }
 
-        if report.isCancelled { return .cancelled(observedAt: report.observedAt) }
-
+        // Age is checked in BOTH directions. A reading stamped in the future —
+        // provider clock skew, or a zone bug parsing observedAt — used to slip
+        // past a one-sided `age > freshness` test and report a green state,
+        // which is the precise failure this file exists to prevent.
         let age = now.timeIntervalSince(report.observedAt) / 60
-        if age > Double(freshnessMinutes) {
-            return .stale(lastSuccess: report.observedAt)
+        if age > Double(freshnessMinutes) || age < -Double(clockSkewToleranceMinutes) {
+            return .stale(lastSuccess: age < 0 ? nil : report.observedAt)
         }
 
         let delay = report.delayMinutes
-        guard delay > 0 else { return .onTime(observedAt: report.observedAt) }
 
-        if let decidedLeaveBy {
-            return .lateSettled(minutes: delay, leaveBy: decidedLeaveBy)
+        // A flight that moved EARLIER is not "on time" — it is the one case
+        // where the existing leave-by is dangerously late. It needs the same
+        // decision as a delay, in the opposite direction.
+        guard delay != 0 else { return .onTime(observedAt: report.observedAt) }
+
+        // A decision settles ONE delay. If the flight has since slipped further
+        // the decision no longer covers it, so it goes back to asking rather
+        // than displaying a leave-by that matches an older, smaller delay.
+        if let decision, decision.covers(delayMinutes: delay) {
+            return .lateSettled(minutes: delay, leaveBy: decision.leaveBy)
         }
         return .lateUndecided(minutes: delay, observedAt: report.observedAt)
+    }
+
+    /// Guards against a provider stamping a reading in the future.
+    static let clockSkewToleranceMinutes = 5
+
+    static func isFutureDated(_ report: FlightStatusReport, now: Date) -> Bool {
+        now.timeIntervalSince(report.observedAt) / 60 < -Double(clockSkewToleranceMinutes)
     }
 
     /// Whether a delay is worth interrupting someone for.
@@ -178,8 +218,13 @@ enum LeaveByRevision {
                         bufferMinutes: Int,
                         journeyMinutes: Int,
                         journeyRemeasured: Bool) -> LeaveByProposal? {
+        // A cancelled flight has no leave-by to propose. Offering one would be
+        // the app asserting a journey it knows is not happening.
+        guard !report.isCancelled else { return nil }
         let delay = report.delayMinutes
-        guard delay > 0 else { return nil }
+        // Non-zero in EITHER direction: a flight brought forward needs a new
+        // leave-by just as much as a delayed one, and more urgently.
+        guard delay != 0 else { return nil }
         let atAirport = report.estimatedDeparture
             .addingTimeInterval(-Double(bufferMinutes) * 60)
         let proposed = atAirport.addingTimeInterval(-Double(journeyMinutes) * 60)
