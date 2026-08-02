@@ -50,6 +50,7 @@ struct DayPlannerView: View {
     @State private var calendarError: String?
     @State private var showPlanEditor = false
     @State private var showDateJump = false
+    @State private var showTicketImport = false
 
     private var today: Date { Date().startOfDay }
     private var isToday: Bool { selectedDate == today }
@@ -90,6 +91,7 @@ struct DayPlannerView: View {
             }
         }
         .sheet(item: $editingTrip) { TripEditorView(trip: $0) }
+        .sheet(isPresented: $showTicketImport) { TicketImportView() }
         .sheet(isPresented: $showDateJump) {
             DateJumpSheet(selectedDate: $selectedDate, today: today)
                 .presentationDetents([.height(460)])
@@ -911,7 +913,14 @@ struct DayPlannerView: View {
             // creating a trip stands the planner down for the whole day — so
             // the label says which one this tap will do.
             let hasTrip = tripCovering(selectedDate) != nil
-            Button { openOrCreateTrip() } label: {
+            Menu {
+                Button(hasTrip ? "Open this trip" : "Start a trip on this day") {
+                    openOrCreateTrip()
+                }
+                // A ticket already knows the dates, the stays and every leg —
+                // typing that in by hand is the slow path, not the main one.
+                Button("Import a ticket…") { showTicketImport = true }
+            } label: {
                 Circle()
                     .fill(hasTrip ? Color.travelBg : Color.surface)
                     .frame(width: 44, height: 44)
@@ -920,7 +929,9 @@ struct DayPlannerView: View {
                         .font(.ui(15)))
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(hasTrip ? "Open trip" : "Start a trip on this day")
+            .accessibilityLabel("Travel")
+            .accessibilityHint(hasTrip ? "Open this trip, or import a ticket"
+                                       : "Start a trip, or import a ticket")
             .accessibilityHint(hasTrip ? "" : "Creates a trip covering this day and stands the planner down")
             // A calendar glyph means "pick a date" — it used to jump to today,
             // which does nothing visible on the day you are already on (the
