@@ -325,6 +325,181 @@ final class ChatToolExecutorTests: XCTestCase {
         XCTAssertEqual(after.first?.date, Date().startOfDay)
     }
 
+    // MARK: eval-14 — the day has edges, but an event can cross them
+
+    /// Pushing a 22:00 event by three hours used to clamp it to 24:00–24:00:
+    /// a zero-length event pinned to the wrong day. Past midnight it belongs
+    /// to the next day, at full duration.
+    func testShiftPastMidnightCarriesTheEventToTheNextDay() async {
+        let context = container.mainContext
+        _ = await executor.run(.init(
+            id: "n1", name: "add_event",
+            input: ["title": "Late film", "date": day(1),
+                    "start_time": "22:00", "end_time": "23:00"]))
+        let out = await executor.run(.init(
+            id: "n2", name: "edit_event",
+            input: ["title": "Late film", "shift_by_minutes": 180]))
+
+        let events = (try? context.fetch(FetchDescriptor<DailyEvent>())) ?? []
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.startMinute, 60, "22:00 + 3h is 01:00")
+        XCTAssertEqual(events.first?.endMinute, 120, "the full hour survives the day boundary")
+        XCTAssertEqual(events.first?.date,
+                       Calendar.current.date(byAdding: .day, value: 2, to: Date())!.startOfDay)
+        XCTAssertTrue(out.text.contains("Moved"), "the receipt names the day it landed on")
+    }
+
+    /// The half that genuinely cannot be stored: an event whose END would pass
+    /// midnight. It must not be reported as a clean push.
+    func testShiftThatWouldCrossMidnightSaysHowMuchWasLost() async {
+        let context = container.mainContext
+        _ = await executor.run(.init(
+            id: "n3", name: "add_event",
+            input: ["title": "Dinner with Arvind", "date": day(1),
+                    "start_time": "20:00", "end_time": "24:00"]))
+        let out = await executor.run(.init(
+            id: "n4", name: "edit_event",
+            input: ["title": "Dinner with Arvind", "shift_by_minutes": 30]))
+
+        let e = ((try? context.fetch(FetchDescriptor<DailyEvent>())) ?? []).first
+        XCTAssertEqual(e?.startMinute, 20 * 60 + 30)
+        XCTAssertEqual(e?.endMinute, 24 * 60)
+        XCTAssertTrue(out.text.contains("SHORTER BY 30 MIN"),
+                      "the loss belongs in the main sentence, not a trailing aside")
+        XCTAssertTrue(out.text.contains("past midnight"))
+    }
+
+    // MARK: eval-14 — hotel policy actually reaches the drives
+
+    /// Told "checkout is 11:30", the executor stored the minute and stopped:
+    /// resync only ran on a DATE move, so the transition drive kept a leave
+    /// time after the checkout it had just been given.
+    func testCheckoutChangeReAnchorsTheTransitionDriveAndNamesTheConflict() async throws {
+        let context = container.mainContext
+        _ = await executor.run(.init(
+            id: "p1", name: "add_stay",
+            input: ["trip": "Hills", "hotel": "CGH Earth Wayanad",
+                    "arrive_date": day(5), "depart_date": day(8)]))
+        _ = await executor.run(.init(
+            id: "p2", name: "add_stay",
+            input: ["trip": "Hills", "hotel": "Western Valley Resort",
+                    "arrive_date": day(8), "depart_date": day(10)]))
+        await drainBackgroundMeasure()
+
+        // 42-min drive, checkout 11:30 → arrives 12:12, well before a 14:00
+        // check-in. That gap is real and must be said, not smoothed over.
+        let out = await executor.run(.init(
+            id: "p3", name: "update_stay",
+            input: ["hotel": "Western Valley Resort", "checkin_time": "14:00"]))
+
+        XCTAssertTrue(out.text.contains("HOTEL POLICY"),
+                      "a leg that cannot satisfy both windows must say so: \(out.text)")
+        XCTAssertTrue(out.text.contains("check-in"), out.text)
+        let segs = (try? context.fetch(FetchDescriptor<TravelSegment>())) ?? []
+        XCTAssertNotNil(segs.first { $0.mode == .drive && $0.arriveBy != nil })
+    }
+
+    func testUpdateStayReceiptQuotesTheOldRangeAndTheNew() async {
+        _ = await executor.run(.init(
+            id: "r1", name: "add_stay",
+            input: ["trip": "Coorg", "hotel": "Evolve Back",
+                    "arrive_date": day(5), "depart_date": day(7)]))
+        let out = await executor.run(.init(
+            id: "r2", name: "update_stay",
+            input: ["hotel": "Evolve Back", "new_depart_date": day(9)]))
+        XCTAssertTrue(out.text.contains("→"), "old → new, never just the new: \(out.text)")
+    }
+
+    // MARK: eval-14 — one set of days belongs to one trip
+
+    func testMovingATripThroughAnotherIsRefusedAndNothingChanges() async {
+        let context = container.mainContext
+        let a = Trip(title: "Colombo",
+                     startDate: Calendar.current.date(byAdding: .day, value: 20, to: Date())!.startOfDay,
+                     endDate: Calendar.current.date(byAdding: .day, value: 24, to: Date())!.startOfDay)
+        let b = Trip(title: "Mysore",
+                     startDate: Calendar.current.date(byAdding: .day, value: 14, to: Date())!.startOfDay,
+                     endDate: Calendar.current.date(byAdding: .day, value: 16, to: Date())!.startOfDay)
+        context.insert(a); context.insert(b)
+        try? context.save()
+
+        let out = await executor.run(.init(
+            id: "o1", name: "update_trip",
+            input: ["title": "Mysore", "new_start_date": day(21), "new_end_date": day(23)]))
+
+        XCTAssertTrue(out.text.contains("Colombo"), out.text)
+        XCTAssertTrue(out.text.contains("NOTHING was changed"), out.text)
+        XCTAssertEqual(b.startDate, Calendar.current.date(byAdding: .day, value: 14, to: Date())!.startOfDay,
+                       "a refused move must leave the trip exactly where it was")
+        XCTAssertEqual(b.endDate, Calendar.current.date(byAdding: .day, value: 16, to: Date())!.startOfDay)
+    }
+
+    func testTripsMayStillTouchAtAHandoverDay() async {
+        let context = container.mainContext
+        let a = Trip(title: "Singapore", startDate: Date().startOfDay,
+                     endDate: Calendar.current.date(byAdding: .day, value: 5, to: Date())!.startOfDay)
+        let b = Trip(title: "Mysore",
+                     startDate: Calendar.current.date(byAdding: .day, value: 14, to: Date())!.startOfDay,
+                     endDate: Calendar.current.date(byAdding: .day, value: 16, to: Date())!.startOfDay)
+        context.insert(a); context.insert(b)
+        try? context.save()
+
+        // Starts on Singapore's LAST day — the handover, which is legal.
+        let out = await executor.run(.init(
+            id: "o2", name: "update_trip",
+            input: ["title": "Mysore", "new_start_date": day(5), "new_end_date": day(7)]))
+        XCTAssertFalse(out.text.contains("NOTHING was changed"), out.text)
+        XCTAssertEqual(b.startDate, Calendar.current.date(byAdding: .day, value: 5, to: Date())!.startOfDay)
+    }
+
+    // MARK: eval-14 — deleting a stay takes its journeys with it
+
+    func testDeletingAStayRemovesTheDrivesThatOnlyLedThere() async throws {
+        let context = container.mainContext
+        _ = await executor.run(.init(
+            id: "d1", name: "add_stay",
+            input: ["trip": "Hills", "hotel": "CGH Earth Wayanad",
+                    "arrive_date": day(5), "depart_date": day(8)]))
+        _ = await executor.run(.init(
+            id: "d2", name: "add_stay",
+            input: ["trip": "Hills", "hotel": "Western Valley Resort",
+                    "arrive_date": day(8), "depart_date": day(10)]))
+        await drainBackgroundMeasure()
+        XCTAssertFalse(((try? context.fetch(FetchDescriptor<TravelSegment>())) ?? []).isEmpty)
+
+        let preview = await executor.run(.init(
+            id: "d3", name: "delete_stay", input: ["hotel": "Western Valley Resort"]))
+        XCTAssertTrue(preview.text.contains("PREVIEW ONLY"))
+        XCTAssertTrue(preview.text.contains("journey"),
+                      "the preview must name the journeys going with it: \(preview.text)")
+
+        let done = await executor.run(.init(
+            id: "d4", name: "delete_stay",
+            input: ["hotel": "Western Valley Resort", "confirmed": true]))
+        XCTAssertTrue(done.text.contains("Also removed"), done.text)
+        let segs = (try? context.fetch(FetchDescriptor<TravelSegment>())) ?? []
+        XCTAssertFalse(segs.contains { Self.mentionsWesternValley($0) },
+                       "no drive may survive pointing at a hotel that no longer exists")
+    }
+
+    private static func mentionsWesternValley(_ s: TravelSegment) -> Bool {
+        [s.label, s.toPlace, s.fromPlace].contains { $0.localizedCaseInsensitiveContains("Western Valley") }
+    }
+
+    func testDeleteTripByDateWithNoMatchNamesTheDayNotAnEmptyTitle() async {
+        let context = container.mainContext
+        context.insert(Trip(title: "Colombo",
+                            startDate: Calendar.current.date(byAdding: .day, value: 20, to: Date())!.startOfDay,
+                            endDate: Calendar.current.date(byAdding: .day, value: 23, to: Date())!.startOfDay))
+        try? context.save()
+
+        let out = await executor.run(.init(
+            id: "x1", name: "delete_trip", input: ["date": day(3)]))
+        XCTAssertTrue(out.text.contains("No trip covers"), out.text)
+        XCTAssertFalse(out.text.contains("matches ''"),
+                       "the receipt must blame the date given, not an empty title")
+    }
+
     // MARK: stale travel data after an edit
 
     func testMovingAStayReAnchorsAndReMeasuresItsDrives() async throws {

@@ -344,6 +344,12 @@ enum JeevesChatService {
     no clarifying question when the event is unambiguous. You do not know an event's stored end time unless a \
     tool result told you — and add_event ASSUMES a 3-hour end when none was \
     given, so guessing has already shortened a dinner it was asked to extend.
+    - EVERY RECEIPT CARRIES THE OLD VALUE AND THE NEW ONE. The tool result \
+    hands you both — "20:00–23:00 → 20:00–24:00", "13 Sep – 15 Sep → 13 Sep – \
+    19 Sep". "Now runs until midnight" and "is 13 Sep – 19 Sep" drop the half \
+    that tells the user what changed. Quote both ends, always. And if a result \
+    says something was CLAMPED, ran SHORTER, or carries a HOTEL POLICY caveat, \
+    that is the headline, not a footnote — say it in the first sentence.
     - RECEIPTS ARE VERBATIM: name trips, stays and records EXACTLY as the \
     tool result names them. If a result says the stay went to 'Colombo' and \
     the user meant the Mysore trip, that is the WRONG trip — say so and move \

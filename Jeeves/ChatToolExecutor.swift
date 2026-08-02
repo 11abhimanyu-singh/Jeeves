@@ -208,9 +208,16 @@ final class ChatToolExecutor {
         }
         guard let trip = candidates.first else {
             let names = trips.map { "'\($0.title)' (\(TravelGuard.dayRange($0)))" }.joined(separator: ", ")
-            return .init(text: trips.isEmpty
-                         ? "There are no trips to delete."
-                         : "No trip matches '\(query)'. Trips: \(names). Ask the user which one.")
+            if trips.isEmpty { return .init(text: "There are no trips to delete.") }
+            // Name the key the USER actually gave. Asked to delete trips on the
+            // 15th the date filter ran and matched nothing, but the reply read
+            // "No trip matches ''" and listed every trip — a receipt blaming an
+            // empty title for a date that simply had no trip on it.
+            if query.isEmpty, let dateRaw = input["date"] as? String {
+                let day = JeevesChatService.resolveDate(dateRaw, relativeTo: today)
+                return .init(text: "No trip covers \(Self.dayString(day)) — there is nothing to delete on that day. Trips on file: \(names). Say this plainly; do NOT ask which one.")
+            }
+            return .init(text: "No trip matches '\(query)'. Trips: \(names). Ask the user which one.")
         }
         let segments = ((try? modelContext.fetch(FetchDescriptor<TravelSegment>())) ?? [])
             .filter { $0.tripID == trip.id }
@@ -316,15 +323,40 @@ final class ChatToolExecutor {
             }
             if let shift = shiftBy, shift != 0 {
                 let span = max(0, e.endMinute - e.startMinute)
-                e.startMinute = max(0, min(24 * 60, e.startMinute + shift))
+                let oldDay = e.date
+                // Past midnight an event belongs to the NEXT day, not to the
+                // last minute of this one. Clamping start to 24:00 pinned a
+                // 22:00 dinner pushed three hours at 24:00–24:00 — a zero-
+                // length event on the wrong day. Carry the day instead.
+                var start = e.startMinute + shift
+                while start >= 24 * 60,
+                      let next = Calendar.current.date(byAdding: .day, value: 1, to: e.date) {
+                    start -= 24 * 60
+                    e.date = next.startOfDay
+                }
+                while start < 0,
+                      let prev = Calendar.current.date(byAdding: .day, value: -1, to: e.date) {
+                    start += 24 * 60
+                    e.date = prev.startOfDay
+                }
+                e.startMinute = max(0, min(24 * 60, start))
                 e.endMinute = max(e.startMinute, min(24 * 60, e.startMinute + span))
+                if e.date != oldDay {
+                    daysMoved.append("\(Self.dayString(oldDay)) → \(Self.dayString(e.date))")
+                }
                 if e.isAllDay { e.isAllDay = false; changes.append("now timed") }
-                // The day has edges here too: pushing an event that runs to
-                // midnight squeezes its duration silently unless we say so.
+                // A span that still crosses midnight cannot be stored — an
+                // event's end is minutes-since-its-own-midnight. Say what the
+                // event actually became, IN THE RECEIPT'S MAIN SENTENCE: as a
+                // trailing note it was read as an aside and a dinner that lost
+                // half an hour was reported as a clean 30-minute push.
                 let newSpan = e.endMinute - e.startMinute
                 if newSpan < span {
-                    clampedNote = " NOTE: it now runs \(span - newSpan) min shorter — it hit the end"
-                        + " of the day. Say the real new end rather than the requested shift."
+                    changes.append("SHORTER BY \(span - newSpan) MIN — it would have run past midnight")
+                    clampedNote = " NOTE: the event now ends at \(hhmm(e.endMinute)), NOT \(span - newSpan)"
+                        + " min later as asked — an event cannot run past its own midnight. Tell the user"
+                        + " the real new end and that it lost \(span - newSpan) min, or offer to move the"
+                        + " whole thing to the next day with shift_by_days."
                 }
             }
             if let extend = extendBy, extend != 0 {
@@ -802,8 +834,12 @@ final class ChatToolExecutor {
         let created = createdTrip
             ? "NEW trip '\(trip.title)' created (\(TravelGuard.dayRange(trip))) for this stay. "
             : ""
+        // Say exactly what happened and nothing more. An earlier wording
+        // ("it went onto 'Mysore'") was narrated back as "the trip, renamed to
+        // cover both stops" — a rename no tool performed. The receipt now
+        // states the title is UNCHANGED, because that is the fact.
         let joinedNote = continued
-            ? " (You asked for '\(tripQuery)' — this is the same journey continuing, so it went onto '\(trip.title)'. Say so, and offer to split it out if it really is a separate trip.)"
+            ? " NOTE: no trip called '\(tripQuery)' exists and this stay continues the current itinerary, so it went onto '\(trip.title)', whose title is UNCHANGED. Do not say it was renamed. Tell the user it joined '\(trip.title)' and offer update_trip if they want it renamed or split out."
             : ""
         return .init(text: created + "Stay added to '\(trip.title)': \(place), \(f.string(from: arrive)) – \(f.string(from: depart))."
                      + (grew ? " The trip grew to cover it." : "") + joinedNote + transitionNote)
@@ -825,6 +861,10 @@ final class ChatToolExecutor {
             return .init(text: "No trip matches '\(query)'.")
         }
         let oldRange = TravelGuard.dayRange(trip)
+        // Kept so a refused change can be rolled back exactly — the guard
+        // below runs after the assignments, and a receipt saying "nothing was
+        // changed" has to be true.
+        let oldStart = trip.startDate, oldEnd = trip.endDate, oldTitle = trip.title
         if let t = input["new_title"] as? String, !t.isEmpty { trip.title = t }
         var grew = false
         if let raw = input["new_start_date"] as? String {
@@ -839,6 +879,23 @@ final class ChatToolExecutor {
         }
         guard trip.endDate >= trip.startDate else {
             return .init(text: "Those dates end before they start — nothing changed.")
+        }
+        // One set of days belongs to one trip. Pushing Mysore back a week
+        // drove it straight through Colombo and nothing objected: the window
+        // moved, both trips claimed the same days, and the planner had two
+        // travel modes for one date. Boundary-touch is still legal — a
+        // handover day is shared on purpose — so this is a STRICT interior
+        // test, the same one add_stay uses.
+        if let clash = trips.first(where: { other in
+            other.id != trip.id
+                && other.endDate > trip.startDate && other.startDate < trip.endDate
+        }) {
+            trip.startDate = oldStart
+            trip.endDate = oldEnd
+            trip.title = oldTitle
+            return .init(text: "Those dates run through '\(clash.title)' (\(TravelGuard.dayRange(clash))) — "
+                         + "two trips cannot own the same days, so NOTHING was changed. Move or shorten "
+                         + "'\(clash.title)' first, or pick dates that only touch it at a handover day.")
         }
         modelContext.saveOrLog("chat.updateTrip")
         EventLog.log(.tripUpdated, "'\(trip.title)' \(oldRange) → \(TravelGuard.dayRange(trip))",
@@ -885,10 +942,27 @@ final class ChatToolExecutor {
         guard wantDepart >= wantArrive else {
             return .init(text: "That checkout (\(Self.dayString(wantDepart))) is before check-in (\(Self.dayString(wantArrive))) — nothing changed.")
         }
+        let oldRange = fmtRange(stay)
         stay.arriveDate = wantArrive
         stay.departDate = wantDepart
-        if let m = minutesFrom(input["checkin_time"] as? String) { stay.checkinMinute = m }
-        if let m = minutesFrom(input["checkout_time"] as? String) { stay.checkoutMinute = m }
+        // A policy change is a real change. Told "checkout is before 11:30,
+        // check-in after 2pm", the executor stored the minutes and stopped —
+        // resync only ran on a DATE move — so the drive between two hotels
+        // kept a leave time an hour after the checkout it was just given.
+        //
+        // STATING a policy counts, even when it matches what was already
+        // stored. "Check-in starts after 2 pm" happens to equal the assumed
+        // default, so a differs-from-stored test saw no change and skipped the
+        // re-check — on the exact turn the user asked for the drives to be
+        // worked around it. What changed is that the window is now CONFIRMED
+        // rather than assumed, and the legs have to be measured against it.
+        var policyChanged = false
+        if let m = minutesFrom(input["checkin_time"] as? String) {
+            stay.checkinMinute = m; policyChanged = true
+        }
+        if let m = minutesFrom(input["checkout_time"] as? String) {
+            stay.checkoutMinute = m; policyChanged = true
+        }
         let dayShift = (
             arriveDelta: cal.dateComponents([.day], from: oldArrive, to: wantArrive).day ?? 0,
             departDelta: cal.dateComponents([.day], from: oldDepart, to: wantDepart).day ?? 0
@@ -908,9 +982,20 @@ final class ChatToolExecutor {
         // receipt said the stay changed while its journeys silently kept the
         // old days, times and measured minutes — two records disagreeing about
         // the same trip.
-        let touched = await resyncJourneys(around: stay, dayShift: dayShift)
-        return .init(text: "\(stay.place): \(fmtRange(stay))."
-                     + (grew ? " The trip grew to cover it." : "") + touched)
+        let touched = await resyncJourneys(around: stay, dayShift: dayShift,
+                                           policyChanged: policyChanged)
+        // Old AND new, every time. "CGH Earth Wayanad is 13 Sep – 19 Sep" told
+        // the user nothing about what it used to be, and the reply built on it
+        // inherited the gap.
+        let newRange = fmtRange(stay)
+        let rangeNote = oldRange == newRange
+            ? "\(stay.place): \(newRange) (dates unchanged)"
+            : "\(stay.place): \(oldRange) → \(newRange)"
+        let policyNote = policyChanged
+            ? " Check-in \(StayWindow.clock(stay.checkinMinute)), checkout \(StayWindow.clock(stay.checkoutMinute))."
+            : ""
+        return .init(text: rangeNote + "."
+                     + (grew ? " The trip grew to cover it." : "") + policyNote + touched)
     }
 
     private func toolDeleteStay(_ input: [String: Any]) -> JeevesChatService.ToolResult {
@@ -931,18 +1016,47 @@ final class ChatToolExecutor {
         guard let stay = matches.first else {
             return .init(text: "No stay matches '\(query)' — nothing deleted.")
         }
+        // A stay is not just a row: the drives either side of it point AT it.
+        // Deleting Western Valley Resort left a 'CGH Earth → Western Valley'
+        // drive in the store aiming at a hotel that no longer existed, and the
+        // receipt only said "check its journeys still make sense" — handing
+        // the user a problem the tool could name exactly.
+        let orphans = ((try? modelContext.fetch(FetchDescriptor<TravelSegment>())) ?? [])
+            .filter { seg in
+                seg.tripID == stay.tripID
+                    && (Self.sharesPlaceWord(seg.toPlace, stay.place)
+                        || Self.sharesPlaceWord(seg.fromPlace, stay.place)
+                        || (!stay.address.isEmpty
+                            && (Self.sharesPlaceWord(seg.toPlace, stay.address)
+                                || Self.sharesPlaceWord(seg.fromPlace, stay.address))))
+            }
+        let orphanNames = orphans.map { $0.label.isEmpty ? $0.mode.label : $0.label }
+
         // Destructive → preview first, execute only on confirmed=true.
         if (input["confirmed"] as? Bool) != true {
             let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
             let tripName = trips.first { $0.id == stay.tripID }?.title ?? "its trip"
-            return .init(text: "PREVIEW ONLY — nothing deleted yet. This removes the \(stay.place) stay (\(fmtRange(stay))) from '\(tripName)'. Show the user; if they confirm, call delete_stay again with confirmed=true.")
+            let alsoNote = orphanNames.isEmpty
+                ? ""
+                : " It also removes \(orphans.count) journey(s) that only exist to reach it: "
+                    + orphanNames.joined(separator: ", ") + "."
+            return .init(text: "PREVIEW ONLY — nothing deleted yet. This removes the \(stay.place) stay (\(fmtRange(stay))) from '\(tripName)'.\(alsoNote) Show the user BOTH parts; if they confirm, call delete_stay again with confirmed=true.")
         }
         let name = stay.place
         let range = fmtRange(stay)
+        for seg in orphans {
+            if scheduleNudges { TravelNotifier.cancel(segment: seg) }
+            EventLog.log(.travelCleanup, "\(seg.label) removed with the \(name) stay",
+                         subject: seg.id, context: modelContext)
+            modelContext.delete(seg)
+        }
         modelContext.delete(stay)
         modelContext.saveOrLog("chat.deleteStay")
         EventLog.log(.stayDeleted, "\(name) \(range)", context: modelContext)
-        return .init(text: "Deleted the \(name) stay (\(range)). The trip's dates are unchanged — shrink them with update_trip if the trip is shorter now, and check its journeys still make sense.")
+        let alsoDeleted = orphanNames.isEmpty
+            ? ""
+            : " Also removed \(orphans.count) journey(s) that led there: " + orphanNames.joined(separator: ", ") + "."
+        return .init(text: "Deleted the \(name) stay (\(range)).\(alsoDeleted) The trip's dates are unchanged — shrink them with update_trip if the trip is shorter now.")
     }
 
     /// Cancel and re-arm the leave-by nudge for every journey in a trip whose
@@ -982,10 +1096,13 @@ final class ChatToolExecutor {
     /// disagreeing with itself.
     @MainActor
     private func resyncJourneys(around stay: TripStay,
-                                dayShift: (arriveDelta: Int, departDelta: Int)) async -> String {
-        guard dayShift.arriveDelta != 0 || dayShift.departDelta != 0 else { return "" }
+                                dayShift: (arriveDelta: Int, departDelta: Int),
+                                policyChanged: Bool = false) async -> String {
+        guard dayShift.arriveDelta != 0 || dayShift.departDelta != 0 || policyChanged else { return "" }
         let segments = ((try? modelContext.fetch(FetchDescriptor<TravelSegment>())) ?? [])
             .filter { $0.tripID == stay.tripID }
+        let siblings = ((try? modelContext.fetch(FetchDescriptor<TripStay>())) ?? [])
+            .filter { $0.tripID == stay.tripID && $0.id != stay.id }
 
         // One-directional on purpose. Matching BOTH ways meant a segment
         // endpoint of "Mysore" matched the stay "Radisson Mysore" — and so did
@@ -1004,6 +1121,7 @@ final class ChatToolExecutor {
         var moved: [String] = []
         var measured: [String] = []
         var untouched: [String] = []
+        var policyCaveats: [String] = []
         for seg in segments {
             let arriving = matches(seg.toPlace)
             let leaving = matches(seg.fromPlace)
@@ -1022,8 +1140,29 @@ final class ChatToolExecutor {
 
             let newAnchor: Date?
             if arriving {
-                // A drive INTO this stay lands at its check-in.
-                newAnchor = at(stay.checkinMinute, on: stay.arriveDate)
+                // A drive INTO this stay lands at its check-in — but it also
+                // has to LEAVE somewhere, and if that somewhere is another
+                // hotel on this trip its checkout is a hard wall. Aiming only
+                // at check-in produced a leg leaving at 12:55 on a morning the
+                // user had just said checkout was 11:30: both policies were
+                // stored, only one was used.
+                let origin = siblings.first { matches($0.place) || (!$0.address.isEmpty && matches($0.address)) }
+                    ?? siblings.first { seg.fromPlace.localizedCaseInsensitiveContains($0.place) && $0.place.count >= 3 }
+                if let origin, seg.travelMinutes > 0 {
+                    let window = StayWindow.transition(checkoutMinute: origin.checkoutMinute,
+                                                       checkinMinute: stay.checkinMinute,
+                                                       travelMinutes: seg.travelMinutes)
+                    newAnchor = at(window.arriveByMinute, on: stay.arriveDate)
+                    if let caveat = window.caveat {
+                        policyCaveats.append("\(seg.label.isEmpty ? seg.mode.label : seg.label): \(caveat)")
+                    } else if window.leaveMinute > origin.checkoutMinute {
+                        policyCaveats.append("\(seg.label.isEmpty ? seg.mode.label : seg.label): leaving at "
+                            + "\(StayWindow.clock(window.leaveMinute)) is AFTER checkout from \(origin.place) "
+                            + "(\(StayWindow.clock(origin.checkoutMinute))) — say so rather than picking one end.")
+                    }
+                } else {
+                    newAnchor = at(stay.checkinMinute, on: stay.arriveDate)
+                }
             } else {
                 // A drive OUT of it keeps its own deadline — arriveBy is when
                 // you must reach the NEXT place ("home by 6 pm"), which this
@@ -1075,6 +1214,13 @@ final class ChatToolExecutor {
         if !untouched.isEmpty {
             note += " NOT changed — these have booked times only the airline can move, so check them: "
                 + untouched.joined(separator: ", ") + "."
+        }
+        // A leg that cannot satisfy both hotels' policies must SAY so. Quietly
+        // picking one end is the failure this whole window calculation exists
+        // to prevent.
+        if !policyCaveats.isEmpty {
+            note += " HOTEL POLICY — repeat this to the user verbatim, do not resolve it silently: "
+                + policyCaveats.joined(separator: " ")
         }
         return note
     }

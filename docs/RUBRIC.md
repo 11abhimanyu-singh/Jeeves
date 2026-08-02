@@ -208,6 +208,13 @@ behind** — this section only states the shape they share:
   ordinary meaning and need no clarifying question when the target is
   unambiguous. A whole day is a day: an event pushed by one day keeps its time
   of day and its duration.
+- **The day has edges, and they are reported.** An event pushed past midnight
+  belongs to the next day at full duration. When its END would cross midnight
+  it cannot be stored, so the reply says how much time the event actually lost
+  — reporting a clean push that silently shortened a dinner is a wrong answer.
+- **Deleting something takes its dependents with it.** A stay's inbound drive
+  exists only to reach that stay; the preview names it, the receipt confirms
+  it, and nothing survives pointing at a record that is gone.
 - **What makes it a new trip is going home, not a new place.** "From Mysore I
   drive to Wayanad" continues the trip already running — one itinerary, one
   window that grows. Only once a leg has landed them home does the next stay
