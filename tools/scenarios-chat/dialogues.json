@@ -5,7 +5,7 @@
     "answers": "Replies fed ONLY after every scripted turn is done and the assistant is still asking something, in order. Real users answer; a one-way script made the app's (correct) request for a missing checkout date look like a failure to act. Answers never interleave with the script \u2014 injecting them mid-scenario once answered 'a hotel for the Singapore stay?' with 'two nights at Wayanad' and derailed the run.",
     "expect": "What a correct build must leave behind."
   },
-  "sequencing": "Scenarios share one store and run in order: 2 and 3 modify the event 1 created, so running one alone tests less than running the sequence. 4 is self-contained. The numbering is the user's.",
+  "sequencing": "Scenarios share one store and run in order. 2, 3 and 11 act on the event 1 created; 7, 8, 9 and 10 build on and then move the itinerary 5 started; 12 lists whatever exists by then; 13 is a fresh chain; 14 modifies what is left. Running one alone tests far less than running the sequence. The numbering is the user's and skips 6.",
   "tier1": [
     {
       "id": "t1-1-event-with-destination",
@@ -23,14 +23,14 @@
       "turns": [
         "I'm at the dinner, it's running long \u2014 extend it by an hour"
       ],
-      "expect": "The SAME event's end moves +60 minutes \u2014 via extend_by_minutes, never a computed clock time, and never a shrink. No duplicate. The receipt quotes the old and the new range. If the event is today, a replan of the remainder is OFFERED, not silently skipped, and elapsed blocks before it are not marked missed."
+      "expect": "The SAME event's end moves +60 minutes \u2014 via extend_by_minutes, never a computed clock time, and never a shrink. No duplicate. The receipt quotes the old and the new range. If the event is today a replan of the remainder is OFFERED, not silently skipped, and elapsed blocks before it are not marked missed."
     },
     {
       "id": "t1-3-extend-while-commuting",
       "turns": [
         "Stuck in traffic on the way to the dinner, push it 30 minutes"
       ],
-      "expect": "Start AND end move +30 together (shift_by_minutes \u2014 the duration is preserved, not stretched). Any replan uses resume_at = new start and marks blocks the delay swallowed via missed_blocks \u2014 ELAPSED IS NOT DONE."
+      "expect": "Start AND end move +30 together (shift_by_minutes \u2014 duration preserved, not stretched). Any replan uses resume_at = the new start and marks blocks the delay swallowed via missed_blocks \u2014 ELAPSED IS NOT DONE."
     },
     {
       "id": "t1-4-timezone-trip-both-legs",
@@ -41,7 +41,101 @@
       "answers": [
         "Leaving from home in Indiranagar, Bengaluru airport both ways"
       ],
-      "expect": "One trip, 4 days, its end date AFTER its start. Exactly TWO flight journeys \u2014 no duplicates from restating a leg: outbound origin-clock IST, return origin-clock Asia/Colombo (+5:30 \u2014 same offset, zones still stamped on BOTH legs). Leave-by chains on the right days; two nudges; no second trip from the second turn."
+      "expect": "One trip, 4 days, end date AFTER start. Exactly TWO flight journeys \u2014 no duplicate from restating a leg: outbound origin-clock IST, return origin-clock Asia/Colombo, zones stamped on BOTH legs. Leave-by chains on the right days; two nudges; no second trip from the second turn."
+    },
+    {
+      "id": "t1-5-back-to-back-international-then-mysore",
+      "turns": [
+        "I'm in Singapore till the 10th of next month, flying back SQ 510 departing 19:40 SGT, landing BLR 21:10",
+        "Next morning I drive to Mysore, staying at Radisson hotel Mysore for 2 days, then checkout"
+      ],
+      "answers": [
+        "Driving from home in Indiranagar",
+        "Yes, that's right"
+      ],
+      "expect": "TWO trips sharing the handover day, never merged \u2014 the Mysore itinerary must NOT be absorbed into the Singapore trip. Radisson Blu Mysore stay of exactly 2 nights, one measured drive from home to Mysore, and the return flight stamped Asia/Singapore. One journey per leg. The handover day shows both trips' cards."
+    },
+    {
+      "id": "t1-7-modify-trip-add-and-remove-day",
+      "turns": [
+        "Add one more day to the Mysore trip",
+        "Actually cut the last day, end it a day earlier"
+      ],
+      "answers": [
+        "Yes, go ahead"
+      ],
+      "expect": "update_trip/update_stay both times \u2014 no new trip, no duplicate, and the SHRINK must actually happen (a reply saying it went back with no tool call behind it is a fabrication). EVERY turn gets a reply. Growth sweeps plans on the new day; shrink says the freed day goes back to the planner. Receipts quote the old AND the new ranges."
+    },
+    {
+      "id": "t1-8-wayanad-three-days-then-home-by-six",
+      "turns": [
+        "From Mysore I drive to Wayanad and stay at CGH Earth Wayanad",
+        "Checkout from Wayanad three days later and drive back home, I want to reach home by 6 pm"
+      ],
+      "answers": [
+        "Checkout the morning of the third day, driving home to Indiranagar"
+      ],
+      "expect": "CGH Earth Wayanad stay of three nights on the SAME trip as Mysore, a measured Radisson \u2192 CGH Earth drive transition, and a return drive whose leave-by works BACKWARDS from arriving home at 18:00 on the DESTINATION clock. Exactly one journey per leg \u2014 never a second copy under another trip. The trip window grows to cover the Wayanad days."
+    },
+    {
+      "id": "t1-9-postpone-checkout-by-two-days",
+      "turns": [
+        "Postpone the Wayanad checkout by 2 days \u2014 make it a 5 day stay"
+      ],
+      "expect": "The SAME CGH Earth stay extends from 3 nights to 5 \u2014 update_stay, never a second stay. The trip window grows with it, the drive home moves to the new checkout day and is RE-MEASURED for that day, its leave-by still works back from 18:00, and its old nudge is cancelled and re-armed. The receipt quotes the old range and the new one."
+    },
+    {
+      "id": "t1-10-push-whole-trip-by-seven-days",
+      "turns": [
+        "Push the whole Mysore trip back by 7 days \u2014 everything moves a week later"
+      ],
+      "answers": [
+        "Yes, the stays and the drives too"
+      ],
+      "expect": "The trip, BOTH stays and EVERY journey shift exactly 7 days \u2014 nothing left behind on the old dates and nothing duplicated. Critically the FREED days stop being travel days: the planner takes them back and they render as normal days, not travel mode. Nudges for the old dates are cancelled and re-armed on the new ones. The receipt names the old window and the new one."
+    },
+    {
+      "id": "t1-11-postpone-and-prepone-an-event",
+      "turns": [
+        "Postpone my dinner with Arvind by a day",
+        "Actually prepone it \u2014 bring it forward two days"
+      ],
+      "expect": "Plain 'postpone' and 'prepone' are understood without a clarifying question: the SAME event moves +1 day, then \u22122 days from there, keeping its time of day and duration. No duplicate event, no new event. Each receipt quotes the day it moved from and to."
+    },
+    {
+      "id": "t1-12-list-upcoming-events-and-journeys",
+      "turns": [
+        "Show me all my upcoming events",
+        "Now show my upcoming journeys"
+      ],
+      "expect": "BOTH answers are read from stored data, never from the conversation. Every event and every journey that exists is listed with its date \u2014 and a journey answer must come from the journeys themselves, not from calendar events that happen to look like travel. If a collection is empty it says so plainly. Nothing is invented, and nothing real is omitted."
+    },
+    {
+      "id": "t1-13-weekend-chain-with-hotel-policies",
+      "turns": [
+        "Plan this: I drive to Wayanad on Friday and stay at CGH Earth Wayanad",
+        "I check out from CGH Earth on Monday morning and drive to Western Valley Resort near Ooty, staying there the next two days, then home before 6 pm",
+        "Checkout at all the hotels is before 11:30 am, check-in starts after 2 pm, and breakfast is served 7:30 to 10:30 am \u2014 work the drives around that"
+      ],
+      "answers": [
+        "This coming Friday, driving from home in Indiranagar",
+        "Yes, two nights at Western Valley, home on the third day"
+      ],
+      "expect": "Day-of-week arithmetic right: Friday check-in, Monday checkout = THREE nights at CGH Earth. A measured Wayanad \u2192 Western Valley drive that LEAVES after breakfast and before the 11:30 checkout and ARRIVES after the 14:00 check-in \u2014 and if it cannot satisfy both, says so rather than silently picking one. Two nights at Western Valley, then a return drive working back from 18:00 at home. One stay per hotel, one journey per leg, despite three turns of constraints."
+    },
+    {
+      "id": "t1-14-modify-by-date-location-hotel",
+      "turns": [
+        "Move the Radisson stay to start a day later",
+        "Delete the stay at Western Valley",
+        "Delete all trips on the 15th",
+        "Extend whatever event I have on the 12th by two hours"
+      ],
+      "answers": [
+        "Yes, confirm it",
+        "Yes, delete it"
+      ],
+      "expect": "Each modification lands via the matching key the user chose \u2014 hotel name, date, location \u2014 with a preview/confirm on the destructive ones, receipts naming exactly what changed, and zero duplicates created by any of the four turns."
     }
   ],
   "tier2": {
@@ -61,15 +155,14 @@
     "note": "Chaos runs \u2014 execute a Tier 1 dialogue while: airplane mode toggled mid-conversation, app backgrounded mid-tool-call, watch delivering a workout summary simultaneously. Pass = graceful receipts or honest apologies; FAIL = silence, duplicates, or claimed actions that didn't happen."
   },
   "gaps": {
-    "note": "Known coverage gaps \u2014 recorded so their absence is deliberate, not forgotten. A green run over four scenarios is not a green product.",
+    "note": "Known coverage gaps \u2014 recorded so their absence is deliberate, not forgotten.",
     "missing": [
-      "the planner itself: plan quality and travel-day stand-down still have no dialogue of their own (replan honesty is now covered by t1-10)",
-      "fitness/Watch: no dialogue touches workouts (those bugs surface via the anomaly digest instead)",
+      "the planner itself: plan quality and travel-day stand-down have no dialogue of their own",
+      "fitness/Watch: no dialogue touches workouts (those surface via the anomaly digest)",
       "refusal path: no dialogue declines a destructive action after seeing its preview",
+      "everyday data questions (longest walk, page in a book, best lift) are untested",
       "idempotent replay: running a dialogue twice must not double anything",
-      "relaunch survival: nothing checks state after the app restarts",
-      "TRAVEL IS UNCOVERED: trips, stays, journeys, hotel windows, handover days and the leave-by chain have no scenario at all since 5, 7, 8 and 9 were removed. The travel code and its repairs are still shipped and still running \u2014 they are simply unevaluated.",
-      "chat cannot READ travel data (no trips/journeys/stays in fetch_app_data, nothing in the state note), so travel questions are answered from memory \u2014 found in real use on 2 Aug, and no scenario would catch it"
+      "relaunch survival: nothing checks state after the app restarts"
     ]
   },
   "verification": "Every run: python3 tools/diagnose.py <workdir> --pull  (store-audit + trajectory-audit deterministic layer), then tools/trajectory-judge.py on the artifact (Claude + GPT, strictest verdict wins, Fable 5 breaks ties). Pass requires: zero duplicate trips/stays/journeys, every assistant number traceable to a tool result, every claimed action present in the store, no unanswered turns. Run-to-run variance is large \u2014 six runs on near-identical code produced 25/21/14/11/23/11 tool calls \u2014 so a single run is a smoke test, not a verdict: repeat each dialogue 3-5 times, require the deterministic invariants at 100%, and report judged scores as a mean with its spread."

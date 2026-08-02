@@ -199,6 +199,19 @@ behind** — this section only states the shape they share:
 - A trip owns its days; a stay belongs to the trip whose region it is in.
 - Hotel policy is respected: leave by checkout, arrive after check-in, and if
   both cannot hold, say so rather than silently picking one.
+- **Moving something moves everything with it, and frees what it leaves.** When
+  a trip shifts, its stays, its journeys and its nudges shift too — and the days
+  it vacated STOP being travel days. A window that grows is only half the job;
+  the planner must get the freed days back, or the user keeps seeing travel mode
+  on days they are at home.
+- **Plain words work.** "Postpone", "prepone", "push it by a week" carry their
+  ordinary meaning and need no clarifying question when the target is
+  unambiguous.
+- **Chat can READ, not only write.** "Show my upcoming journeys" is answered
+  from stored rows — never from the conversation, and never by substituting a
+  neighbouring collection because the right one has no tool. A question about
+  travel that gets answered out of calendar events is a wrong answer, not a
+  near miss.
 
 ---
 
