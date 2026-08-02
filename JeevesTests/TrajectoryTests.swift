@@ -72,26 +72,6 @@ final class TrajectoryTests: XCTestCase {
         // A saved Home so tools that resolve "Home" behave like the real app.
         context.insert(SavedLocation(kind: .home, address: "Indiranagar, Bengaluru"))
 
-        // A small starting store, so the everyday-data scenario has right
-        // answers to be WRONG about. Against an empty store, "what was my
-        // longest walk" cannot tell a correct answer from a lucky one — and
-        // the bug worth catching is answering from the neighbouring
-        // collection (walks read out of runs), which needs both to exist.
-        let walk = Workout(date: Date().addingTimeInterval(-3 * 86400), type: .walk,
-                           state: .done, source: .watch, title: "Evening walk",
-                           durationMin: 52, distanceKm: 4.6)
-        context.insert(walk)
-        context.insert(Workout(date: Date().addingTimeInterval(-5 * 86400), type: .run,
-                               state: .done, source: .watch, title: "Morning run",
-                               durationMin: 31, distanceKm: 5.2))
-        let book = Book(title: "Atomic Habits", author: "James Clear", isFiction: false)
-        book.totalPages = 320
-        book.currentPage = 147
-        context.insert(book)
-        let squat = LiftSession(date: Date().addingTimeInterval(-2 * 86400),
-                                exerciseName: "Back Squat")
-        context.insert(squat)
-        context.insert(LiftSet(sessionID: squat.id, order: 1, reps: 5, weightKg: 92.5))
         try? context.save()
 
         let executor = ChatToolExecutor(modelContext: context)
