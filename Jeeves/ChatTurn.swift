@@ -22,6 +22,10 @@ final class ChatTurn {
     var planJSON: String?    // encoded GeneratedPlan when this turn is a plan
     var isOfflinePlan: Bool = false
     @Attribute(.externalStorage) var imageData: Data?  // uploaded ticket, shown in-thread
+    /// Encoded [ChatReceipt] read out of this turn's TOOL RESULTS — the
+    /// old→new pairs the reply is supposed to quote. Rendered as a card under
+    /// the prose so the old value cannot go missing.
+    var receiptsJSON: String?
 
     init(
         role: String,
@@ -30,6 +34,7 @@ final class ChatTurn {
         planJSON: String? = nil,
         isOfflinePlan: Bool = false,
         imageData: Data? = nil,
+        receiptsJSON: String? = nil,
         timestamp: Date = .now
     ) {
         self.id = UUID()
@@ -40,9 +45,12 @@ final class ChatTurn {
         self.planJSON = planJSON
         self.isOfflinePlan = isOfflinePlan
         self.imageData = imageData
+        self.receiptsJSON = receiptsJSON
     }
 
     var isUser: Bool { roleRaw == "user" }
+
+    var receipts: [ChatReceipt] { ChatReceipt.decode(receiptsJSON) }
 
     /// Decodes the stored plan JSON back into a GeneratedPlan, if present.
     var plan: GeneratedPlan? {

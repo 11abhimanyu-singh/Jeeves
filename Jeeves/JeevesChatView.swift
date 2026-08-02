@@ -32,12 +32,18 @@ struct JeevesChatView: View {
     // Persisted conversation, oldest first — survives tab switches and restarts.
     @Query(sort: \ChatTurn.timestamp, order: .forward) private var allTurns: [ChatTurn]
 
+    @Query private var trips: [Trip]
+    @Query private var segments: [TravelSegment]
+
     @State private var inputText = ""
     @State private var isSending = false
     @State private var isPlanning = false
     @State private var errorText: String?
     @State private var showSetup = false
     @State private var showSettings = false
+    /// What the executor is doing RIGHT NOW, named. A bare spinner through
+    /// four tool calls reads as a hang.
+    @State private var activeTool: String?
 
     // In-chat ticket upload → event ingestion.
     @State private var photoItem: PhotosPickerItem?
@@ -67,7 +73,6 @@ struct JeevesChatView: View {
         VStack(spacing: 0) {
             header
             Divider().overlay(Color.textPrimary.opacity(0.14))
-            planMyDayBar
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -87,11 +92,13 @@ struct JeevesChatView: View {
 
                         if isSending || isPlanning || isReadingTicket {
                             HStack(spacing: 8) {
-                                ProgressView()
+                                ProgressView().controlSize(.small)
                                 Text(planningStatus)
                                     .font(.ui(12.5)).foregroundStyle(Color.textMuted)
+                                    .contentTransition(.opacity)
                             }
                             .padding(.leading, 4)
+                            .id("activity")
                         }
 
                         if let errorText {
@@ -99,6 +106,14 @@ struct JeevesChatView: View {
                         }
                     }
                     .padding(16)
+                    // The keyboard dismisses by tapping the CONVERSATION, and
+                    // only the conversation. This gesture used to live on the
+                    // root VStack — which contains the composer — so it sat
+                    // above the mic, the attach button and the field and
+                    // competed with every one of them for the tap. That, not
+                    // the buttons themselves, is why they felt dead.
+                    .contentShape(Rectangle())
+                    .onTapGesture { dismissKeyboard() }
                 }
                 .scrollDismissesKeyboard(.interactively)
                 // Open at the most recent message, not the top.
@@ -112,12 +127,11 @@ struct JeevesChatView: View {
                 }
             }
 
+            suggestionChips
             Divider().overlay(Color.textPrimary.opacity(0.1))
             inputBar
         }
         .background(Color.bg)
-        // Tap anywhere on the conversation to dismiss the keyboard.
-        .onTapGesture { dismissKeyboard() }
         .sheet(isPresented: $showSetup) {
             NavigationStack { PlannerSetupView() }
         }
@@ -133,14 +147,20 @@ struct JeevesChatView: View {
         }
     }
 
+    /// Three targets, not five. New chat, Today's anchors and Settings were
+    /// three separate 16pt glyphs crowded into one row — the same undersized
+    /// target problem as the mic, three times over. They live in one menu now,
+    /// and the space that frees carries a status line: Jeeves already builds
+    /// this summary for every turn's state note, so the screen can answer
+    /// "what do you know about me?" before being asked.
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             if let onMinimise {
                 Button(action: onMinimise) {
                     Image(systemName: "chevron.down")
                         .font(.ui(16, weight: .semibold))
                         .foregroundStyle(Color.textSoft)
-                        .frame(width: 30, height: 30)
+                        .frame(width: Self.tapTarget, height: Self.tapTarget)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -148,48 +168,121 @@ struct JeevesChatView: View {
             }
             Circle()
                 .fill(Color.accent)
-                .frame(width: 30, height: 30)
+                .frame(width: 32, height: 32)
                 .overlay(Image(systemName: "sparkles").foregroundStyle(.white).font(.ui(13)))
-            Text("Jeeves").font(.heading(18)).foregroundStyle(Color.textPrimary)
-            Spacer()
-            // New chat = start a fresh session. Older turns stay in the store
-            // (they feed the chat eval) — they just leave the screen.
-            if !turns.isEmpty {
-                Button { startNewSession() } label: {
-                    Image(systemName: "square.and.pencil").font(.ui(16)).foregroundStyle(Color.textSoft)
+                .padding(.leading, onMinimise == nil ? 8 : 0)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Jeeves").font(.heading(18)).foregroundStyle(Color.textPrimary)
+                Text(statusLine)
+                    .font(.ui(11.5)).foregroundStyle(Color.textMuted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+
+            Menu {
+                if !turns.isEmpty {
+                    // New chat = start a fresh session. Older turns stay in the
+                    // store (they feed the chat eval) — they just leave the screen.
+                    Button { startNewSession() } label: {
+                        Label("New chat", systemImage: "square.and.pencil")
+                    }
                 }
+                // Today's anchors (gym + events). NOT a calendar glyph: that one
+                // means "pick a date" everywhere else, and wearing it here made
+                // three screens promise three different things with one icon.
+                Button { showSetup = true } label: {
+                    Label("Today's anchors", systemImage: "slider.horizontal.3")
+                }
+                // Gear = standing configuration (keys, integrations, locations).
+                Button { showSettings = true } label: {
+                    Label("Settings", systemImage: "gearshape.fill")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.ui(17, weight: .semibold))
+                    .foregroundStyle(Color.textSoft)
+                    .frame(width: Self.tapTarget, height: Self.tapTarget)
+                    .contentShape(Rectangle())
             }
-            // Today's anchors (gym + events). NOT a calendar glyph: that one
-            // means "pick a date" everywhere else, and wearing it here made
-            // three screens promise three different things with one icon.
-            Button { showSetup = true } label: {
-                Image(systemName: "slider.horizontal.3").font(.ui(16)).foregroundStyle(Color.textSoft)
-            }
-            .accessibilityLabel("Today's anchors")
-            // Gear = standing configuration (keys, integrations, locations).
-            Button { showSettings = true } label: {
-                Image(systemName: "gearshape.fill").font(.ui(16)).foregroundStyle(Color.textSoft)
-            }
+            .accessibilityLabel("More")
         }
-        .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 10)
+        .padding(.horizontal, 12).padding(.top, 4).padding(.bottom, 6)
     }
 
-    private var planMyDayBar: some View {
-        HStack(spacing: 10) {
-            Button(action: planMyDay) {
-                HStack(spacing: 6) {
-                    Image(systemName: "wand.and.stars").font(.ui(13, weight: .semibold))
-                    Text("Plan my day").font(.ui(14, weight: .semibold))
-                }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 11)
-                .background(RoundedRectangle(cornerRadius: 14).fill(Color.accent))
+    /// What Jeeves is holding, in one line. Read from the store, never from
+    /// the conversation — the same rule the chat itself now follows.
+    private var statusLine: String {
+        var parts: [String] = []
+        let upcoming = trips.filter { $0.endDate >= today }.sorted { $0.startDate < $1.startDate }
+        let legs = segments.filter { $0.day >= today }.count
+        if legs > 0 { parts.append("\(legs) journey\(legs == 1 ? "" : "s")") }
+        if let next = upcoming.first {
+            let days = Calendar.current.dateComponents([.day], from: today, to: next.startDate).day ?? 0
+            if days <= 0 {
+                parts.append("\(next.title) now")
+            } else {
+                parts.append("\(next.title) in \(days) day\(days == 1 ? "" : "s")")
             }
-            .buttonStyle(.plain)
-            .disabled(isPlanning || isSending)
         }
-        .padding(.horizontal, 16).padding(.vertical, 10)
+        if parts.isEmpty {
+            let n = todayEvents.count
+            parts.append(n == 0 ? "Nothing on today" : "\(n) event\(n == 1 ? "" : "s") today")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// "Plan my day" used to hold a permanent full-width bar above the
+    /// conversation — roughly 60pt of vertical space, on every turn, forever.
+    /// As chips it keeps its prominence on an empty thread and gets out of the
+    /// way the moment you start typing.
+    @ViewBuilder
+    private var suggestionChips: some View {
+        if !isSending && !isPlanning && !isReadingTicket
+            && inputText.trimmingCharacters(in: .whitespaces).isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    Button(action: planMyDay) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "wand.and.stars").font(.ui(12, weight: .semibold))
+                            Text("Plan my day").font(.ui(13.5, weight: .semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 36)
+                        .background(Capsule().fill(Color.accent))
+                    }
+                    .buttonStyle(.plain)
+
+                    ForEach(contextualSuggestions, id: \.self) { text in
+                        Button { inputText = text; sendChat() } label: {
+                            Text(text)
+                                .font(.ui(13.5))
+                                .foregroundStyle(Color.textPrimary)
+                                .padding(.horizontal, 14)
+                                .frame(minHeight: 36)
+                                .background(
+                                    Capsule().fill(Color.surface)
+                                        .overlay(Capsule().stroke(Color.textPrimary.opacity(0.11)))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .padding(.vertical, 8)
+        }
+    }
+
+    /// Offers that depend on what is actually on file, so a chip never
+    /// proposes something the store can't answer.
+    private var contextualSuggestions: [String] {
+        var out: [String] = []
+        if segments.contains(where: { $0.day >= today }) { out.append("Show my upcoming journeys") }
+        if todayPlanState?.plan != nil { out.append("What's left today?") }
+        else if !todayEvents.isEmpty { out.append("What's on today?") }
+        return Array(out.prefix(2))
     }
 
     // MARK: Turn rendering
@@ -204,6 +297,20 @@ struct JeevesChatView: View {
     }
 
     private func bubble(for turn: ChatTurn) -> some View {
+        VStack(alignment: turn.isUser ? .trailing : .leading, spacing: 8) {
+            speechBubble(for: turn)
+            // The old value lives in a slot, not in a sentence. Three eval
+            // scenarios failed because the reply dropped it while the tool
+            // result underneath still had it — prose makes that easy, a card
+            // with an empty half does not.
+            ForEach(turn.receipts) { receipt in
+                ReceiptCard(receipt: receipt)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: turn.isUser ? .trailing : .leading)
+    }
+
+    private func speechBubble(for turn: ChatTurn) -> some View {
         HStack {
             if turn.isUser { Spacer(minLength: 40) }
             VStack(alignment: .trailing, spacing: 6) {
@@ -227,57 +334,136 @@ struct JeevesChatView: View {
         }
     }
 
+    /// Apple's minimum touch target. The mic used to be `.frame(width: 26)`
+    /// and attach a bare 22pt glyph with no frame at all — roughly half of
+    /// this, which is why they missed even when nothing was intercepting them.
+    static let tapTarget: CGFloat = 44
+
+    @ViewBuilder
     private var inputBar: some View {
-        HStack(alignment: .bottom, spacing: 10) {
+        if voice.phase == .idle {
+            composerIdle
+        } else {
+            composerRecording
+        }
+    }
+
+    private var composerIdle: some View {
+        HStack(alignment: .bottom, spacing: 2) {
             // Attach a ticket screenshot → Jeeves reads it and drafts an event.
             PhotosPicker(selection: $photoItem, matching: .images) {
                 Image(systemName: "photo")
-                    .font(.ui(22))
+                    .font(.ui(20))
                     .foregroundStyle(Color.textSoft)
-                    .padding(.bottom, 4)
+                    .frame(width: Self.tapTarget, height: Self.tapTarget)
+                    .contentShape(Rectangle())
             }
+            .accessibilityLabel("Attach a ticket")
 
-            // Voice note: tap to record (en-IN transcription), tap again to
-            // stop — the transcript lands in the field for a glance-and-send.
+            // Voice note: tap to record (en-IN transcription). Stopping and
+            // cancelling both live in the recording bar, so this is a single
+            // unambiguous action rather than a button that means three things.
             Button { voiceTapped() } label: {
-                Group {
-                    switch voice.phase {
-                    case .idle:
-                        Image(systemName: "mic")
-                            .font(.ui(22))
-                            .foregroundStyle(Color.textSoft)
-                    case .recording:
-                        Image(systemName: "stop.circle.fill")
-                            .font(.ui(24))
-                            .foregroundStyle(Color(red: 0.70, green: 0.23, blue: 0.18))
-                            .symbolEffect(.pulse, options: .repeating)
-                    case .transcribing:
-                        ProgressView().controlSize(.small)
-                    }
-                }
-                .padding(.bottom, 4)
-                .frame(width: 26)
+                Image(systemName: "mic")
+                    .font(.ui(20))
+                    .foregroundStyle(Color.textSoft)
+                    .frame(width: Self.tapTarget, height: Self.tapTarget)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Record a voice note")
+
+            TextField("Message Jeeves…", text: $inputText, axis: .vertical)
+                .lineLimit(1...4)
+                .font(.ui(15))
+                .foregroundStyle(Color.textPrimary)
+                .padding(.horizontal, 15)
+                .frame(minHeight: Self.tapTarget)
+                .background(
+                    RoundedRectangle(cornerRadius: 22).fill(Color.surface)
+                        .overlay(RoundedRectangle(cornerRadius: 22)
+                            .stroke(Color.textPrimary.opacity(0.09)))
+                )
+
+            Button(action: sendChat) {
+                Image(systemName: "arrow.up")
+                    .font(.ui(17, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(canSend ? Color.accent : Color.textMuted.opacity(0.35)))
+                    .frame(width: Self.tapTarget, height: Self.tapTarget)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSend)
+            .accessibilityLabel("Send")
+        }
+        .padding(.horizontal, 8).padding(.vertical, 6)
+        .background(Color.bg)
+    }
+
+    /// Recording had no way out: the only exit was stop-and-transcribe, so a
+    /// mistaken tap — likely, at 26pt — cost you a transcription you didn't
+    /// want. VoiceRecorder has had `cancel()` and `elapsed` all along; nothing
+    /// was calling them.
+    private var composerRecording: some View {
+        HStack(spacing: 2) {
+            Button { voice.cancel() } label: {
+                Text("Cancel")
+                    .font(.ui(14.5))
+                    .foregroundStyle(Color.textMuted)
+                    .padding(.horizontal, 10)
+                    .frame(height: Self.tapTarget)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(voice.phase == .transcribing)
 
-            TextField(voice.phase == .recording ? "Listening… tap ⏹ to finish" : "Message Jeeves…",
-                      text: $inputText, axis: .vertical)
-                .lineLimit(1...4)
-                .foregroundStyle(Color.textPrimary)
-                .padding(10)
-                .background(RoundedRectangle(cornerRadius: 14).fill(Color.surface))
+            HStack(spacing: 10) {
+                if voice.phase == .transcribing {
+                    ProgressView().controlSize(.small)
+                    Text("Transcribing…")
+                        .font(.ui(14.5)).foregroundStyle(Color.textMuted)
+                } else {
+                    // A live clock, so a recording that silently failed to
+                    // start is visible as one that never advances.
+                    TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                        Text(Self.clock(voice.elapsed))
+                            .font(.ui(14, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(Color.accentDeep)
+                    }
+                    RecordingWave()
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 15)
+            .frame(minHeight: Self.tapTarget)
+            .background(
+                RoundedRectangle(cornerRadius: 22).fill(Color.surface)
+                    .overlay(RoundedRectangle(cornerRadius: 22)
+                        .stroke(Color.accent.opacity(0.35)))
+            )
 
-            Button(action: sendChat) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.ui(30))
-                    .foregroundStyle(canSend ? Color.accent : Color.textMuted.opacity(0.5))
+            Button { voiceTapped() } label: {
+                Image(systemName: "stop.fill")
+                    .font(.ui(15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(Color.accentDeep))
+                    .frame(width: Self.tapTarget, height: Self.tapTarget)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(!canSend)
+            .disabled(voice.phase == .transcribing)
+            .accessibilityLabel("Stop and transcribe")
         }
-        .padding(.horizontal, 16).padding(.vertical, 12)
+        .padding(.horizontal, 8).padding(.vertical, 6)
         .background(Color.bg)
+    }
+
+    private static func clock(_ seconds: TimeInterval) -> String {
+        let s = max(0, Int(seconds))
+        return String(format: "%d:%02d", s / 60, s % 60)
     }
 
     /// One button, three states: start recording → stop & transcribe → (spinner).
@@ -329,10 +515,11 @@ struct JeevesChatView: View {
     // MARK: Persisted-turn helpers
 
     @discardableResult
-    private func addTurn(role: ChatMessage.Role, _ content: String, plan: GeneratedPlan? = nil, isOfflinePlan: Bool = false, imageData: Data? = nil) -> ChatTurn {
+    private func addTurn(role: ChatMessage.Role, _ content: String, plan: GeneratedPlan? = nil, isOfflinePlan: Bool = false, imageData: Data? = nil, receiptsJSON: String? = nil) -> ChatTurn {
         let turn = ChatTurn(
             role: role.rawValue, content: content, day: today,
-            planJSON: plan.flatMap(ChatTurn.encodePlan), isOfflinePlan: isOfflinePlan, imageData: imageData
+            planJSON: plan.flatMap(ChatTurn.encodePlan), isOfflinePlan: isOfflinePlan,
+            imageData: imageData, receiptsJSON: receiptsJSON
         )
         modelContext.insert(turn)
         modelContext.saveOrLog()
@@ -373,6 +560,10 @@ struct JeevesChatView: View {
         dismissKeyboard()
         isSending = true
 
+        // Receipts are collected from the TOOL RESULTS as they come back, so
+        // the card can never disagree with what actually happened.
+        let collected = ToolReceiptCollector()
+
         Task {
             // Hold a background assertion: an agentic turn can call plan_day,
             // which is slow, so it must survive the user switching away.
@@ -380,16 +571,26 @@ struct JeevesChatView: View {
                 do {
                     let reply = try await JeevesChatService.sendAgentic(
                         history: priorHistory, newMessage: text, stateNote: stateNote,
-                        execute: { call in await toolExecutor.run(call) }
+                        execute: { call in
+                            activeTool = ToolActivity.label(for: call.name, input: call.input)
+                            let result = await toolExecutor.run(call)
+                            collected.add(tool: call.name, result: result.text)
+                            activeTool = nil
+                            return result
+                        }
                     )
                     return .success(reply)
                 } catch {
                     return .failure(error)
                 }
             }
+            activeTool = nil
             switch outcome {
             case .success(let reply):
-                if !reply.text.isEmpty { addTurn(role: .assistant, reply.text) }
+                if !reply.text.isEmpty {
+                    addTurn(role: .assistant, reply.text,
+                            receiptsJSON: ChatReceipt.encode(collected.receipts))
+                }
                 // A claim that survived the challenge is a real incident — the
                 // digest must see it, not just the user who read the reply.
                 if reply.unverifiedClaim {
@@ -517,8 +718,11 @@ struct JeevesChatView: View {
     }
 
     private var planningStatus: String {
-        if isPlanning { return "Jeeves is planning your day…" }
         if isReadingTicket { return "Reading your ticket…" }
+        // The running tool wins: it is the most specific true thing available,
+        // and it makes the read path visible.
+        if let activeTool { return activeTool }
+        if isPlanning { return "Jeeves is planning your day…" }
         return "Jeeves is thinking…"
     }
 
