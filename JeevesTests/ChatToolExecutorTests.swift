@@ -119,6 +119,212 @@ final class ChatToolExecutorTests: XCTestCase {
         XCTAssertEqual(stays.count, 2, "first and last night at the same hotel are two bookings")
     }
 
+    // MARK: add_stay continues an open itinerary (t1-8, t1-13)
+
+    /// "From Mysore I drive to Wayanad and stay at CGH Earth" — the stay runs
+    /// past the Mysore trip's end so nothing COVERS it, and the executor used
+    /// to mint a second trip beside the one the user was already on.
+    /// add_stay measures its auto transition on a background Task. Let it land
+    /// before the container goes away, or the teardown pulls the store out from
+    /// under a live model instance and the whole test process dies.
+    private func drainBackgroundMeasure() async {
+        for _ in 0..<40 {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            let segs = (try? container.mainContext.fetch(FetchDescriptor<TravelSegment>())) ?? []
+            if segs.contains(where: { $0.travelMinutes > 0 }) { return }
+        }
+    }
+
+    func testAddStayContinuesTheOpenTripItRunsPast() async {
+        let context = container.mainContext
+        let start = Calendar.current.date(byAdding: .day, value: 5, to: Date())!.startOfDay
+        let end = Calendar.current.date(byAdding: .day, value: 7, to: Date())!.startOfDay
+        let trip = Trip(title: "Mysore", startDate: start, endDate: end)
+        context.insert(trip)
+        context.insert(TripStay(tripID: trip.id, place: "Radisson Blu Mysore",
+                                arriveDate: start, departDate: end))
+        // The only journey so far took them OUT — nothing has brought them home.
+        context.insert(TravelSegment(tripID: trip.id, mode: .drive, label: "Home → Mysore",
+                                     toPlace: "Radisson Mysore",
+                                     arriveBy: start.addingTimeInterval(14 * 3600)))
+        try? context.save()
+
+        _ = await executor.run(.init(
+            id: "c1", name: "add_stay",
+            input: ["trip": "", "hotel": "CGH Earth Wayanad",
+                    "arrive_date": day(7), "depart_date": day(10)]))
+
+        await drainBackgroundMeasure()
+        let trips = (try? context.fetch(FetchDescriptor<Trip>())) ?? []
+        let stays = (try? context.fetch(FetchDescriptor<TripStay>())) ?? []
+        XCTAssertEqual(trips.count, 1, "the itinerary continues — no second trip")
+        XCTAssertEqual(stays.count, 2)
+        XCTAssertEqual(stays.first { $0.place.contains("CGH") }?.tripID, trip.id)
+        XCTAssertEqual(trips.first?.endDate,
+                       Calendar.current.date(byAdding: .day, value: 10, to: Date())!.startOfDay,
+                       "the trip window grows to cover the new stay")
+    }
+
+    /// The counterweight: once a leg has landed them back home the trip is
+    /// closed, and the next morning's drive starts a NEW trip. This is the
+    /// merged-Mysore bug (t1-5) — the two must not become one.
+    func testAddStayStartsANewTripOnceTheLastLegLandedHome() async {
+        let context = container.mainContext
+        let start = Date().startOfDay
+        let end = Calendar.current.date(byAdding: .day, value: 5, to: Date())!.startOfDay
+        let trip = Trip(title: "Singapore", startDate: start, endDate: end)
+        context.insert(trip)
+        context.insert(TripStay(tripID: trip.id, place: "Singapore",
+                                arriveDate: start, departDate: end))
+        context.insert(TravelSegment(tripID: trip.id, mode: .flight, label: "SQ 510",
+                                     fromPlace: "Singapore", toPlace: "BLR",
+                                     departAt: end.addingTimeInterval(19 * 3600 + 40 * 60)))
+        try? context.save()
+
+        _ = await executor.run(.init(
+            id: "c2", name: "add_stay",
+            input: ["trip": "", "hotel": "Radisson Blu Mysore",
+                    "arrive_date": day(6), "depart_date": day(8)]))
+
+        let trips = (try? context.fetch(FetchDescriptor<Trip>())) ?? []
+        XCTAssertEqual(trips.count, 2, "they came home — Mysore is its own trip")
+        XCTAssertEqual(trips.first { $0.title == "Singapore" }?.endDate, end,
+                       "the Singapore window must not stretch over the Mysore days")
+    }
+
+    /// The same mistake wearing a label: the model naming the trip after the
+    /// hotel. It still belongs to the open itinerary, and the receipt has to
+    /// say which trip it actually joined rather than silently overruling.
+    func testStayUnderAnInventedTripNameStillContinuesTheOpenTrip() async {
+        let context = container.mainContext
+        let start = Calendar.current.date(byAdding: .day, value: 5, to: Date())!.startOfDay
+        let end = Calendar.current.date(byAdding: .day, value: 7, to: Date())!.startOfDay
+        let trip = Trip(title: "Mysore", startDate: start, endDate: end)
+        context.insert(trip)
+        context.insert(TripStay(tripID: trip.id, place: "Radisson Blu Mysore",
+                                arriveDate: start, departDate: end))
+        context.insert(TravelSegment(tripID: trip.id, mode: .drive, label: "Home → Mysore",
+                                     toPlace: "Radisson Mysore",
+                                     arriveBy: start.addingTimeInterval(14 * 3600)))
+        try? context.save()
+
+        let out = await executor.run(.init(
+            id: "c3", name: "add_stay",
+            input: ["trip": "CGH Earth Wayanad", "hotel": "CGH Earth Wayanad",
+                    "arrive_date": day(7), "depart_date": day(10)]))
+
+        await drainBackgroundMeasure()
+        let trips = (try? context.fetch(FetchDescriptor<Trip>())) ?? []
+        XCTAssertEqual(trips.count, 1, "an invented trip name must not fork the itinerary")
+        XCTAssertTrue(out.text.contains("Mysore"), "the receipt names the trip it really joined")
+    }
+
+    func testPlaceWordMatchIgnoresFillerAndShortTokens() {
+        XCTAssertTrue(ChatToolExecutor.sharesPlaceWord("Radisson hotel Mysore",
+                                                       "Radisson Blu Mysore, Nazarbad"))
+        XCTAssertFalse(ChatToolExecutor.sharesPlaceWord("Singapore", "BLR"))
+        // "hotel" alone is not a match.
+        XCTAssertFalse(ChatToolExecutor.sharesPlaceWord("Airport hotel", "The hotel"))
+    }
+
+    // MARK: chat can READ travel, not only write it (t1-12)
+
+    func testFetchAppDataServesJourneysTripsAndStays() async throws {
+        let context = container.mainContext
+        let start = Calendar.current.date(byAdding: .day, value: 3, to: Date())!.startOfDay
+        let end = Calendar.current.date(byAdding: .day, value: 6, to: Date())!.startOfDay
+        let trip = Trip(title: "Wayanad", startDate: start, endDate: end)
+        context.insert(trip)
+        context.insert(TripStay(tripID: trip.id, place: "CGH Earth Wayanad",
+                                arriveDate: start, departDate: end))
+        context.insert(TravelSegment(tripID: trip.id, mode: .drive, label: "Home → Wayanad",
+                                     toPlace: "CGH Earth Wayanad",
+                                     arriveBy: start.addingTimeInterval(14 * 3600),
+                                     travelMinutes: 260, travelIsEstimated: false))
+        try? context.save()
+
+        func rows(_ collection: String, _ extra: [String: Any] = [:]) async throws -> [[String: Any]] {
+            var input: [String: Any] = ["collection": collection]
+            extra.forEach { input[$0] = $1 }
+            let out = await executor.run(.init(id: "f", name: "fetch_app_data", input: input))
+            let obj = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(out.text.utf8)) as? [String: Any])
+            return try XCTUnwrap(obj["rows"] as? [[String: Any]])
+        }
+
+        let trips = try await rows("trips")
+        XCTAssertEqual(trips.count, 1)
+        XCTAssertEqual(trips.first?["title"] as? String, "Wayanad")
+        XCTAssertEqual((trips.first?["stays"] as? [String])?.first, "CGH Earth Wayanad")
+
+        let journeys = try await rows("journeys")
+        XCTAssertEqual(journeys.count, 1, "a journey question is answered from journeys")
+        XCTAssertEqual(journeys.first?["travelMinutes"] as? String, "260")
+
+        let stays = try await rows("stays")
+        XCTAssertEqual(stays.first?["trip"] as? String, "Wayanad")
+
+        // A window narrows it, so "anything in August" is one call.
+        let after = try await rows("journeys", ["from": day(20)])
+        XCTAssertTrue(after.isEmpty, "the drive is before the window")
+        let around = try await rows("journeys", ["from": day(0), "to": day(30)])
+        XCTAssertEqual(around.count, 1)
+    }
+
+    func testUnmeasuredJourneyReportsNotMeasuredRatherThanZero() async throws {
+        let context = container.mainContext
+        let trip = Trip(title: "Ooty", startDate: Date().startOfDay,
+                        endDate: Calendar.current.date(byAdding: .day, value: 2, to: Date())!.startOfDay)
+        context.insert(trip)
+        context.insert(TravelSegment(tripID: trip.id, mode: .drive, label: "Home → Ooty",
+                                     toPlace: "Ooty", arriveBy: Date().startOfDay.addingTimeInterval(50_000)))
+        try? context.save()
+
+        let out = await executor.run(.init(id: "f2", name: "fetch_app_data",
+                                           input: ["collection": "journeys"]))
+        XCTAssertTrue(out.text.contains("not measured"),
+                      "an unmeasured leg must not read as a confident 0 minutes")
+    }
+
+    func testStateNoteNamesTravelOnFile() async {
+        let context = container.mainContext
+        XCTAssertTrue(executor.stateNote().contains("No trips or journeys stored"))
+        let trip = Trip(title: "Waterfall day", startDate: Date().startOfDay,
+                        endDate: Date().startOfDay)
+        context.insert(trip)
+        try? context.save()
+        XCTAssertTrue(executor.stateNote().contains("Waterfall day"),
+                      "chat said 'no journey planned' on a morning a trip was on file")
+    }
+
+    // MARK: days are days (t1-9, t1-11)
+
+    func testShiftByDaysMovesTheWholeEventAndItsSpan() async {
+        let context = container.mainContext
+        _ = await executor.run(.init(
+            id: "e1", name: "add_event",
+            input: ["title": "Dinner with Arvind", "date": day(1),
+                    "start_time": "20:00", "end_time": "22:00"]))
+        _ = await executor.run(.init(
+            id: "e2", name: "edit_event",
+            input: ["title": "Dinner with Arvind", "shift_by_days": 1]))
+
+        let events = (try? context.fetch(FetchDescriptor<DailyEvent>())) ?? []
+        XCTAssertEqual(events.count, 1, "postponing must move the event, never re-create it")
+        let moved = events.first
+        XCTAssertEqual(moved?.date,
+                       Calendar.current.date(byAdding: .day, value: 2, to: Date())!.startOfDay)
+        XCTAssertEqual(moved?.startMinute, 20 * 60, "the time of day is preserved")
+        XCTAssertEqual(moved?.endMinute, 22 * 60)
+
+        // And back two days — "prepone" is the same tool with a negative shift.
+        _ = await executor.run(.init(
+            id: "e3", name: "edit_event",
+            input: ["title": "Dinner with Arvind", "shift_by_days": -2]))
+        let after = (try? context.fetch(FetchDescriptor<DailyEvent>())) ?? []
+        XCTAssertEqual(after.count, 1)
+        XCTAssertEqual(after.first?.date, Date().startOfDay)
+    }
+
     // MARK: stale travel data after an edit
 
     func testMovingAStayReAnchorsAndReMeasuresItsDrives() async throws {

@@ -274,10 +274,28 @@ final class ChatToolExecutor {
         // it ran 20:00–21:00 and set the end to 22:00. Code does this maths.
         let extendBy = input["extend_by_minutes"] as? Int
         let shiftBy = input["shift_by_minutes"] as? Int
+        // Whole DAYS move the date, never the minutes. "Postpone by a day"
+        // used to arrive as shift_by_minutes: 1440, which clamps against the
+        // end of the day: a 20:00–24:00 dinner became 24:00–24:00 on the SAME
+        // date — it didn't move and it lost four hours. A second shift left it
+        // at 00:00–00:00.
+        let shiftDays = input["shift_by_days"] as? Int
         var timesChanged = false
+        var daysMoved: [String] = []
         var clampedNote = ""
         for e in matches {
             let oldStart = e.startMinute, oldEnd = e.endMinute
+            if let days = shiftDays, days != 0 {
+                let oldDay = e.date
+                if let moved = Calendar.current.date(byAdding: .day, value: days, to: e.date) {
+                    e.date = moved.startOfDay
+                    if let span = e.spanEndDate,
+                       let movedSpan = Calendar.current.date(byAdding: .day, value: days, to: span) {
+                        e.spanEndDate = movedSpan.startOfDay
+                    }
+                    daysMoved.append("\(Self.dayString(oldDay)) → \(Self.dayString(e.date))")
+                }
+            }
             if let venue = input["new_venue"] as? String, !venue.isEmpty {
                 e.destinationAddress = venue
                 // Old coordinates would contradict the new venue.
@@ -344,7 +362,10 @@ final class ChatToolExecutor {
         let replanNote = (timesChanged && touchesToday)
             ? " This changes today — OFFER to replan the remainder (replan_today, with resume_at and any missed_blocks)."
             : ""
-        return .init(text: "Updated \(matches.count) event(s) (\(days)): \(Set(changes).joined(separator: "; ")).\(replanNote)\(clampedNote)")
+        // A day move is the headline when it happened — the receipt has to say
+        // which day it left and which it landed on, not just the new times.
+        let movedNote = daysMoved.isEmpty ? "" : " Moved \(Set(daysMoved).joined(separator: "; "))."
+        return .init(text: "Updated \(matches.count) event(s) (\(days)): \(Set(changes).joined(separator: "; ")).\(movedNote)\(replanNote)\(clampedNote)")
     }
 
     @MainActor
@@ -604,6 +625,50 @@ final class ChatToolExecutor {
             }
             resolved = covering.first
         }
+        // CONTINUATION. "From Mysore I drive to Wayanad and stay at CGH Earth"
+        // is the same journey continuing, not a second holiday — but the stay
+        // runs past the Mysore trip's end, so no trip COVERS it and the old
+        // code minted a 'CGH Earth Wayanad' trip beside the one the user was
+        // already on. A stay that picks up where the itinerary left off joins
+        // that trip and grows it.
+        //
+        // The guard against the old `?? trips.last` disaster is that the trip
+        // must still be OPEN: its last journey landed at one of its own stays,
+        // not back home. Singapore ends with SQ 510 into BLR, so the Mysore
+        // drive the next morning correctly starts a new trip — the handover
+        // day stays shared, and the two itineraries stay separate.
+        //
+        // This also catches the stay that arrived under an INVENTED name —
+        // the model naming a trip after each hotel ("CGH Earth Wayanad") is
+        // the same mistake wearing a label, so an unmatched name gets the same
+        // treatment and the receipt says which trip it actually joined.
+        var continued = false
+        if resolved == nil {
+            let cal = Calendar.current
+            let allStays = (try? modelContext.fetch(FetchDescriptor<TripStay>())) ?? []
+            let allSegs = (try? modelContext.fetch(FetchDescriptor<TravelSegment>())) ?? []
+            let adjacent = trips.filter { t in
+                let dayAfter = cal.date(byAdding: .day, value: 1, to: t.endDate) ?? t.endDate
+                return arrive.startOfDay >= t.startDate && arrive.startOfDay <= dayAfter
+            }
+            let open = adjacent.filter { t in
+                let legs = allSegs.filter { $0.tripID == t.id }.sorted { $0.day < $1.day }
+                // Nothing has brought them home yet.
+                guard let last = legs.last, !last.toPlace.isEmpty else { return true }
+                let here = allStays.filter { $0.tripID == t.id }.flatMap { [$0.place, $0.address] }
+                return here.contains { Self.sharesPlaceWord($0, last.toPlace) }
+            }
+            // Growing this trip must not swallow another one's interior.
+            if let candidate = open.max(by: { $0.startDate < $1.startDate }),
+               !trips.contains(where: { other in
+                   other.id != candidate.id
+                       && other.endDate > candidate.startDate && other.startDate < depart.startOfDay
+               }) {
+                resolved = candidate
+                continued = !tripQuery.isEmpty
+                    && candidate.title.compare(tripQuery, options: .caseInsensitive) != .orderedSame
+            }
+        }
         var createdTrip = false
         let trip: Trip
         if let resolved {
@@ -737,8 +802,11 @@ final class ChatToolExecutor {
         let created = createdTrip
             ? "NEW trip '\(trip.title)' created (\(TravelGuard.dayRange(trip))) for this stay. "
             : ""
+        let joinedNote = continued
+            ? " (You asked for '\(tripQuery)' — this is the same journey continuing, so it went onto '\(trip.title)'. Say so, and offer to split it out if it really is a separate trip.)"
+            : ""
         return .init(text: created + "Stay added to '\(trip.title)': \(place), \(f.string(from: arrive)) – \(f.string(from: depart))."
-                     + (grew ? " The trip grew to cover it." : "") + transitionNote)
+                     + (grew ? " The trip grew to cover it." : "") + joinedNote + transitionNote)
     }
 
     private func toolUpdateTrip(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
@@ -1280,9 +1348,71 @@ final class ChatToolExecutor {
             return .init(text: String(data: data, encoding: .utf8) ?? "{}")
         }
 
+        // An optional window, so "journeys in August" is one call rather than
+        // a guess. Absent bounds mean everything.
+        let fromDate = (input["from"] as? String).map { JeevesChatService.resolveDate($0, relativeTo: today) }
+        let toDate = (input["to"] as? String).map { JeevesChatService.resolveDate($0, relativeTo: today) }
+        func inWindow(_ start: Date, _ end: Date? = nil) -> Bool {
+            let finish = end ?? start
+            if let fromDate, finish < fromDate.startOfDay { return false }
+            if let toDate, start > toDate.startOfDay.addingTimeInterval(86_399) { return false }
+            return true
+        }
+
         switch collection {
         case "run_program":
             return .init(text: JeevesChatService.runProgramSummary())
+
+        // TRAVEL. Chat could create all three of these and never read one
+        // back: asked "are there any journeys in August" it answered from
+        // conversation memory, and asked about a trip it answered out of the
+        // events collection. Both are wrong answers, not near misses.
+        case "trips":
+            let all = ((try? modelContext.fetch(FetchDescriptor<Trip>())) ?? [])
+                .filter { inWindow($0.startDate, $0.endDate) }
+            let stays = (try? modelContext.fetch(FetchDescriptor<TripStay>())) ?? []
+            let segs = (try? modelContext.fetch(FetchDescriptor<TravelSegment>())) ?? []
+            return json(all.sorted { $0.startDate < $1.startDate }.map { t in
+                ["title": t.title, "start": df.string(from: t.startDate),
+                 "end": df.string(from: t.endDate), "days": t.dayCount,
+                 "stays": stays.filter { $0.tripID == t.id }.map(\.place),
+                 "journeys": segs.filter { $0.tripID == t.id }
+                     .map { $0.label.isEmpty ? $0.mode.label : $0.label }]
+            })
+
+        case "journeys":
+            let segs = ((try? modelContext.fetch(FetchDescriptor<TravelSegment>())) ?? [])
+                .filter { inWindow($0.day) }
+            let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
+            return json(segs.sorted { $0.day < $1.day }.map { s in
+                var row: [String: Any] = [
+                    "label": s.label.isEmpty ? s.mode.label : s.label,
+                    "mode": s.modeRaw,
+                    "day": df.string(from: s.day),
+                    "from": s.fromPlace.isEmpty ? "Home" : s.fromPlace,
+                    "to": s.toPlace,
+                    "trip": trips.first { $0.id == s.tripID }?.title ?? "(no trip — orphaned)",
+                    // Never a confident zero: an unmeasured leg says so.
+                    "travelMinutes": s.travelMinutes > 0 ? "\(s.travelMinutes)" : "not measured",
+                ]
+                if let plan = LeaveBy.plan(for: s) {
+                    row["leaveBy"] = TravelClock.hhmm(plan.leaveAt, in: s.fromTimeZone)
+                }
+                return row
+            })
+
+        case "stays":
+            let all = ((try? modelContext.fetch(FetchDescriptor<TripStay>())) ?? [])
+                .filter { inWindow($0.arriveDate, $0.departDate) }
+            let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
+            return json(all.sorted { $0.arriveDate < $1.arriveDate }.map { s in
+                ["place": s.place, "address": s.address,
+                 "arrive": df.string(from: s.arriveDate),
+                 "depart": df.string(from: s.departDate),
+                 "checkin": StayWindow.clock(s.checkinMinute),
+                 "checkout": StayWindow.clock(s.checkoutMinute),
+                 "trip": trips.first { $0.id == s.tripID }?.title ?? "(no trip — orphaned)"]
+            })
 
         case "events":
             let all = (try? modelContext.fetch(FetchDescriptor<DailyEvent>())) ?? []
@@ -1429,6 +1559,24 @@ final class ChatToolExecutor {
         let f = DateFormatter()
         f.dateFormat = "EEE d MMM"
         return f.string(from: d)
+    }
+
+    /// Do two place strings name the same place? Substring matching is no use
+    /// here — "Radisson hotel Mysore" and "Radisson Blu Mysore, Nazarbad" are
+    /// the same hotel and neither contains the other. One meaningful word in
+    /// common is the signal; the filler words hotels share are not.
+    private static let placeNoise: Set<String> = [
+        "hotel", "resort", "the", "inn", "stay", "house", "villa", "airport",
+        "road", "street", "near", "and", "suites", "lodge", "camp", "palace",
+    ]
+    static func sharesPlaceWord(_ a: String, _ b: String) -> Bool {
+        func words(_ s: String) -> Set<String> {
+            Set(s.lowercased()
+                .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                .map(String.init)
+                .filter { $0.count > 2 && !placeNoise.contains($0) })
+        }
+        return !words(a).isDisjoint(with: words(b))
     }
 
     /// Re-plan only the rest of today from now, preserving what's already done —
@@ -1658,6 +1806,33 @@ final class ChatToolExecutor {
             lines.append("No gym set for today.")
         }
         if todayPlanState?.plan != nil { lines.append("A plan for today already exists — planning again replaces it.") }
+
+        // Travel, always. Chat once told the user "no journey is planned" on a
+        // morning the planner was showing a waterfall trip and a notification
+        // had already fired for it: nothing in the state note mentioned travel,
+        // so the model answered from the conversation. A count here is not the
+        // answer — fetch_app_data is — but it stops a confident "none".
+        let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
+        let segments = (try? modelContext.fetch(FetchDescriptor<TravelSegment>())) ?? []
+        let live = trips.filter { $0.endDate >= today }.sorted { $0.startDate < $1.startDate }
+        if live.isEmpty && segments.filter({ $0.day >= today }).isEmpty {
+            lines.append("No trips or journeys stored from today onward.")
+        } else {
+            lines.append("TRAVEL ON FILE: "
+                + live.prefix(4).map { t in
+                    let legs = segments.filter { $0.tripID == t.id && $0.day >= today }.count
+                    return "\(t.title) \(dayLabel(t.startDate))–\(dayLabel(t.endDate))"
+                        + (legs > 0 ? " (\(legs) journey\(legs == 1 ? "" : "s"))" : "")
+                }.joined(separator: "; ")
+                + (live.count > 4 ? "; +\(live.count - 4) more" : "")
+                + ". Read trips/journeys/stays for details — never answer travel from memory.")
+        }
+        let orphans = segments.filter { s in s.day >= today && !trips.contains { $0.id == s.tripID } }
+        if !orphans.isEmpty {
+            lines.append("\(orphans.count) journey(s) belong to no trip: "
+                         + orphans.prefix(3).map { "\($0.label.isEmpty ? $0.mode.label : $0.label) \(dayLabel($0.day))" }
+                             .joined(separator: "; ") + ".")
+        }
         let prefs = StandingPrefs.all()
         if !prefs.isEmpty {
             lines.append("STANDING PREFERENCES (persist across days; honor without re-asking): "

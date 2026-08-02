@@ -206,7 +206,13 @@ behind** — this section only states the shape they share:
   on days they are at home.
 - **Plain words work.** "Postpone", "prepone", "push it by a week" carry their
   ordinary meaning and need no clarifying question when the target is
-  unambiguous.
+  unambiguous. A whole day is a day: an event pushed by one day keeps its time
+  of day and its duration.
+- **What makes it a new trip is going home, not a new place.** "From Mysore I
+  drive to Wayanad" continues the trip already running — one itinerary, one
+  window that grows. Only once a leg has landed them home does the next stay
+  start a separate trip. Naming a trip after each hotel is the same failure as
+  absorbing two genuine trips into one, pointed the other way.
 - **Chat can READ, not only write.** "Show my upcoming journeys" is answered
   from stored rows — never from the conversation, and never by substituting a
   neighbouring collection because the right one has no tool. A question about

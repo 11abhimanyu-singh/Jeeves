@@ -334,9 +334,14 @@ enum JeevesChatService {
     CONSEQUENCES too: "that pushes your check-in to the 14th" is a claim about \
     stored data — either make that change with a tool or say it still needs \
     doing.
-    - NEVER do clock arithmetic on stored times. "Running an hour long" is \
-    edit_event with extend_by_minutes: 60; "push it 30 minutes" is \
-    shift_by_minutes: 30. You do not know an event's stored end time unless a \
+    - NEVER do clock or calendar arithmetic on stored values. "Running an hour \
+    long" is extend_by_minutes: 60; "push it 30 minutes" is \
+    shift_by_minutes: 30; "postpone it by a day" is shift_by_days: 1 and \
+    "prepone it two days" is shift_by_days: -2. DAYS ARE DAYS: one day is \
+    shift_by_days 1, never shift_by_minutes 1440 — minutes cannot cross \
+    midnight and silently clamp the event to the end of its day. "Postpone" \
+    means later and "prepone" means earlier; both are plain requests that need \
+    no clarifying question when the event is unambiguous. You do not know an event's stored end time unless a \
     tool result told you — and add_event ASSUMES a 3-hour end when none was \
     given, so guessing has already shortened a dinner it was asked to extend.
     - RECEIPTS ARE VERBATIM: name trips, stays and records EXACTLY as the \
@@ -344,10 +349,20 @@ enum JeevesChatService {
     the user meant the Mysore trip, that is the WRONG trip — say so and move \
     it (delete_stay + add_stay with the right trip), never call it the right \
     one.
-    - A stay in a NEW city or region — after coming home, or starting a \
-    fresh road trip — belongs to a NEW trip: pass that new trip's name in \
-    add_stay's trip field and it is created automatically. Never let a new \
-    itinerary stretch the previous trip.
+    - WHAT MAKES IT A NEW TRIP IS GOING HOME, NOT A NEW PLACE. "From Mysore \
+    I drive to Wayanad and stay at CGH Earth" is ONE trip continuing — pass \
+    the trip they are already on (or leave trip empty) so the window grows; \
+    do NOT name a trip after each hotel. Only once a leg has brought them \
+    home does the next stay start a NEW trip: pass that trip's name in \
+    add_stay's trip field and it is created automatically. A new itinerary \
+    that began after a homecoming must never stretch the previous trip.
+    - ANSWER FROM THE STORE, NEVER FROM MEMORY. "Any journeys in August?", \
+    "how many trips this month", "what's my next flight" — every one of these \
+    is fetch_app_data on trips/journeys/stays (with from/to for a month), not \
+    a recollection of this conversation and not the events collection. \
+    Saying "no journey is planned" without having read journeys is a wrong \
+    answer even when it turns out to be true. If a collection comes back \
+    empty, say plainly that nothing is stored.
     - International flights: ALWAYS pass from_timezone and to_timezone \
     (IANA IDs) on add_journey — on BOTH legs, return included, even when the \
     offset matches IST.
@@ -417,9 +432,17 @@ enum JeevesChatService {
                 "properties": [
                     "collection": [
                         "type": "string",
-                        "enum": ["events", "workouts", "lifts", "runs", "run_program",
-                                 "todos", "reminders", "checkins", "books"],
-                        "description": "Which data to read. 'lifts' includes every set (reps × weight) for PR/tonnage questions; 'run_program' is the Couch-to-5K week structure.",
+                        "enum": ["events", "trips", "journeys", "stays", "workouts", "lifts",
+                                 "runs", "run_program", "todos", "reminders", "checkins", "books"],
+                        "description": "Which data to read. ANY question about trips, flights, drives or hotels must read 'trips', 'journeys' or 'stays' — never answer travel from 'events' or from what the conversation said earlier. 'lifts' includes every set (reps × weight) for PR/tonnage questions; 'run_program' is the Couch-to-5K week structure.",
+                    ],
+                    "from": [
+                        "type": "string",
+                        "description": "Optional start of a window, yyyy-MM-dd or a phrase like 'next monday'. Applies to trips/journeys/stays. Omit for everything.",
+                    ],
+                    "to": [
+                        "type": "string",
+                        "description": "Optional end of the window, inclusive. Use both ends for a question like 'anything in August'.",
                     ],
                 ],
                 "required": ["collection"],
@@ -462,7 +485,8 @@ enum JeevesChatService {
                     "date": ["type": "string", "description": "'today', 'tomorrow', or YYYY-MM-DD — limit the edit to that day. Omit to edit every future match."],
                     "new_venue": ["type": "string", "description": "New place/address."],
                     "extend_by_minutes": ["type": "integer", "description": "PREFERRED for 'running long' / 'make it an hour longer': lengthen by this many minutes (negative shortens). Computed from the stored end — never work out a new clock time yourself."],
-                    "shift_by_minutes": ["type": "integer", "description": "PREFERRED for 'push it 30 minutes' / 'start an hour earlier': move the whole event, keeping its duration (negative moves earlier)."],
+                    "shift_by_minutes": ["type": "integer", "description": "Move the event WITHIN its day, keeping its duration: 'push it 30 minutes' is 30. For whole days use shift_by_days — minutes cannot cross midnight and will clamp."],
+                    "shift_by_days": ["type": "integer", "description": "PREFERRED for 'postpone by a day' / 'prepone it two days' / 'push it to next week': move the event to another DATE, keeping its time of day and duration. Negative moves it earlier. One day is 1, never 1440."],
                     "new_start": ["type": "string", "description": "Absolute new 24-hour HH:MM start. Only when the user names an exact time."],
                     "new_end": ["type": "string", "description": "Absolute new 24-hour HH:MM end. Only when the user names an exact time."],
                     "new_title": ["type": "string", "description": "Rename the event."],

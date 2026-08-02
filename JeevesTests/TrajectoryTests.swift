@@ -151,6 +151,24 @@ final class TrajectoryTests: XCTestCase {
         let stays = (try? context.fetch(FetchDescriptor<TripStay>())) ?? []
         let events = (try? context.fetch(FetchDescriptor<DailyEvent>())) ?? []
 
+        // A trip that ends before it starts is impossible, not merely wrong.
+        // One run produced 'Colombo 10 Sep → 9 Sep' and this layer reported
+        // zero failures; a judge had to notice it.
+        for t in trips where t.endDate < t.startDate {
+            failures.append("inverted trip window: '\(t.title)' ends \(t.endDate) before it starts \(t.startDate)")
+        }
+
+        // Silence is a failure whatever caused it — and the harness could not
+        // see its own. trajectory-audit.py checks this against the pulled
+        // store, never against the artifact, so a turn answered with nothing
+        // passed cleanly here.
+        for (index, turn) in transcript.enumerated() where turn.role == "user" {
+            let next = index + 1 < transcript.count ? transcript[index + 1] : nil
+            if next == nil || next?.role == "user" {
+                failures.append("unanswered turn in \(turn.dialogue): \"\(turn.text.prefix(60))\" got no reply")
+            }
+        }
+
         // No two trips with identical title AND overlapping dates.
         for i in trips.indices {
             for j in trips.indices where j > i {
@@ -161,14 +179,22 @@ final class TrajectoryTests: XCTestCase {
                 }
             }
         }
-        // No two journeys of the same mode on the same day within one trip
-        // heading to the same place.
+        // No two journeys of the same mode on the same day heading to the same
+        // place — REGARDLESS OF TRIP. Requiring the same tripID meant a leg
+        // duplicated under a different parent was invisible: a run ended with
+        // two identical 'CGH Earth Wayanad → Western Valley Resort' drives and
+        // this layer reported zero failures.
         for i in segments.indices {
             for j in segments.indices where j > i {
                 let a = segments[i], b = segments[j]
-                if a.tripID == b.tripID, a.mode == b.mode, a.toPlace == b.toPlace,
+                let sameLabel = !a.label.isEmpty
+                    && a.label.compare(b.label, options: .caseInsensitive) == .orderedSame
+                let sameEndpoints = !a.toPlace.isEmpty && a.toPlace == b.toPlace
+                    && a.fromPlace == b.fromPlace
+                if a.mode == b.mode, sameLabel || sameEndpoints,
                    Calendar.current.isDate(a.day, inSameDayAs: b.day) {
-                    failures.append("duplicate journeys: '\(a.label)' twice on the same day")
+                    let where_ = a.tripID == b.tripID ? "in one trip" : "ACROSS two trips"
+                    failures.append("duplicate journeys \(where_): '\(a.label)' twice on the same day")
                 }
             }
         }
