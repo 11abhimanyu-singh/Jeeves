@@ -70,7 +70,7 @@ struct TicketImportPlan: Equatable, Sendable {
         var reason: String
     }
 
-    var dayCount: Int {
+    nonisolated var dayCount: Int {
         let days = Calendar.current.dateComponents([.day], from: tripStart, to: tripEnd).day ?? 0
         return max(1, days + 1)
     }
@@ -97,7 +97,7 @@ enum TicketImportPlanner {
 
     /// Builds the plan. `existing` is any trip whose window overlaps the
     /// ticket — the caller finds it; deciding what to do about it lives here.
-    static func plan(from itinerary: ResolvedItinerary,
+    nonisolated static func plan(from itinerary: ResolvedItinerary,
                      existing: ExistingTrip? = nil,
                      calendar: Calendar = .current) -> TicketImportPlan? {
         guard let first = itinerary.legs.first,
@@ -141,7 +141,7 @@ enum TicketImportPlanner {
     /// the time actually spent somewhere, so the stay's first day is the
     /// arrival's local day and its last day is the departure's — inclusive,
     /// matching TripStay's own convention.
-    static func plannedStays(from itinerary: ResolvedItinerary,
+    nonisolated static func plannedStays(from itinerary: ResolvedItinerary,
                              calendar: Calendar = .current) -> [PlannedStay] {
         var out: [PlannedStay] = []
         for (index, gap) in itinerary.layovers.enumerated() where gap.kind == .stay {
@@ -160,7 +160,7 @@ enum TicketImportPlanner {
 
     /// A stay is named for its place, not its airport building — "Bali", not
     /// "Ngurah Rai". Falls back to the code so a label is never empty.
-    static func cityName(for iata: String) -> String {
+    nonisolated static func cityName(for iata: String) -> String {
         switch iata.uppercased() {
         case "DPS": return "Bali"
         case "SIN": return "Singapore"
@@ -179,7 +179,7 @@ enum TicketImportPlanner {
         }
     }
 
-    static func plannedJourney(_ leg: ResolvedLeg) -> PlannedJourney {
+    nonisolated static func plannedJourney(_ leg: ResolvedLeg) -> PlannedJourney {
         PlannedJourney(
             label: leg.leg.flightNumber,
             fromPlace: "\(leg.leg.from) · \(leg.fromName)",
@@ -195,7 +195,7 @@ enum TicketImportPlanner {
     }
 
     /// "Bali & Singapore" — named for where you actually stay, in order.
-    static func tripTitle(for stays: [PlannedStay], itinerary: ResolvedItinerary) -> String {
+    nonisolated static func tripTitle(for stays: [PlannedStay], itinerary: ResolvedItinerary) -> String {
         let places = stays.map(\.place)
         switch places.count {
         case 0:  return itinerary.legs.last.map { cityName(for: $0.leg.to) } ?? "Trip"
@@ -210,7 +210,7 @@ enum TicketImportPlanner {
     /// Plain-language differences between what's stored and what the ticket
     /// says. These are what the review sheet shows — a collision the user
     /// can't understand is a collision they'll resolve wrongly.
-    static func differences(existing: ExistingTrip,
+    nonisolated static func differences(existing: ExistingTrip,
                             newStart: Date, newEnd: Date,
                             newStays: [PlannedStay],
                             calendar: Calendar) -> [String] {
@@ -243,7 +243,7 @@ enum TicketImportPlanner {
     ///
     /// Deliberately conservative — a stay that merely overlaps is NOT
     /// redundant, because it may be a real separate visit.
-    static func redundantStays(existing: ExistingTrip,
+    nonisolated static func redundantStays(existing: ExistingTrip,
                                against newStays: [PlannedStay],
                                calendar: Calendar) -> [TicketImportPlan.RedundantStay] {
         var out: [TicketImportPlan.RedundantStay] = []
@@ -267,7 +267,7 @@ enum TicketImportPlanner {
 
     // MARK: Helpers
 
-    static func startOfDay(_ instant: Date, in zone: TimeZone, calendar: Calendar = .current) -> Date {
+    nonisolated static func startOfDay(_ instant: Date, in zone: TimeZone, calendar: Calendar = .current) -> Date {
         var cal = calendar
         cal.timeZone = zone
         return cal.startOfDay(for: instant)

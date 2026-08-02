@@ -173,6 +173,26 @@ final class FlightStatusTests: XCTestCase {
         guard case .lateSettled = state else { return XCTFail("got \(state)") }
     }
 
+    func testAProposalThatHasAlreadyPassedSaysSo() {
+        // Learning about a 20-minute delay at 22:35 proposes leaving at 18:10 —
+        // four hours gone. Rendering that as advice would be absurd.
+        let now = scheduled.addingTimeInterval(-30 * 60)   // 22:35 IST
+        let p = LeaveByRevision.propose(currentLeaveBy: scheduled.addingTimeInterval(-315 * 60),
+                                        report: report(delayMinutes: 20, now: now),
+                                        bufferMinutes: 240, journeyMinutes: 75,
+                                        journeyRemeasured: false)
+        XCTAssertEqual(p?.isAlreadyPast(now: now), true)
+    }
+
+    func testDelayRoundsDownNotTowardZero() {
+        // A 119-second early re-time is −2 minutes, not −1. Truncation rounded
+        // the wrong way in exactly the direction that now matters.
+        let now = scheduled.addingTimeInterval(-4 * 3600)
+        var r = report(delayMinutes: 0, now: now)
+        r.estimatedDeparture = scheduled.addingTimeInterval(-119)
+        XCTAssertEqual(r.delayMinutes, -2)
+    }
+
     func testACancelledFlightGetsNoLeaveByProposal() {
         let now = scheduled.addingTimeInterval(-5 * 3600)
         XCTAssertNil(LeaveByRevision.propose(currentLeaveBy: scheduled,

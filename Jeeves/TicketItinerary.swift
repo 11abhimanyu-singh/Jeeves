@@ -85,19 +85,50 @@ struct Layover: Equatable, Sendable {
     var kind: LayoverKind
     var minutes: Int
     var changesTerminal: Bool?    // nil when either terminal is unknown
-
-    /// Nights the gap spans, which is what actually separates a connection
-    /// from a stay — six daytime hours in an airport is not a visit.
-    var isOvernight: Bool { minutes >= LayoverRules.overnightMinutes }
+    /// Whether the gap actually spans a night where it happens.
+    var isOvernight: Bool = false
 }
 
 enum LayoverRules {
-    /// A gap at or beyond this is a stay. Chosen as "long enough that you
-    /// would leave the airport and sleep somewhere", not as a round number.
-    static let overnightMinutes = 10 * 60
+    /// The hour that means "you slept somewhere". A gap containing local 03:00
+    /// at the layover airport is a night, whatever its length.
+    nonisolated static let deepNightHour = 3
 
-    static func classify(minutes: Int) -> LayoverKind {
-        minutes >= overnightMinutes ? .stay : .connection
+    /// Beyond this a gap is a stay regardless of clock — a day and a half in a
+    /// terminal is not a connection even if it dodges the small hours.
+    nonisolated static let unconditionalStayMinutes = 14 * 60
+
+    /// Whether the gap contains local 03:00 at the place it happens.
+    ///
+    /// The old rule was "10 hours or more", which was neither overnight nor
+    /// accurate in either direction: a 22:00→05:00 gap where you would take a
+    /// hotel counted as a connection, and eleven daytime hours airside counted
+    /// as a stay. Length was standing in for a question about the clock, so
+    /// now it asks the clock.
+    nonisolated static func spansNight(from start: Date, minutes: Int,
+                                       in zone: TimeZone) -> Bool {
+        guard minutes > 0 else { return false }
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = zone
+        let end = start.addingTimeInterval(Double(minutes) * 60)
+        // Walk each local 03:00 from the day the gap starts and see if one
+        // falls inside it. At most a couple of iterations for any real gap,
+        // and correct across DST because it re-derives each night's 03:00.
+        var probeDay = cal.startOfDay(for: start)
+        while probeDay <= end {
+            if let night = cal.date(bySettingHour: deepNightHour, minute: 0, second: 0,
+                                    of: probeDay, matchingPolicy: .nextTime),
+               night > start, night < end {
+                return true
+            }
+            guard let next = cal.date(byAdding: .day, value: 1, to: probeDay) else { break }
+            probeDay = next
+        }
+        return false
+    }
+
+    nonisolated static func classify(minutes: Int, spansNight: Bool) -> LayoverKind {
+        (spansNight || minutes >= unconditionalStayMinutes) ? .stay : .connection
     }
 }
 
@@ -115,9 +146,9 @@ struct ResolvedLeg: Equatable, Sendable {
     /// times are verified" must read this rather than assume.
     var zonesVerified: Bool = false
 
-    var elapsedMinutes: Int { Int(arriveUTC.timeIntervalSince(departUTC) / 60) }
-    var fromName: String { AirportDirectory.name(leg.from) }
-    var toName: String { AirportDirectory.name(leg.to) }
+    nonisolated var elapsedMinutes: Int { Int(arriveUTC.timeIntervalSince(departUTC) / 60) }
+    nonisolated var fromName: String { AirportDirectory.name(leg.from) }
+    nonisolated var toName: String { AirportDirectory.name(leg.to) }
 }
 
 struct ResolvedItinerary: Equatable, Sendable {
@@ -127,12 +158,12 @@ struct ResolvedItinerary: Equatable, Sendable {
 
     /// Trip window in the traveller's home zone — the first departure's day
     /// through the last arrival's day.
-    var startUTC: Date? { legs.first?.departUTC }
-    var endUTC: Date? { legs.last?.arriveUTC }
+    nonisolated var startUTC: Date? { legs.first?.departUTC }
+    nonisolated var endUTC: Date? { legs.last?.arriveUTC }
 
     /// Every gap the traveller actually spends somewhere.
-    var stays: [Layover] { layovers.filter { $0.kind == .stay } }
-    var connections: [Layover] { layovers.filter { $0.kind == .connection } }
+    nonisolated var stays: [Layover] { layovers.filter { $0.kind == .stay } }
+    nonisolated var connections: [Layover] { layovers.filter { $0.kind == .connection } }
 }
 
 // MARK: - Problems
@@ -145,22 +176,26 @@ enum ItineraryProblem: Equatable, Sendable {
     case legsOutOfOrder(earlier: String, later: String)
     case brokenChain(landed: String, departed: String, after: String)
     case impossibleConnection(at: String, minutes: Int)
+    /// A local time the clocks jumped over (spring forward).
+    case clockSkipped(flight: String, which: String)
+    /// A local time that happens twice (fall back).
+    case clockRepeated(flight: String, which: String)
     case noLegs
 
     /// Whether this stops the import outright. A mismatch means a zone is
     /// wrong somewhere and every downstream time is untrustworthy; a tight
     /// connection is the airline's problem to explain, not a parse failure.
-    var isFatal: Bool {
+    nonisolated var isFatal: Bool {
         switch self {
         case .unknownAirport, .unreadableTime, .durationMismatch,
              .arrivesBeforeDeparts, .legsOutOfOrder, .brokenChain, .noLegs:
             return true
-        case .impossibleConnection:
+        case .impossibleConnection, .clockSkipped, .clockRepeated:
             return false
         }
     }
 
-    var message: String {
+    nonisolated var message: String {
         switch self {
         case .unknownAirport(let code):
             return "I don't know the airport \(code), so I can't place its times on a clock."
@@ -176,12 +211,16 @@ enum ItineraryProblem: Equatable, Sendable {
             return "\(after) lands at \(landed) but the next flight leaves from \(departed) — a leg is missing."
         case .impossibleConnection(let at, let minutes):
             return "Only \(fmt(minutes)) at \(at) between flights."
+        case .clockSkipped(let flight, let which):
+            return "\(flight)'s \(which) time doesn't exist — the clocks go forward that morning. Times near it could be an hour out."
+        case .clockRepeated(let flight, let which):
+            return "\(flight)'s \(which) time happens twice that day — the clocks go back. I've taken the first; it could be an hour out."
         case .noLegs:
             return "No flights found in this ticket."
         }
     }
 
-    private func fmt(_ m: Int) -> String {
+    nonisolated private func fmt(_ m: Int) -> String {
         m >= 60 ? "\(m / 60)h \(String(format: "%02d", m % 60))m" : "\(m) min"
     }
 }
@@ -192,18 +231,18 @@ enum TicketItinerary {
 
     /// Minutes below which a connection is flagged. Not a hard floor — the
     /// airline sold it — but worth surfacing while a booking can still change.
-    static let tightConnectionMinutes = 90
+    nonisolated static let tightConnectionMinutes = 90
 
     /// How far a computed duration may drift from the printed one before the
     /// import stops. One minute absorbs rounding on the ticket; anything more
     /// means a zone is wrong, and every zone error is a whole number of
     /// half-hours, so this can be strict without being brittle.
-    static let durationToleranceMinutes = 2
+    nonisolated static let durationToleranceMinutes = 2
 
     /// Resolves printed local times into real instants, then checks the
     /// ticket against itself. Returns the itinerary (when it can) alongside
     /// every problem found — the caller decides what to show and what blocks.
-    static func resolve(legs: [TicketLeg],
+    nonisolated static func resolve(legs: [TicketLeg],
                         booking: TicketBooking = TicketBooking()) -> (itinerary: ResolvedItinerary?, problems: [ItineraryProblem]) {
         guard !legs.isEmpty else { return (nil, [.noLegs]) }
 
@@ -217,11 +256,27 @@ enum TicketItinerary {
             guard let toZone = AirportDirectory.timeZone(leg.to) else {
                 problems.append(.unknownAirport(leg.to)); continue
             }
-            guard let dep = instant(from: leg.departLocal, in: fromZone) else {
+            guard let depResolved = resolve(leg.departLocal, in: fromZone) else {
                 problems.append(.unreadableTime(flight: leg.flightNumber, which: "departure")); continue
             }
-            guard let arr = instant(from: leg.arriveLocal, in: toZone) else {
+            guard let arrResolved = resolve(leg.arriveLocal, in: toZone) else {
                 problems.append(.unreadableTime(flight: leg.flightNumber, which: "arrival")); continue
+            }
+            let dep = depResolved.date
+            let arr = arrResolved.date
+
+            // A clock that jumped or repeated is reported, not swallowed. Both
+            // are non-fatal: the ticket is still importable, but the leave-by
+            // built from it could be an hour out and the user should know.
+            for (resolution, which) in [(depResolved.resolution, "departure"),
+                                        (arrResolved.resolution, "arrival")] {
+                switch resolution {
+                case .exact: break
+                case .nonexistent:
+                    problems.append(.clockSkipped(flight: leg.flightNumber, which: which))
+                case .ambiguous:
+                    problems.append(.clockRepeated(flight: leg.flightNumber, which: which))
+                }
             }
             guard arr > dep else {
                 problems.append(.arrivesBeforeDeparts(flight: leg.flightNumber)); continue
@@ -275,7 +330,7 @@ enum TicketItinerary {
     }
 
     /// The gaps between consecutive legs, classified.
-    static func gaps(between legs: [ResolvedLeg]) -> [Layover] {
+    nonisolated static func gaps(between legs: [ResolvedLeg]) -> [Layover] {
         zip(legs, legs.dropFirst()).map { a, b in
             let minutes = max(0, Int(b.departUTC.timeIntervalSince(a.arriveUTC) / 60))
             let changes: Bool?
@@ -287,29 +342,79 @@ enum TicketItinerary {
                 // mistake in another costume.
                 changes = nil
             }
+            let zone = TimeZone(identifier: a.toZoneID) ?? .current
+            let overnight = LayoverRules.spansNight(from: a.arriveUTC, minutes: minutes, in: zone)
             return Layover(at: a.leg.to,
-                           kind: LayoverRules.classify(minutes: minutes),
+                           kind: LayoverRules.classify(minutes: minutes, spansNight: overnight),
                            minutes: minutes,
-                           changesTerminal: changes)
+                           changesTerminal: changes,
+                           isOvernight: overnight)
         }
     }
 
-    /// A local wall-clock reading, placed on a real zone.
-    static func instant(from parts: DateComponents, in zone: TimeZone) -> Date? {
+    /// How a local reading landed on the timeline.
+    enum ClockResolution: Equatable, Sendable {
+        case exact
+        /// The wall time does not exist — the clocks jumped over it. Foundation
+        /// silently snaps forward, so 02:30 on a spring-forward morning becomes
+        /// 03:30 with no error anywhere. Reported instead.
+        case nonexistent(snappedTo: Date)
+        /// The wall time happens twice. Foundation always returns the FIRST,
+        /// making the second unreachable — an hour of error on a leave-by, and
+        /// invisible.
+        case ambiguous(chosen: Date, other: Date)
+    }
+
+    /// A local wall-clock reading, placed on a real zone, with an honest
+    /// account of whether that placement was unique.
+    nonisolated static func resolve(_ parts: DateComponents,
+                                    in zone: TimeZone) -> (date: Date, resolution: ClockResolution)? {
+        guard let y = parts.year, let mo = parts.month, let d = parts.day,
+              let h = parts.hour, let mi = parts.minute else { return nil }
+        // Foundation is lenient: month 13 rolls into next January and day 32
+        // into the following month, so an OCR slip becomes a plausible wrong
+        // date rather than a rejection. Range-check first.
+        guard (1...12).contains(mo), (1...31).contains(d),
+              (0...23).contains(h), (0...59).contains(mi) else { return nil }
+
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = zone
-        var c = parts
+        var c = DateComponents(year: y, month: mo, day: d, hour: h, minute: mi, second: 0)
         c.timeZone = zone
-        c.second = 0
-        guard c.year != nil, c.month != nil, c.day != nil,
-              c.hour != nil, c.minute != nil else { return nil }
-        return cal.date(from: c)
+        guard let date = cal.date(from: c) else { return nil }
+
+        // Did we get back the wall time we asked for? If not, it didn't exist.
+        let got = cal.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        if got.day != d || got.hour != h || got.minute != mi || got.month != mo || got.year != y {
+            return (date, .nonexistent(snappedTo: date))
+        }
+
+        // An hour earlier showing the SAME wall time means this reading happens
+        // twice — a fall-back morning.
+        let earlier = date.addingTimeInterval(-3600)
+        let earlierParts = cal.dateComponents([.hour, .minute, .day], from: earlier)
+        if earlierParts.hour == h, earlierParts.minute == mi, earlierParts.day == d {
+            return (earlier, .ambiguous(chosen: earlier, other: date))
+        }
+        // Or an hour later does — same situation, the other way round.
+        let later = date.addingTimeInterval(3600)
+        let laterParts = cal.dateComponents([.hour, .minute, .day], from: later)
+        if laterParts.hour == h, laterParts.minute == mi, laterParts.day == d {
+            return (date, .ambiguous(chosen: date, other: later))
+        }
+
+        return (date, .exact)
+    }
+
+    /// Convenience for callers that only need the instant.
+    nonisolated static func instant(from parts: DateComponents, in zone: TimeZone) -> Date? {
+        resolve(parts, in: zone)?.date
     }
 
     // MARK: Human formatting
 
     /// "3h 00m" / "42 min" — the two shapes the UI needs, and the only two.
-    static func durationLabel(_ minutes: Int) -> String {
+    nonisolated static func durationLabel(_ minutes: Int) -> String {
         let m = max(0, minutes)
         if m < 60 { return "\(m) min" }
         return "\(m / 60)h \(String(format: "%02d", m % 60))m"

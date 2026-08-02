@@ -25,13 +25,13 @@ struct Airport: Equatable, Sendable {
     /// Olson identifier — the only form that survives DST correctly.
     let timeZoneID: String
 
-    var timeZone: TimeZone? { TimeZone(identifier: timeZoneID) }
+    nonisolated var timeZone: TimeZone? { TimeZone(identifier: timeZoneID) }
 }
 
 enum AirportDirectory {
 
     /// Known airports, keyed by uppercase IATA.
-    static let all: [String: Airport] = [
+    nonisolated static let all: [String: Airport] = [
         // The user's own routes
         "BLR": Airport(iata: "BLR", name: "Kempegowda International", timeZoneID: "Asia/Kolkata"),
         "SIN": Airport(iata: "SIN", name: "Changi", timeZoneID: "Asia/Singapore"),
@@ -71,7 +71,7 @@ enum AirportDirectory {
     ]
 
     /// Looks a code up. Case- and whitespace-tolerant because tickets are not.
-    static func airport(_ code: String) -> Airport? {
+    nonisolated static func airport(_ code: String) -> Airport? {
         let key = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         return all[key]
     }
@@ -82,14 +82,14 @@ enum AirportDirectory {
     /// airport must surface as unknown. Defaulting to the phone's zone would
     /// read every foreign departure in IST and be wrong by hours with no
     /// visible symptom.
-    static func timeZone(_ code: String) -> TimeZone? {
+    nonisolated static func timeZone(_ code: String) -> TimeZone? {
         airport(code)?.timeZone
     }
 
     /// Human name, falling back to the bare code so a label is never empty.
-    static func name(_ code: String) -> String {
+    nonisolated static func name(_ code: String) -> String {
         airport(code)?.name ?? code.uppercased()
     }
 
-    static func isKnown(_ code: String) -> Bool { airport(code) != nil }
+    nonisolated static func isKnown(_ code: String) -> Bool { airport(code) != nil }
 }

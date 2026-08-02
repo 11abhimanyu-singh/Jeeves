@@ -204,6 +204,91 @@ final class TicketItineraryTests: XCTestCase {
         XCTAssertEqual(problems, [.noLegs])
     }
 
+    // MARK: DST — the cases Foundation swallows
+
+    private func zone(_ id: String) -> TimeZone { TimeZone(identifier: id)! }
+
+    func testANonexistentLocalTimeIsReportedNotSnappedSilently() {
+        // 02:30 on US spring-forward morning does not exist; Calendar returns
+        // 03:30 with no error, so the leave-by would be an hour out invisibly.
+        let r = TicketItinerary.resolve(
+            DateComponents(year: 2026, month: 3, day: 8, hour: 2, minute: 30),
+            in: zone("America/New_York"))
+        guard case .nonexistent = r?.resolution else {
+            return XCTFail("expected nonexistent, got \(String(describing: r?.resolution))")
+        }
+    }
+
+    func testAnAmbiguousLocalTimeIsReportedAndBothInstantsAreReachable() {
+        // 01:30 on US fall-back morning happens twice. Calendar always returns
+        // the first, making the second unreachable from the API at all.
+        let r = TicketItinerary.resolve(
+            DateComponents(year: 2026, month: 11, day: 1, hour: 1, minute: 30),
+            in: zone("America/New_York"))
+        guard case .ambiguous(let chosen, let other) = r?.resolution else {
+            return XCTFail("expected ambiguous, got \(String(describing: r?.resolution))")
+        }
+        XCTAssertEqual(other.timeIntervalSince(chosen), 3600, accuracy: 1,
+                       "both occurrences must be reachable")
+    }
+
+    func testADSTLegIsFlaggedButStillImportable() {
+        // A correct ticket across fall-back used to be BLOCKED as a duration
+        // mismatch. It must import, with the ambiguity stated.
+        let leg = TicketLeg(flightNumber: "DL 100", carrier: "Delta",
+                            from: "JFK", to: "JFK",
+                            departLocal: dc(2026, 11, 1, 1, 30),
+                            arriveLocal: dc(2026, 11, 1, 4, 30),
+                            printedMinutes: nil)
+        let (itin, problems) = TicketItinerary.resolve(legs: [leg])
+        XCTAssertNotNil(itin, "a real ticket across a clock change must still import")
+        XCTAssertTrue(problems.contains { if case .clockRepeated = $0 { return true }; return false })
+        XCTAssertFalse(problems.contains(where: \.isFatal))
+    }
+
+    func testOutOfRangeComponentsAreRejectedRatherThanRolledOver() {
+        // Foundation rolls day 32 into the next month and month 13 into next
+        // January, so an OCR slip became a plausible wrong date.
+        XCTAssertNil(TicketItinerary.resolve(
+            DateComponents(year: 2026, month: 9, day: 32, hour: 10, minute: 0),
+            in: zone("Asia/Kolkata")))
+        XCTAssertNil(TicketItinerary.resolve(
+            DateComponents(year: 2026, month: 13, day: 1, hour: 10, minute: 0),
+            in: zone("Asia/Kolkata")))
+    }
+
+    // MARK: Layovers actually look at a clock now
+
+    func testAShortOvernightGapIsAStay() {
+        // 22:00 → 05:00 at Dubai: seven hours, and you take a hotel. The old
+        // 10-hour rule called this a connection.
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = zone("Asia/Dubai")
+        let start = cal.date(from: DateComponents(year: 2026, month: 9, day: 3, hour: 22))!
+        XCTAssertTrue(LayoverRules.spansNight(from: start, minutes: 7 * 60, in: zone("Asia/Dubai")))
+        XCTAssertEqual(LayoverRules.classify(minutes: 7 * 60, spansNight: true), .stay)
+    }
+
+    func testALongDaytimeGapIsAConnection() {
+        // 08:00 → 19:00 airside: eleven hours, no visa, no hotel. The old rule
+        // called this a stay.
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = zone("Asia/Dubai")
+        let start = cal.date(from: DateComponents(year: 2026, month: 9, day: 3, hour: 8))!
+        XCTAssertFalse(LayoverRules.spansNight(from: start, minutes: 11 * 60, in: zone("Asia/Dubai")))
+        XCTAssertEqual(LayoverRules.classify(minutes: 11 * 60, spansNight: false), .connection)
+    }
+
+    func testAVeryLongGapIsAStayEvenDodgingTheSmallHours() {
+        XCTAssertEqual(LayoverRules.classify(minutes: 15 * 60, spansNight: false), .stay)
+    }
+
+    func testTheRealTicketStillClassifiesTheSameWayUnderTheClockRule() {
+        let (itin, _) = TicketItinerary.resolve(legs: realTicket)
+        XCTAssertEqual(itin?.layovers.map(\.kind), [.connection, .stay, .stay])
+        XCTAssertEqual(itin?.layovers.first?.isOvernight, false, "06:10→07:30 at Changi is morning")
+    }
+
     // MARK: Formatting
 
     func testDurationLabelCoversBothShapesTheUINeeds() {

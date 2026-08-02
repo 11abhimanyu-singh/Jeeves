@@ -37,8 +37,11 @@ struct FlightStatusReport: Equatable, Sendable {
     /// When the provider last knew this to be true.
     var observedAt: Date
 
-    var delayMinutes: Int {
-        Int(estimatedDeparture.timeIntervalSince(scheduledDeparture) / 60)
+    /// Floor, not truncation. `Int(_:)` rounds toward zero, so a 119-second
+    /// early re-time read as −1 minute instead of −2 — wrong in the direction
+    /// that matters now that a flight brought forward is actionable.
+    nonisolated var delayMinutes: Int {
+        Int(floor(estimatedDeparture.timeIntervalSince(scheduledDeparture) / 60))
     }
 }
 
@@ -56,7 +59,7 @@ struct UnconfiguredFlightStatusProvider: FlightStatusProviding {
     struct NotConfigured: LocalizedError {
         var errorDescription: String? { "No flight-status service is set up yet." }
     }
-    func status(flightNumber: String, departingOn day: Date) async throws -> FlightStatusReport {
+    nonisolated func status(flightNumber: String, departingOn day: Date) async throws -> FlightStatusReport {
         throw NotConfigured()
     }
 }
@@ -80,7 +83,7 @@ enum FlightWatchState: Equatable, Sendable {
     case stale(lastSuccess: Date?)
     case cancelled(observedAt: Date)
 
-    var isActionable: Bool {
+    nonisolated var isActionable: Bool {
         if case .lateUndecided = self { return true }
         if case .cancelled = self { return true }
         return false
@@ -99,7 +102,7 @@ struct LeaveByDecision: Equatable, Sendable {
     /// How much further the flight may slip before the decision is re-opened.
     var toleranceMinutes: Int = 10
 
-    func covers(delayMinutes: Int) -> Bool {
+    nonisolated func covers(delayMinutes: Int) -> Bool {
         abs(delayMinutes - forDelayMinutes) <= toleranceMinutes
     }
 }
@@ -109,15 +112,15 @@ enum FlightWatch {
     /// How long before departure the app starts caring. Outside this, a delay
     /// is not actionable and polling is noise — for a September flight in
     /// August there is nothing to say.
-    static let windowHours = 12
+    nonisolated static let windowHours = 12
 
     /// A delay under this is not worth a notification: it is inside the noise
     /// of getting to an airport, and airlines re-time by a few minutes
     /// constantly. Still shown on the journey page; just doesn't interrupt.
-    static let notifiableDelayMinutes = 20
+    nonisolated static let notifiableDelayMinutes = 20
 
     /// A check older than this, inside the watch window, is stale.
-    static let freshnessMinutes = 90
+    nonisolated static let freshnessMinutes = 90
 
     /// Resolves the state. Pure, so every branch is testable without a clock
     /// or a network.
@@ -128,7 +131,7 @@ enum FlightWatch {
     ///   - decidedLeaveBy: set once the user has confirmed a new leave-by for
     ///     THIS delay — passing it is what moves `lateUndecided` to settled
     ///   - now: injected
-    static func state(report: FlightStatusReport?,
+    nonisolated static func state(report: FlightStatusReport?,
                       scheduledDeparture: Date,
                       decision: LeaveByDecision? = nil,
                       now: Date = Date()) -> FlightWatchState {
@@ -177,14 +180,14 @@ enum FlightWatch {
     }
 
     /// Guards against a provider stamping a reading in the future.
-    static let clockSkewToleranceMinutes = 5
+    nonisolated static let clockSkewToleranceMinutes = 5
 
-    static func isFutureDated(_ report: FlightStatusReport, now: Date) -> Bool {
+    nonisolated static func isFutureDated(_ report: FlightStatusReport, now: Date) -> Bool {
         now.timeIntervalSince(report.observedAt) / 60 < -Double(clockSkewToleranceMinutes)
     }
 
     /// Whether a delay is worth interrupting someone for.
-    static func shouldNotify(delayMinutes: Int) -> Bool {
+    nonisolated static func shouldNotify(delayMinutes: Int) -> Bool {
         delayMinutes >= notifiableDelayMinutes
     }
 }
@@ -203,7 +206,12 @@ struct LeaveByProposal: Equatable, Sendable {
     var journeyRemeasured: Bool
     var journeyMinutes: Int
 
-    var shiftMinutes: Int { Int(proposed.timeIntervalSince(current) / 60) }
+    nonisolated var shiftMinutes: Int { Int(floor(proposed.timeIntervalSince(current) / 60)) }
+
+    /// True when the proposed leave-by has already passed. A proposal to leave
+    /// at 18:10 delivered at 22:35 is not advice — the UI has to say so rather
+    /// than render a time that quietly means "you should already be gone".
+    nonisolated func isAlreadyPast(now: Date) -> Bool { proposed < now }
 }
 
 enum LeaveByRevision {
@@ -213,7 +221,7 @@ enum LeaveByRevision {
     /// `journeyMinutes` is passed in rather than derived: the caller measures
     /// it for the NEW departure time, and whether that measurement succeeded
     /// is recorded honestly on the proposal.
-    static func propose(currentLeaveBy: Date,
+    nonisolated static func propose(currentLeaveBy: Date,
                         report: FlightStatusReport,
                         bufferMinutes: Int,
                         journeyMinutes: Int,
@@ -238,7 +246,7 @@ enum LeaveByRevision {
     /// How long you'd wait at the terminal if you kept the current leave-by.
     /// The consequence of doing nothing, which the user is entitled to see
     /// before choosing to do nothing.
-    static func idleMinutesIfUnchanged(currentLeaveBy: Date,
+    nonisolated static func idleMinutesIfUnchanged(currentLeaveBy: Date,
                                        journeyMinutes: Int,
                                        report: FlightStatusReport) -> Int {
         let arriveAtAirport = currentLeaveBy.addingTimeInterval(Double(journeyMinutes) * 60)

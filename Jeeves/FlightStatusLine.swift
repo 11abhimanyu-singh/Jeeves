@@ -20,38 +20,65 @@ import SwiftUI
 struct FlightStatusLine: View {
     let flightNumber: String
     let state: FlightWatchState
+    /// The departure airport's zone. Every moment shown here — when watching
+    /// begins, the settled leave-by — happens THERE, not where the phone is.
+    /// Rendering a 09:45 WITA leave-by as 07:15 because the handset is in IST
+    /// is the exact error AirportDirectory exists to prevent.
+    var zoneID: String?
+    /// Injected so the row and the state agree on the clock, and so age can be
+    /// tested without waiting.
+    var now: Date = Date()
     /// Called when the row is tapped and there is something to decide.
     var onTap: (() -> Void)? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulsing = false
 
+    /// A Button only exists when there is both something to decide AND a
+    /// handler. Announcing a button that does nothing is worse than announcing
+    /// none, and the two conditions were previously allowed to disagree.
+    private var isTappable: Bool { state.isActionable && onTap != nil }
+
+    private var actionHint: String {
+        if case .cancelled = state { return "Opens what to do about the cancellation" }
+        return "Opens the leave-by decision"
+    }
+
     var body: some View {
         Group {
-            if state.isActionable, let onTap {
+            if isTappable, let onTap {
                 Button(action: onTap) { row }
                     .buttonStyle(.plain)
+                    // On the Button itself, so activation survives the merge.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(spokenLabel)
+                    .accessibilityHint(actionHint)
             } else {
                 row
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(spokenLabel)
             }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spokenLabel)
-        .accessibilityAddTraits(state.isActionable ? .isButton : [])
-        .accessibilityHint(state.isActionable ? "Opens the leave-by decision" : "")
     }
 
     private var row: some View {
         HStack(spacing: 7) {
             if showsDot {
+                // Reduce Motion has to work in BOTH directions. Setting
+                // `pulsing` only in onAppear froze the dot permanently at 35%
+                // when the setting was turned on mid-view, and never started it
+                // when turned off. Driving it from the setting fixes both, and
+                // opacity is forced back to 1 so a frozen dim state is
+                // impossible.
                 Circle()
                     .fill(dotColour)
                     .frame(width: 7, height: 7)
-                    .opacity(pulsing ? 0.35 : 1)
+                    .opacity(reduceMotion ? 1 : (pulsing ? 0.35 : 1))
                     .animation(reduceMotion ? nil
                                : .easeInOut(duration: 1).repeatForever(autoreverses: true),
                                value: pulsing)
-                    .onAppear { if !reduceMotion { pulsing = true } }
+                    .onAppear { pulsing = !reduceMotion }
+                    .onChange(of: reduceMotion) { _, reduced in pulsing = !reduced }
             }
 
             Text(headline)
@@ -69,7 +96,7 @@ struct FlightStatusLine: View {
             }
         }
         .padding(.horizontal, 12)
-        .frame(minHeight: 34)
+        .frame(minHeight: 44)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(background)
         .contentShape(Rectangle())
@@ -87,8 +114,8 @@ struct FlightStatusLine: View {
             return "\(flightNumber) late by \(TicketItinerary.durationLabel(minutes))"
         case .stale(let last):
             return last == nil
-                ? "No flight update yet"
-                : "No flight update since \(clock(last!))"
+                ? "No update on \(flightNumber) yet"
+                : "No \(flightNumber) update since \(clock(last!))"
         case .cancelled:
             return "\(flightNumber) is cancelled"
         }
@@ -160,14 +187,23 @@ struct FlightStatusLine: View {
 
     // MARK: Formatting
 
+    /// On the departure airport's clock when one is known, with its label, so
+    /// two 06:10s in different countries can be told apart.
     private func clock(_ date: Date) -> String {
-        date.formatted(.dateTime.hour().minute())
+        guard let zoneID, let zone = TimeZone(identifier: zoneID) else {
+            return date.formatted(.dateTime.hour().minute())
+        }
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        f.timeZone = zone
+        return f.string(from: date) + " " + (zone.abbreviation(for: date) ?? "")
     }
 
     /// Relative age, kept coarse — "checked 2 min ago" is useful, "checked
-    /// 127 seconds ago" is noise.
+    /// 127 seconds ago" is noise. Uses the injected `now` so the row can't
+    /// disagree with the state that was computed alongside it.
     private func ago(_ date: Date) -> String {
-        let minutes = max(0, Int(Date().timeIntervalSince(date) / 60))
+        let minutes = max(0, Int(now.timeIntervalSince(date) / 60))
         if minutes < 1  { return "just now" }
         if minutes < 60 { return "\(minutes) min ago" }
         return "\(minutes / 60)h ago"
