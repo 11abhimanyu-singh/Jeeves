@@ -42,6 +42,7 @@ enum DataRepair {
         findings += containedStays(context)
         findings += duplicateJourneys(context)
         findings += redundantSpanRows(context)
+        findings += staysWrittenWithTheOldDepartMeaning(context)
         findings += staleCardio(context)
         findings += planClockAndBlocks(context)
         findings += bookIssues(context)
@@ -224,6 +225,77 @@ enum DataRepair {
     // MARK: Check-ins
 
     @MainActor
+    /// Stays saved before `departDate` had one meaning.
+    ///
+    /// The calendar importer used to write the last NIGHT there; the ticket
+    /// importer wrote the day you FLY OUT. Both landed in the same field, so a
+    /// nights count was wrong for one of them whichever way you read it. New
+    /// rows are written as last-day-present, and these are the old ones — a
+    /// real store had a stay whose arrive and depart are the same day, which
+    /// now reads as nought nights.
+    ///
+    /// The discriminator only exists on a trip with more than one stay: if a
+    /// stay's departDate is the day BEFORE the next stay's arriveDate, it was
+    /// written the old way and is one day short. If they are equal it is
+    /// already last-day-present. A lone stay cannot be told apart at all, so it
+    /// is marked unsettled rather than guessed at — the count then renders as a
+    /// pair, which is the true state of the knowledge.
+    private static func staysWrittenWithTheOldDepartMeaning(_ context: ModelContext) -> [Finding] {
+        let stays = (try? context.fetch(FetchDescriptor<TripStay>())) ?? []
+        guard !stays.isEmpty else { return [] }
+        let cal = Calendar.current
+        var short: [TripStay] = []
+        var lone: [TripStay] = []
+
+        for (_, group) in Dictionary(grouping: stays, by: \.tripID) {
+            let ordered = group.sorted { $0.arriveDate < $1.arriveDate }
+            guard ordered.count > 1 else {
+                // One stay, nothing after it to compare against.
+                if let only = ordered.first, !only.endIsUnsettled { lone.append(only) }
+                continue
+            }
+            for (a, b) in zip(ordered, ordered.dropFirst()) {
+                let dayAfterA = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: a.departDate))
+                if let dayAfterA, cal.isDate(dayAfterA, inSameDayAs: b.arriveDate) {
+                    short.append(a)          // old meaning: one day short
+                }
+            }
+            // The last stay of a multi-stay trip has nothing after it either.
+            if let last = ordered.last, !last.endIsUnsettled { lone.append(last) }
+        }
+
+        guard !short.isEmpty || !lone.isEmpty else { return [] }
+        var findings: [Finding] = []
+
+        if !short.isEmpty {
+            let names = short.map(\.place).joined(separator: ", ")
+            findings.append(Finding(
+                title: "\(short.count) stay\(short.count == 1 ? "" : "s") end a day early",
+                detail: "\(names) — saved when a stay's end meant its last night rather than the day you leave, so each is one night short. The stay that follows proves the right value.",
+                action: .fixable,
+                fix: {
+                    for s in short {
+                        s.departDate = (cal.date(byAdding: .day, value: 1, to: s.departDate) ?? s.departDate).startOfDay
+                    }
+                    context.saveOrLog("DataRepair.staysWrittenWithTheOldDepartMeaning")
+                    return "Moved \(short.count) stay end\(short.count == 1 ? "" : "s") forward a day: \(names)."
+                }))
+        }
+        if !lone.isEmpty {
+            let names = lone.map(\.place).joined(separator: ", ")
+            findings.append(Finding(
+                title: "\(lone.count) stay\(lone.count == 1 ? "" : "s") with an end nobody can settle",
+                detail: "\(names) — nothing follows these, so I can't tell whether the last date is a night there or the day you leave. I'll show both readings rather than pick one.",
+                action: .fixable,
+                fix: {
+                    for s in lone { s.endIsUnsettled = true }
+                    context.saveOrLog("DataRepair.markUnsettledStayEnds")
+                    return "Marked \(lone.count) stay end\(lone.count == 1 ? "" : "s") as unsettled: \(names)."
+                }))
+        }
+        return findings
+    }
+
     private static func staleCardio(_ context: ModelContext) -> [Finding] {
         let checkins = (try? context.fetch(FetchDescriptor<CheckIn>())) ?? []
         let stale = checkins.filter {
