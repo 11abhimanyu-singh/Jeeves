@@ -79,6 +79,56 @@ final class ChatReceiptTests: XCTestCase {
             result: "Wayanad: CGH Earth Wayanad, 7 Aug – 10 Aug."))
     }
 
+    /// The card read "00–19:00" on a clinic appointment the user had just
+    /// booked, because the label was split at the first bare colon — which
+    /// lives inside "16:00". Verbatim from ChatToolExecutor.toolAddEvent.
+    func testAnEventsHourSurvivesTheCard() throws {
+        let r = try XCTUnwrap(ChatReceipt.parse(
+            tool: "add_event",
+            result: "Added \"Appointment with Tasvaa\" 16:00–19:00 on tomorrow at Tasvaa Skin And Hair Clinic. (no end time given — I assumed it ends 19:00; change it with edit_event's extend_by_minutes)"))
+        XCTAssertEqual(r.kind, .created)
+        XCTAssertEqual(r.label, "Appointment with Tasvaa")
+        XCTAssertEqual(r.now, "16:00–19:00 on tomorrow at Tasvaa Skin And Hair Clinic",
+                       "the start hour is not a label separator")
+    }
+
+    /// No venue, no assumed-end clause — the shortest form the tool emits.
+    func testABareEventStillCarriesBothTimes() throws {
+        let r = try XCTUnwrap(ChatReceipt.parse(
+            tool: "add_event",
+            result: "Added \"Standup\" 09:30–10:00 on Mon 4 Aug."))
+        XCTAssertEqual(r.label, "Standup")
+        XCTAssertEqual(r.now, "09:30–10:00 on Mon 4 Aug")
+    }
+
+    /// A todo carried no card at all before: its receipt has no colon, so the
+    /// old parser bailed and the change went unreceipted.
+    func testATodoIsAReceiptToo() throws {
+        let r = try XCTUnwrap(ChatReceipt.parse(
+            tool: "add_todo",
+            result: "Added todo 'Call the bank' (high), due Mon 4 Aug."))
+        XCTAssertEqual(r.kind, .created)
+        XCTAssertEqual(r.label, "Call the bank")
+        XCTAssertEqual(r.now, "(high), due Mon 4 Aug")
+    }
+
+    /// An apostrophe inside the title must not truncate it.
+    func testAnApostropheInATitleIsNotAClosingQuote() throws {
+        let r = try XCTUnwrap(ChatReceipt.parse(
+            tool: "add_todo",
+            result: "Added todo 'Dad's birthday present' (normal)."))
+        XCTAssertEqual(r.label, "Dad's birthday present")
+    }
+
+    /// The colon form still belongs to everything that isn't add_event/add_todo.
+    func testAReminderStillUsesTheColonForm() throws {
+        let r = try XCTUnwrap(ChatReceipt.parse(
+            tool: "add_reminder",
+            result: "Reminder set: 'Renew passport' at Mon 4 Aug at 09:00 (once)."))
+        XCTAssertEqual(r.label, "Reminder set")
+        XCTAssertEqual(r.now, "'Renew passport' at Mon 4 Aug at 09:00 (once)")
+    }
+
     // MARK: what must NOT become a card
 
     func testPreviewsRefusalsAndQuestionsProduceNoCard() {

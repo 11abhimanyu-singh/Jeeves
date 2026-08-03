@@ -81,6 +81,8 @@ final class ChatToolExecutor {
         case "fetch_calendar": return await toolFetchCalendar(call.input)
         case "plan_day":       return await toolPlanDay(call.input)
         case "replan_today":   return await toolReplanToday(call.input)
+        case "set_day_activities": return toolSetDayActivities(call.input)
+        case "show_activity_picker": return toolShowActivityPicker(call.input)
         case "fetch_app_data": return toolFetchAppData(call.input)
         case "add_todo":       return toolAddTodo(call.input)
         case "add_reminder":   return toolAddReminder(call.input)
@@ -113,6 +115,7 @@ final class ChatToolExecutor {
     /// one side only surfaces as "Unknown tool" at runtime.
     static let handledToolNames: Set<String> = [
         "add_event", "set_gym", "fetch_calendar", "plan_day", "replan_today",
+        "set_day_activities", "show_activity_picker",
         "fetch_app_data", "add_todo", "add_reminder", "edit_event", "delete_event",
         "commute_estimate", "log_walk", "mark_block_done", "complete_todo",
         "delete_todo", "delete_reminder", "fetch_chat_history", "remember_preference",
@@ -1509,6 +1512,48 @@ final class ChatToolExecutor {
         case "run_program":
             return .init(text: JeevesChatService.runProgramSummary())
 
+        // THE ROUTINE. The user asked to "keep interview prep and interview
+        // prep reading" in a re-plan; chat searched the CALENDAR, found
+        // nothing, and asked them for a start time it already had. A routine
+        // activity is not an event — it has no start time until the planner
+        // gives it one — and until this case existed there was no way to
+        // discover that a named activity was a routine activity at all.
+        case "routine":
+            let rows = routineActivities.sorted { $0.sortOrder < $1.sortOrder }
+            // An unseeded store still gets planned — Baseline.routine falls
+            // back to the built-in defaults — so reporting "no routine" here
+            // would be a lie while eight activities are being scheduled.
+            guard !rows.isEmpty else {
+                return json(Baseline.activities.enumerated().map { i, a in
+                    ["name": a.name, "match": JeevesChatService.routineKey(a.name),
+                     "minutes": a.durationMinutes, "tier": a.tier.rawValue,
+                     "in_routine": true, "order": i, "planned_today": true,
+                     "source": "built-in default — nothing saved yet, but the planner uses these"]
+                })
+            }
+            let selection = planState(on: today).activitySelection
+            return json(rows.map { a in
+                var row: [String: Any] = [
+                    // The planner name IS the plan block's title, so this is
+                    // what a block in today's plan will be called.
+                    "name": a.plannerName,
+                    // Punctuation-free, for matching against what the user said.
+                    "match": JeevesChatService.routineKey(a.plannerName),
+                    "minutes": a.durationMinutes,
+                    "tier": a.tier.rawValue,
+                    "in_routine": a.enabled,
+                    "order": a.sortOrder,
+                    "planned_today": a.enabled && selection.includes(a.plannerName),
+                    "placement": a.group == .gym
+                        ? "part of the gym session — sets its LENGTH, placed at the gym time"
+                        : (a.enabled ? "the planner picks its time — it has no start time of its own"
+                                     : "switched off in the routine — kept in the list, not planned"),
+                ]
+                if a.group != .none { row["group"] = a.group.rawValue }
+                if let note = a.note, !note.isEmpty { row["note"] = note }
+                return row
+            })
+
         // TRAVEL. Chat could create all three of these and never read one
         // back: asked "are there any journeys in August" it answered from
         // conversation memory, and asked about a trip it answered out of the
@@ -1752,26 +1797,13 @@ final class ChatToolExecutor {
         // (missed_blocks) and they're excluded from the locked set and told
         // to the planner as missed.
         let missed = (input["missed_blocks"] as? [Any])?.compactMap { $0 as? String } ?? []
-        // Same rule as the planner button: a commute survives a re-plan only
-        // while the arrival it was for is still on the day.
-        let arrivalAnchors = PlanCoordinator.arrivalAnchors(
-            gymMinute: state.hasGymToday ? state.gymMinute : nil,
-            eventStarts: eventsOn(today).filter { !$0.isAllDay }.map(\.startMinute))
-        var locked = PlanCoordinator.lockedBlocks(committed, endedBy: nowMinute,
-                                                  stillArrivingAt: arrivalAnchors)
-        if !missed.isEmpty {
-            locked = locked.filter { block in
-                !missed.contains { JeevesChatService.strictMatch(block.title, query: $0) }
-            }
-        }
-        let doneNote = locked.map(\.title).joined(separator: ", ")
         let missedNote = missed.isEmpty ? "" : " Earlier blocks that did NOT happen (do not count them as done): \(missed.joined(separator: ", "))."
+        let selection = state.activitySelection
 
-        // The remainder starts at the user's stated ETA when they gave one
-        // ("20 more minutes"), not at the clock — a plan that begins before
-        // the user can act is already behind on arrival.
-        let resumeMinute = minutesFrom(input["resume_at"] as? String).map { max($0, nowMinute) } ?? nowMinute
-
+        // The elapsed-day arithmetic — which blocks are preserved, and from
+        // which minute the remainder starts — belongs to the coordinator. This
+        // call site hands over the raw facts instead: the committed plan, the
+        // blocks the user says didn't happen, and their stated ETA.
         let result = await PlanCoordinator.generateLogged(.init(
             userMessage: note + missedNote,
             hasGym: state.hasGymToday,
@@ -1779,20 +1811,24 @@ final class ChatToolExecutor {
             events: eventsOn(today),
             locations: locations,
             prepSessions: prepSessions,
-            routine: Baseline.routine(from: routineActivities),
+            routine: Baseline.routine(from: routineActivities, selection: selection),
+            gymSession: Baseline.gymSession(from: routineActivities),
             adherenceNote: AdherenceHistory.planningNote(context: modelContext, for: today),
-            replanFromMinute: resumeMinute,
-            alreadyDoneNote: doneNote.isEmpty ? nil : doneNote,
-            lockedBlocks: locked,
-            planDate: today
+            planDate: today,
+            existingPlan: committed,
+            missedBlocks: missed,
+            resumeAtMinute: minutesFrom(input["resume_at"] as? String),
+            blankDay: selection.isBlankDay
         ), context: modelContext, trigger: .chat)
 
         guard !result.isOffline else {
             return .init(text: "Couldn't reach the planner to re-plan — your current schedule is unchanged.\(result.error.map { " (\($0))" } ?? "")")
         }
-        commitPlan(result.plan, isOffline: false, on: today)
+        await commitPlan(result, on: today)
         await NotificationService.notifyPlanReady(isOffline: false)
-        return .init(text: "Re-planned from \(hhmm(nowMinute)), keeping what you'd already done. \(result.plan.summary)",
+        let from = result.resumedFromMinute ?? nowMinute
+        let kept = result.keptBlocks == 0 ? "nothing was already done" : "keeping the \(result.keptBlocks) block(s) you'd already done"
+        return .init(text: "Re-planned from \(hhmm(from)), \(kept). \(result.plan.summary)",
                      plan: result.plan, isOfflinePlan: false)
     }
 
@@ -1876,6 +1912,90 @@ final class ChatToolExecutor {
         }
     }
 
+    /// Set when a tool asks the UI to put the activity picker on screen. The
+    /// executor runs headlessly in tests and in the trajectory suite, so it
+    /// cannot present anything itself — it records the request and the chat
+    /// view picks it up after the turn.
+    var pendingPickerDate: Date?
+
+    @MainActor
+    private func toolShowActivityPicker(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let date = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
+        if let trip = TravelGuard.tripCovering(date, context: modelContext) {
+            return .init(text: TravelGuard.refusalMessage(for: date, trip: trip))
+        }
+        pendingPickerDate = date
+        let count = routineActivities.filter { $0.enabled && $0.group != .gym }.count
+        return .init(text: "Opened the activity picker for \(dayLabel(date)) — \(count) activities with checkboxes, plus the gym. The user picks there and the day is planned from what they tick. Tell them it's open in ONE short line; do NOT list the activities (they're looking at them) and do NOT call plan_day — the picker plans the day itself when they confirm.")
+    }
+
+    /// Which routine activities a single day is for.
+    ///
+    /// "Cancel all activities today and keep the full day free" used to clear
+    /// the gym, correctly report that no events remained, and then hand the day
+    /// straight back to the planner — which refilled it from the routine,
+    /// because the routine's `enabled` flag is permanent configuration and
+    /// there was nowhere to say "not today".
+    @MainActor
+    private func toolSetDayActivities(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+        let date = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
+        let mode = (input["mode"] as? String ?? "").lowercased()
+        let rows = routineActivities.filter { $0.enabled && $0.group != .gym }
+        let state = planState(on: date)
+        let hadGym = state.hasGymToday
+        let isToday = Calendar.current.isDateInToday(date)
+
+        switch mode {
+        case "routine":
+            state.activitySelection = .routine
+            modelContext.saveOrLog("dayActivities.routine")
+            return .init(text: "\(dayLabel(date).capitalized) is back on the normal routine — no per-day picks. Re-plan the day so the change takes effect (\(isToday ? "replan_today" : "plan_day")).")
+
+        case "clear":
+            state.activitySelection = .only([])
+            state.hasGymToday = false
+            state.gymMinute = nil
+            modelContext.saveOrLog("dayActivities.clear")
+            let gymNote = hadGym ? " The gym is cleared too." : ""
+            return .init(text: "Cleared \(dayLabel(date)) — no routine activities at all (all \(rows.count) of them are off for the day).\(gymNote) Calendar events and their commutes are NOT touched by this; delete those separately with delete_event if the user wants them gone as well. Now call \(isToday ? "replan_today" : "plan_day") to rebuild the day, then tell the user exactly what is left.")
+
+        case "only":
+            let wanted = (input["activities"] as? [Any])?.compactMap { $0 as? String } ?? []
+            guard !wanted.isEmpty else {
+                return .init(text: "mode 'only' needs at least one activity. To empty the day entirely, call this again with mode 'clear' — an empty list is ambiguous and I won't guess between 'keep nothing' and 'you forgot the list'.")
+            }
+            var kept: Set<String> = []
+            var unmatched: [String] = []
+            for phrase in wanted {
+                let hits = rows.filter {
+                    JeevesChatService.routineMatches(name: $0.name, plannerName: $0.plannerName,
+                                                     query: phrase)
+                }
+                if hits.isEmpty { unmatched.append(phrase) }
+                else { hits.forEach { kept.insert($0.plannerName) } }
+            }
+            // A misspelled activity must not silently shrink the day.
+            guard unmatched.isEmpty else {
+                let names = rows.map(\.plannerName).joined(separator: ", ")
+                return .init(text: "NOTHING was changed. No routine activity matches: \(unmatched.joined(separator: ", ")). The routine is: \(names). Read this list back to the user and ask which they meant — do not guess.")
+            }
+            let wantsGym = wanted.contains { $0.localizedCaseInsensitiveContains("gym") }
+            state.activitySelection = .only(kept)
+            if hadGym, !wantsGym {
+                state.hasGymToday = false
+                state.gymMinute = nil
+            }
+            modelContext.saveOrLog("dayActivities.only")
+            let dropped = rows.map(\.plannerName).filter { !kept.contains($0) }
+            let gymNote = (hadGym && !wantsGym) ? " The gym is cleared for the day." : ""
+            let droppedNote = dropped.isEmpty ? "" : " Off for the day: \(dropped.joined(separator: ", "))."
+            return .init(text: "\(dayLabel(date).capitalized) is now just: \(kept.sorted().joined(separator: ", ")).\(droppedNote)\(gymNote) Calendar events are NOT affected. Now call \(isToday ? "replan_today" : "plan_day") to rebuild the day around this.")
+
+        default:
+            return .init(text: "mode must be 'only', 'clear' or 'routine'. Nothing was changed.")
+        }
+    }
+
     @MainActor
     private func toolSetGym(_ input: [String: Any]) -> JeevesChatService.ToolResult {
         let date = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
@@ -1903,7 +2023,21 @@ final class ChatToolExecutor {
             return .init(text: TravelGuard.refusalMessage(for: date, trip: trip))
         }
         let note = (input["note"] as? String) ?? ""
+        let result = await planDay(date, note: note)
+        await NotificationService.notifyPlanReady(isOffline: result.isOffline)
+        let summary = result.isOffline
+            ? "Built an offline plan for \(dayLabel(date)) — couldn't reach the planning service.\(result.error.map { " (\($0))" } ?? "")"
+            : "Planned \(dayLabel(date)). \(result.plan.summary)"
+        return .init(text: summary, plan: result.plan, isOfflinePlan: result.isOffline)
+    }
+
+    /// Plan one day from its stored inputs, and commit it. Shared by the
+    /// plan_day tool and the activity picker, so a day planned by ticking
+    /// boxes goes through exactly the same path as one planned by asking.
+    @MainActor
+    func planDay(_ date: Date, note: String = "") async -> PlanCoordinator.Result {
         let state = planState(on: date)
+        let selection = state.activitySelection
         let result = await PlanCoordinator.generateLogged(.init(
             userMessage: note,
             hasGym: state.hasGymToday,
@@ -1911,16 +2045,18 @@ final class ChatToolExecutor {
             events: eventsOn(date),
             locations: locations,
             prepSessions: prepSessions,
-            routine: Baseline.routine(from: routineActivities),
+            routine: Baseline.routine(from: routineActivities, selection: selection),
+            gymSession: Baseline.gymSession(from: routineActivities),
             adherenceNote: AdherenceHistory.planningNote(context: modelContext, for: date),
-            planDate: date
+            planDate: date,
+            // Planning TODAY at 12:45 is planning the rest of today. The
+            // coordinator works that out from these rather than from whether
+            // this particular call site remembered to say so.
+            existingPlan: state.plan,
+            blankDay: selection.isBlankDay
         ), context: modelContext, trigger: .chat)
-        commitPlan(result.plan, isOffline: result.isOffline, on: date)
-        await NotificationService.notifyPlanReady(isOffline: result.isOffline)
-        let summary = result.isOffline
-            ? "Built an offline plan for \(dayLabel(date)) — couldn't reach the planning service.\(result.error.map { " (\($0))" } ?? "")"
-            : "Planned \(dayLabel(date)). \(result.plan.summary)"
-        return .init(text: summary, plan: result.plan, isOfflinePlan: result.isOffline)
+        await commitPlan(result, on: date)
+        return result
     }
 
     // MARK: Tool context helpers
@@ -1996,25 +2132,13 @@ final class ChatToolExecutor {
 
     /// Saves the generated plan onto today's DailyPlanState so the Day Planner
     /// tab shows it and it survives relaunches.
-    func commitPlan(_ plan: GeneratedPlan, isOffline: Bool, on date: Date) {
-        let day = date.startOfDay
-        // Fresh-fetch (via planState), NOT the @Query snapshot: inside one
-        // agentic turn the view never re-renders, so `dailyPlans` predates the
-        // state a set_gym/plan_day tool already inserted for this day. Reading
-        // the stale snapshot here would insert a SECOND DailyPlanState — a
-        // duplicate row that also splits the gym flag and the plan across two
-        // records.
-        let state = planState(on: day)
-        state.storePlan(plan, isOffline: isOffline)
-        modelContext.saveOrLog()
-        // Schedule on-device reminders for this plan's key blocks.
-        Task { await NotificationService.reschedule(plan: plan, on: day) }
-        // And the timing nudges for the measurable ones — held in a chain, so
-        // only the block you're actually up to gets one.
-        let context = modelContext
-        Task { await ActivityTimekeeper.scheduleDay(plan: plan, on: day, context: context) }
-        // Arm a background traffic re-check ~90 min before the next commute.
-        CommuteBackgroundRefresh.scheduleNext(context: modelContext)
+    /// Thin wrapper over the one shared commit, kept so chat's callers read the
+    /// same as they did — the four side-effects now live in PlanCoordinator,
+    /// where the planner button and the overnight pass get them too.
+    func commitPlan(_ result: PlanCoordinator.Result, on date: Date) async {
+        let state = planState(on: date)
+        await PlanCoordinator.commit(result, on: date, context: modelContext,
+                                     hasGymToday: state.hasGymToday, gymMinute: state.gymMinute)
     }
 
 }

@@ -81,7 +81,7 @@ enum AutoPlanService {
         let locations = (try? context.fetch(FetchDescriptor<SavedLocation>())) ?? []
         let prepSessions = (try? context.fetch(FetchDescriptor<PrepSession>())) ?? []
         let routineActivities = (try? context.fetch(FetchDescriptor<RoutineActivity>())) ?? []
-        let routine = Baseline.routine(from: routineActivities)
+        let gymSession = Baseline.gymSession(from: routineActivities)
 
         var filled = 0
         for day in needed {
@@ -95,6 +95,9 @@ enum AutoPlanService {
             // or foreground backstop — leaves a diagnostics trace (trigger
             // .autoPlan), mirrored to iCloud Drive. Without this we can't tell
             // whether the background task ever fired.
+            // A day the user has already emptied or narrowed keeps that choice
+            // when the overnight pass fills it in.
+            let selection = state.activitySelection
             let result = await PlanCoordinator.generateLogged(.init(
                 userMessage: "",
                 hasGym: state.hasGymToday,
@@ -102,18 +105,22 @@ enum AutoPlanService {
                 events: dayEvents,
                 locations: locations,
                 prepSessions: prepSessions,
-                routine: routine,
+                routine: Baseline.routine(from: routineActivities, selection: selection),
+                gymSession: gymSession,
                 adherenceNote: AdherenceHistory.planningNote(context: context, for: day),
-                planDate: day
+                planDate: day,
+                blankDay: selection.isBlankDay
             ), context: context, trigger: .autoPlan)
             // An offline (deterministic) plan is a poor thing to silently pin
             // for a FUTURE day — leave the gap so the foreground path (or the
             // user) can build a real one once the network is back.
             guard !result.isOffline else { continue }
 
-            state.storePlan(result.plan, isOffline: false)
-            context.saveOrLog()
-            await NotificationService.reschedule(plan: result.plan, on: day)
+            // The shared commit — this path used to store the plan and schedule
+            // its reminders, but neither the timing nudges nor the traffic
+            // re-check, so an auto-planned day silently had no nudge chain.
+            await PlanCoordinator.commit(result, on: day, context: context,
+                                         hasGymToday: state.hasGymToday, gymMinute: state.gymMinute)
             filled += 1
         }
         // If any gap survived (a day fell back to offline / the planner was

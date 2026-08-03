@@ -33,11 +33,43 @@ final class DayPlannerTests: XCTestCase {
 
     // MARK: Rest day
 
-    func testRestDayStartsWithInterviewReadingAtEight() {
+    /// The morning belongs to whatever the ROUTINE puts first. A hardcoded
+    /// "Interview prep — Reading" used to open every day at the day start, and
+    /// it outranked a routine that had led with Chores for weeks.
+    func testTheDayOpensWithWhateverTheRoutinePutsFirst() {
         let blocks = DayPlanner.generate(gymMinute: nil, prepSessions: [], leisureLogs: [])
         let first = blocks.min { $0.startMinute < $1.startMinute }
-        XCTAssertEqual(first?.title, "Interview prep — Reading")
+        XCTAssertEqual(first?.title, Baseline.activities.first?.name,
+                       "the first block is the routine's first activity, not a title frozen in DayPlanner")
         XCTAssertEqual(first?.startMinute, 8 * 60)
+    }
+
+    /// Reorder the routine and the morning reorders with it — the real proof,
+    /// since asserting against the default list alone would still pass if the
+    /// title were hardcoded to whatever happens to sit at the top of it.
+    func testReorderingTheRoutineReordersTheMorning() {
+        let routine = [
+            BaselineActivity(name: "Job applications", durationMinutes: 45, tier: .important, note: nil),
+            BaselineActivity(name: "Chores", durationMinutes: 40, tier: .flexible, note: nil),
+        ]
+        let blocks = DayPlanner.generate(gymMinute: nil, prepSessions: [], leisureLogs: [],
+                                         routine: routine)
+        XCTAssertEqual(blocks.min { $0.startMinute < $1.startMinute }?.title, "Job applications")
+
+        let flipped = DayPlanner.generate(gymMinute: nil, prepSessions: [], leisureLogs: [],
+                                          routine: routine.reversed())
+        XCTAssertEqual(flipped.min { $0.startMinute < $1.startMinute }?.title, "Chores")
+    }
+
+    /// A day the user deliberately emptied stays empty. Filling the hours back
+    /// in with "Discretionary time — suggested: Music" is still the planner
+    /// deciding what the evening is for.
+    func testAClearedDayIsNotHelpfullyRefilled() {
+        let blocks = DayPlanner.generate(gymMinute: nil, prepSessions: [], leisureLogs: [],
+                                         routine: [], fillFreeTime: false)
+        XCTAssertTrue(blocks.allSatisfy { $0.title != "Discretionary time" },
+                      "an empty day is the answer, not a gap to fill")
+        XCTAssertNotNil(block("Sleep", in: blocks), "the day still ends")
     }
 
     func testRestDayLunchStartsByDeadline() {
@@ -71,7 +103,7 @@ final class DayPlannerTests: XCTestCase {
             XCTAssertTrue(sleep?.isAnchor ?? false, "Sleep is a fixed anchor")
             XCTAssertEqual(blocks.map(\.startMinute).max(), sleep?.startMinute, "nothing starts after Sleep")
             // No productive work past 20:30 (wind-down/sleep may run later).
-            let productive = Set(["Interview prep — Reading", "Job applications", "Reading (habit)", "Lunch", "Chore buffer", "Chores", "Photography"])
+            let productive = Set(["Interview prep — Reading", "Job applications", "Reading habit", "Lunch", "Chore buffer", "Chores", "Photography"])
             for b in blocks where productive.contains(b.title) {
                 XCTAssertLessThanOrEqual(b.endMinute, DayPlanner.dayEndMinute, "'\(b.title)' runs past 20:30")
             }

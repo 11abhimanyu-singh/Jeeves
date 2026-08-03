@@ -175,11 +175,21 @@ extension Baseline {
     /// store hasn't been seeded yet (e.g. tests, first launch mid-plan).
     /// Gym children are excluded — the gym is placed as a per-day anchor, not
     /// filled like a routine activity, and its parts are read separately.
-    static func routine(from activities: [RoutineActivity]) -> [BaselineActivity] {
+    /// `selection` narrows it further to just this DAY's choice. Filtering here
+    /// — once, at the point the routine becomes a value — is what keeps the
+    /// online prompt and the offline fallback from disagreeing about which
+    /// activities the day contains.
+    static func routine(from activities: [RoutineActivity],
+                        selection: ActivitySelection = .routine) -> [BaselineActivity] {
         let enabled = activities
-            .filter { $0.enabled && $0.group != .gym }
+            .filter { $0.enabled && $0.group != .gym && selection.includes($0.plannerName) }
             .sorted { $0.sortOrder < $1.sortOrder }
-        return enabled.isEmpty ? self.activities : enabled.map(\.asBaseline)
+        // An empty result falls back to the hardcoded defaults ONLY when the
+        // store simply hasn't been seeded. A day the user deliberately emptied
+        // must stay empty — falling back there would refill the day they had
+        // just asked to clear, which is the bug this whole path exists to fix.
+        if enabled.isEmpty, !selection.isExplicit { return self.activities }
+        return enabled.map(\.asBaseline)
     }
 
     /// The gym session as configured: enabled parts, in order, with their own

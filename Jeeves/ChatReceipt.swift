@@ -230,13 +230,44 @@ struct ChatReceipt: Codable, Identifiable, Equatable {
     }
 
     /// "Stay added to 'Mysore': CGH Earth Wayanad, 7 Aug – 10 Aug."
+    /// "Added \"Appointment with Dr Rao\" 16:00–19:00 on tomorrow at Tasvaa."
+    /// "Added todo 'Call the bank' (high), due Mon 4 Aug."
     private static func parseCreated(_ text: String) -> (label: String, now: String)? {
         let head = firstSentence(text)
-        guard let colon = head.range(of: ":") else { return nil }
+        // add_event and add_todo quote the thing they made and then run
+        // straight on — no colon separates label from value. Their times are
+        // full of bare colons, and splitting on the first one put "00–19:00"
+        // on a real appointment the user had just booked. The quoted title IS
+        // the label; everything after the closing quote is the value.
+        if head.hasPrefix("Added "), let quoted = quotedTitle(in: head) {
+            let value = tidy(String(head[quoted.after...]))
+            if !value.isEmpty { return (tidy(quoted.title), value) }
+        }
+        // Everything else names itself, then the value, after a colon
+        // FOLLOWED BY A SPACE — the same rule parseArrow uses, and for the
+        // same reason.
+        guard let colon = head.range(of: ": ") else { return nil }
         let label = tidy(String(head[head.startIndex..<colon.lowerBound]))
         let value = tidy(String(head[colon.upperBound...]))
         guard !label.isEmpty, !value.isEmpty else { return nil }
         return (label, value)
+    }
+
+    /// The quoted title in a creation receipt, and where it ends. add_event
+    /// quotes with `"`, add_todo with `'`. The CLOSING quote is searched
+    /// backwards: a receipt carries exactly one quoted title, and searching
+    /// forwards cut "Dad's birthday" down to "Dad".
+    private static func quotedTitle(in head: String) -> (title: String, after: String.Index)? {
+        for quote in ["\"", "'"] {
+            guard let open = head.range(of: quote),
+                  let close = head.range(of: quote, options: .backwards),
+                  open.upperBound <= close.lowerBound
+            else { continue }
+            let title = tidy(String(head[open.upperBound..<close.lowerBound]))
+            guard !title.isEmpty else { continue }
+            return (title, close.upperBound)
+        }
+        return nil
     }
 
     private static func firstSentence(_ text: String) -> String {

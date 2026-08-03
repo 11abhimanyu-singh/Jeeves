@@ -41,6 +41,10 @@ struct JeevesChatView: View {
     @State private var errorText: String?
     @State private var showSetup = false
     @State private var showSettings = false
+    /// Non-nil while the activity picker is up, carrying the day it is for.
+    /// `.sheet(item:)` needs identity and a bare Date has none.
+    struct PickerRequest: Identifiable { let id: Date; var day: Date { id } }
+    @State private var pickerDay: PickerRequest?
     /// What the executor is doing RIGHT NOW, named. A bare spinner through
     /// four tool calls reads as a hang.
     @State private var activeTool: String?
@@ -140,6 +144,12 @@ struct JeevesChatView: View {
         }
         .sheet(item: $detectedDraft) { draft in
             EventEditSheet(draft: draft, onSave: addEventFromChat)
+        }
+        .sheet(item: $pickerDay) { request in
+            ActivityPickerSheet(day: request.day) { chosenDay in
+                pickerDay = nil
+                planPickedDay(chosenDay)
+            }
         }
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
@@ -563,6 +573,11 @@ struct JeevesChatView: View {
         // Receipts are collected from the TOOL RESULTS as they come back, so
         // the card can never disagree with what actually happened.
         let collected = ToolReceiptCollector()
+        // ONE executor for the whole turn. `toolExecutor` is a computed
+        // property that builds a fresh instance on every access, so anything a
+        // tool records on it — like a request to show the activity picker —
+        // would be thrown away the moment the next line asked for it again.
+        let executor = toolExecutor
 
         Task {
             // Hold a background assertion: an agentic turn can call plan_day,
@@ -573,7 +588,7 @@ struct JeevesChatView: View {
                         history: priorHistory, newMessage: text, stateNote: stateNote,
                         execute: { call in
                             activeTool = ToolActivity.label(for: call.name, input: call.input)
-                            let result = await toolExecutor.run(call)
+                            let result = await executor.run(call)
                             collected.add(tool: call.name, result: result.text)
                             activeTool = nil
                             return result
@@ -607,6 +622,9 @@ struct JeevesChatView: View {
                 if reply.text.isEmpty && reply.plans.isEmpty {
                     addTurn(role: .assistant, "Done — anything else?")
                 }
+                // A tool asked for the picker: present it after the reply is on
+                // screen, so the user reads the sentence and then sees the list.
+                if let day = executor.pendingPickerDate { pickerDay = .init(id: day) }
             case .failure(let error):
                 errorText = error.localizedDescription
                 // The failure must live in the TRANSCRIPT, not just a banner:
@@ -651,6 +669,7 @@ struct JeevesChatView: View {
                 let planEvents = await extractAndCreateAnchors(from: userContext)
                 // 2. Generate (Claude, with deterministic fallback) via the
                 //    shared coordinator — same call the Day Planner uses.
+                let selection = todayPlanState?.activitySelection ?? .routine
                 return await PlanCoordinator.generateLogged(.init(
                     userMessage: userContext,
                     hasGym: todayPlanState?.hasGymToday ?? false,
@@ -658,20 +677,45 @@ struct JeevesChatView: View {
                     events: planEvents,
                     locations: locations,
                     prepSessions: prepSessions,
-                    routine: Baseline.routine(from: routineActivities),
+                    routine: Baseline.routine(from: routineActivities, selection: selection),
                     gymSession: Baseline.gymSession(from: routineActivities),
                     adherenceNote: AdherenceHistory.planningNote(context: modelContext, for: today),
-                    planDate: today
+                    planDate: today,
+                    // Tapping this at 12:45 asks for the rest of today, not a
+                    // fresh 08:00–20:30 day on top of the one already spent.
+                    existingPlan: todayPlanState?.plan,
+                    blankDay: selection.isBlankDay
                 ), context: modelContext, trigger: .chat)
             }
             // 3. COMMIT it to the Day Planner for today so it persists across
             //    launches and shows on the planner — not just here in chat.
-            toolExecutor.commitPlan(result.plan, isOffline: result.isOffline, on: today)
+            await toolExecutor.commitPlan(result, on: today)
             // If they backgrounded the app while it planned, tell them it's ready.
             await NotificationService.notifyPlanReady(isOffline: result.isOffline)
 
             if result.isOffline {
                 addTurn(role: .assistant, "I couldn't reach the planning service, so here's an offline plan from the built-in scheduler.\(result.error.map { " (\($0))" } ?? "")")
+            } else {
+                addTurn(role: .assistant, result.plan.summary)
+            }
+            addTurn(role: .assistant, "", plan: result.plan, isOfflinePlan: result.isOffline)
+            isPlanning = false
+        }
+    }
+
+    /// Plan a day from the boxes the user just ticked. Goes through the same
+    /// executor path plan_day uses, so a day chosen by tapping is built exactly
+    /// like one chosen by asking.
+    private func planPickedDay(_ day: Date) {
+        isPlanning = true
+        let executor = toolExecutor
+        Task {
+            let result = await BackgroundActivity.run("plan-my-day") {
+                await executor.planDay(day, note: "Plan only the activities the user ticked.")
+            }
+            await NotificationService.notifyPlanReady(isOffline: result.isOffline)
+            if result.isOffline {
+                addTurn(role: .assistant, "I couldn't reach the planning service, so here's an offline plan built from what you picked.\(result.error.map { " (\($0))" } ?? "")")
             } else {
                 addTurn(role: .assistant, result.plan.summary)
             }

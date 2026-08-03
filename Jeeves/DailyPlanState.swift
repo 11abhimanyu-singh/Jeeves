@@ -10,6 +10,35 @@
 import Foundation
 import SwiftData
 
+/// Which of the routine's activities a single day is actually for.
+///
+/// Three states, not two, and the third is the one that matters: a day nobody
+/// has chosen for is NOT the same as a day chosen to be empty. "Cancel all
+/// activities today and keep the full day free" used to clear the gym, report
+/// honestly that there were no events left, and then watch the planner refill
+/// the day from the routine — because the routine's `enabled` flag is permanent
+/// configuration, and there was nowhere to say "not today".
+enum ActivitySelection: Equatable {
+    /// No choice made for this day — plan the routine as configured.
+    case routine
+    /// Exactly these planner names, and nothing else. EMPTY means a
+    /// deliberately blank day, which is a real answer.
+    case only(Set<String>)
+
+    func includes(_ plannerName: String) -> Bool {
+        switch self {
+        case .routine:          return true
+        case .only(let names):  return names.contains(plannerName)
+        }
+    }
+
+    /// The user asked for nothing at all today.
+    var isBlankDay: Bool { self == .only([]) }
+
+    /// Did the user choose for this day at all?
+    var isExplicit: Bool { self != .routine }
+}
+
 @Model
 final class DailyPlanState {
     var date: Date = Date.distantPast   // startOfDay — one record per day
@@ -36,6 +65,10 @@ final class DailyPlanState {
     /// marking them skipped would be the app recording its own gap as the
     /// user's miss.
     var withheldKeysJSON: String? = nil
+    /// This day's own activity choice, as planner names. Nil is the third
+    /// state — no choice made — and is why this is a JSON string rather than a
+    /// stored Set: nil and "[]" have to stay distinguishable.
+    var activitySelectionJSON: String? = nil
 
     init(date: Date, hasGymToday: Bool, gymMinute: Int?, planConfirmed: Bool = false) {
         self.date = date
@@ -77,6 +110,26 @@ final class DailyPlanState {
         set {
             withheldKeysJSON = newValue.isEmpty ? nil
                 : (try? JSONEncoder().encode(newValue)).flatMap { String(data: $0, encoding: .utf8) }
+        }
+    }
+
+    var activitySelection: ActivitySelection {
+        get {
+            guard let json = activitySelectionJSON, let data = json.data(using: .utf8),
+                  let names = try? JSONDecoder().decode(Set<String>.self, from: data)
+            else { return .routine }
+            return .only(names)
+        }
+        set {
+            switch newValue {
+            case .routine:
+                activitySelectionJSON = nil
+            case .only(let names):
+                // Encoded even when empty — "[]" is the blank day, and losing
+                // it to nil would hand the day straight back to the routine.
+                activitySelectionJSON = (try? JSONEncoder().encode(names))
+                    .flatMap { String(data: $0, encoding: .utf8) }
+            }
         }
     }
 

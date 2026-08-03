@@ -310,6 +310,14 @@ enum JeevesChatService {
     missed_blocks and the user's stated ETA in resume_at. Today's date is in \
     your context — never call today "yesterday" or misdate the current \
     session when recapping.
+    - A named activity is a ROUTINE activity until you have checked. "Interview \
+    prep", "reading", "chores", "job applications" are recurring routine rows, \
+    NOT calendar events — they have no start time until the planner gives them \
+    one, so never ask the user for one and never conclude they are "not on file" \
+    from an empty calendar. Read fetch_app_data(collection:"routine") first. To \
+    take an activity off ONE day (or to empty a day completely), use \
+    set_day_activities — deleting events does not touch the routine, and a day \
+    you only cleared events from will refill from the routine on the next plan.
     - When the user states a STANDING preference ("gym is always 7pm", "never \
     schedule calls before 10"), call remember_preference — it persists across \
     days and appears in your context. If they time-bound it ("for the next 45 \
@@ -439,8 +447,9 @@ enum JeevesChatService {
                     "collection": [
                         "type": "string",
                         "enum": ["events", "trips", "journeys", "stays", "workouts", "lifts",
-                                 "runs", "run_program", "todos", "reminders", "checkins", "books"],
-                        "description": "Which data to read. ANY question about trips, flights, drives or hotels must read 'trips', 'journeys' or 'stays' — never answer travel from 'events' or from what the conversation said earlier. 'lifts' includes every set (reps × weight) for PR/tonnage questions; 'run_program' is the Couch-to-5K week structure.",
+                                 "runs", "run_program", "todos", "reminders", "checkins", "books",
+                                 "routine"],
+                        "description": "Which data to read. ANY question about trips, flights, drives or hotels must read 'trips', 'journeys' or 'stays' — never answer travel from 'events' or from what the conversation said earlier. 'routine' is the user's recurring daily activities (interview prep, reading, chores, job applications, gym parts) — read it whenever they name an activity, BEFORE concluding it isn't on file. 'lifts' includes every set (reps × weight) for PR/tonnage questions; 'run_program' is the Couch-to-5K week structure.",
                     ],
                     "from": [
                         "type": "string",
@@ -760,6 +769,36 @@ enum JeevesChatService {
                 "required": ["note"],
             ],
         ],
+        [
+            "name": "set_day_activities",
+            "description": "Choose which of the user's ROUTINE activities a single day is for. This is the ONLY way to take a routine activity off one day — deleting events does not touch the routine, and the routine's own on/off switch is permanent configuration, not 'not today'. Use it for 'cancel everything today', 'keep the day free', 'today just interview prep and reading', 'skip chores tomorrow'. Read fetch_app_data(collection='routine') first if you are unsure what the activities are called. This does NOT re-plan — call plan_day (or replan_today for today) afterwards.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "mode": [
+                        "type": "string",
+                        "enum": ["only", "clear", "routine"],
+                        "description": "'only' = plan JUST the listed activities that day. 'clear' = plan NO routine activities at all (a deliberately empty day; also clears the gym). 'routine' = undo any per-day picks and go back to the normal routine.",
+                    ],
+                    "activities": [
+                        "type": "array", "items": ["type": "string"],
+                        "description": "Required for mode 'only': the activities to keep, by name. Names are matched against the routine — if any one of them doesn't match, NOTHING is changed and you get the real list back to read to the user.",
+                    ],
+                    "date": ["type": "string", "description": "yyyy-MM-dd, 'today' or 'tomorrow'. Defaults to today."],
+                ],
+                "required": ["mode"],
+            ],
+        ],
+        [
+            "name": "show_activity_picker",
+            "description": "Put a checkbox list of the user's routine activities on screen so they can tick exactly what they want planned for a day. Use it when they ask to SEE or CHOOSE their activities — 'show me my activities', 'let me pick what to do today', 'give me a list to choose from'. Prefer this over set_day_activities whenever the user wants to browse and decide rather than name specific activities. The picker plans the day itself once they confirm, so do NOT call plan_day afterwards.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "date": ["type": "string", "description": "yyyy-MM-dd, 'today' or 'tomorrow'. Defaults to today."],
+                ],
+            ],
+        ],
     ]
 
     /// Runs a full agentic turn: the model may call tools any number of times
@@ -984,6 +1023,31 @@ enum JeevesChatService {
         let q = query.lowercased().trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty, !t.isEmpty else { return false }
         return t.contains(q)
+    }
+
+    /// Routine activities are matched on WORDS, not on raw substrings.
+    ///
+    /// `plannerName` joins a group to its child with an em dash nobody types —
+    /// "Interview prep — Reading" — so `strictMatch`'s bare `contains` returns
+    /// false for "interview prep reading", which is the single most likely
+    /// phrase the user will say. Punctuation collapses to spaces, so the dash,
+    /// the parentheses in "Reading (habit)" and a stray comma all stop
+    /// mattering.
+    nonisolated static func routineKey(_ s: String) -> String {
+        String(s.lowercased().map { $0.isLetter || $0.isNumber ? $0 : " " })
+            .split(separator: " ").joined(separator: " ")
+    }
+
+    /// True when `query` names this activity — by its own name or by the
+    /// planner title it appears under. A GROUP phrase ("interview prep")
+    /// deliberately matches every child; the caller names each hit in its
+    /// receipt, so a broad phrase is answered visibly rather than narrowed
+    /// down to a guess.
+    nonisolated static func routineMatches(name: String, plannerName: String, query: String) -> Bool {
+        let q = routineKey(query)
+        guard !q.isEmpty else { return false }
+        let n = routineKey(name), p = routineKey(plannerName)
+        return p == q || n == q || p.contains(q) || n.contains(q)
     }
 
     /// Narrow a match set the way a human would: if some titles match the

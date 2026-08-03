@@ -29,12 +29,15 @@ enum Baseline {
     /// The user's fixed daily routine. Anchors (gym, events) sit above all of
     /// these and are supplied per-day, not here.
     static let activities: [BaselineActivity] = [
-        BaselineActivity(name: "Interview prep — Reading", durationMinutes: 90, tier: .important, note: "High preference: schedule early in the morning when possible, but it can move and can be dropped like any Important item"),
+        // Chores lead the morning. This list is the FILL ORDER, and the planner
+        // follows it: a hardcoded "reading first" used to override whatever sat
+        // at the top here.
+        BaselineActivity(name: "Chores", durationMinutes: 40, tier: .flexible, note: "First thing — clears the decks before focused work"),
+        BaselineActivity(name: "Interview prep — Reading", durationMinutes: 90, tier: .important, note: "Important and high-preference, but it takes its place in this order like anything else — it is not pinned to the day start"),
         BaselineActivity(name: "Lunch", durationMinutes: 30, tier: .mustDo, note: "Start no earlier than 12:30; finish by 14:00 if possible (hard deadline: start by 14:30)"),
         BaselineActivity(name: "Job applications", durationMinutes: 75, tier: .important, note: nil),
         BaselineActivity(name: "Interview prep — practice", durationMinutes: 120, tier: .important, note: "Split across Product Sense / Execution / Strategy / Behavioral, weighted toward the most-neglected"),
         BaselineActivity(name: "Reading habit", durationMinutes: 90, tier: .important, note: nil),
-        BaselineActivity(name: "Chores", durationMinutes: 40, tier: .flexible, note: nil),
         BaselineActivity(name: "Chore buffer", durationMinutes: 30, tier: .flexible, note: nil),
         BaselineActivity(name: "Photography", durationMinutes: 30, tier: .flexible, note: nil),
     ]
@@ -48,7 +51,7 @@ enum Baseline {
 /// One entry in the returned schedule. `kind` classifies it so the UI can
 /// render/anchor by type rather than guessing from the title. Codable (not
 /// just Decodable) so a generated plan can be persisted in a chat turn.
-struct GeneratedBlock: Codable {
+struct GeneratedBlock: Codable, Equatable {
     let title: String
     let startTime: String       // "HH:MM", 24-hour
     let endTime: String         // "HH:MM"

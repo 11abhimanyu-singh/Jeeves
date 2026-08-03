@@ -40,6 +40,7 @@ struct DayPlannerView: View {
 
     // Plan generation (the same PlanCoordinator call the chat uses).
     @State private var isPlanning = false
+    @State private var showPicker = false
     @State private var planningStartedAt = Date()
     @State private var planningTask: Task<Void, Never>?
     @State private var planError: String?
@@ -93,6 +94,7 @@ struct DayPlannerView: View {
         }
         .sheet(item: $editingTrip) { TripEditorView(trip: $0) }
         .sheet(isPresented: $showTicketImport) { TicketImportView() }
+        .sheet(isPresented: $showPicker) { pickerSheet }
         .sheet(isPresented: $showDateJump) {
             DateJumpSheet(selectedDate: $selectedDate, today: today)
                 .presentationDetents([.height(460)])
@@ -354,20 +356,44 @@ struct DayPlannerView: View {
     /// The committed plan for the selected day, if one has been generated.
     private var savedPlan: GeneratedPlan? { selectedPlanState?.plan }
 
+    /// The activity picker, over the day currently on screen.
+    private var pickerSheet: some View {
+        ActivityPickerSheet(day: selectedDate) { _ in
+            showPicker = false
+            planMyDay()
+        }
+    }
+
     private var planBar: some View {
         VStack(spacing: 8) {
-            Button(action: planMyDay) {
-                HStack(spacing: 6) {
-                    Image(systemName: "wand.and.stars").font(.ui(13, weight: .semibold))
-                    Text(savedPlan == nil ? "Plan my day" : "Re-plan").font(.serif(16))
+            HStack(spacing: 8) {
+                Button(action: planMyDay) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "wand.and.stars").font(.ui(13, weight: .semibold))
+                        Text(savedPlan == nil ? "Plan my day" : "Re-plan").font(.serif(16))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(RoundedRectangle(cornerRadius: 14).fill(Color.accent))
                 }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(RoundedRectangle(cornerRadius: 14).fill(Color.accent))
+                .buttonStyle(.plain)
+                .disabled(isPlanning)
+
+                // Choose the day's activities before planning it. Sits beside
+                // the plan button rather than inside a menu: it is the answer
+                // to "not today", and that question comes up daily.
+                Button { showPicker = true } label: {
+                    Image(systemName: "checklist")
+                        .font(.ui(15, weight: .semibold))
+                        .foregroundStyle(Color.accentDeep)
+                        .frame(width: 48, height: 46)
+                        .background(RoundedRectangle(cornerRadius: 14).fill(Color.surface))
+                }
+                .buttonStyle(.plain)
+                .disabled(isPlanning)
+                .accessibilityLabel("Choose this day's activities")
             }
-            .buttonStyle(.plain)
-            .disabled(isPlanning)
 
             if isPlanning {
                 PlanningProgressCard(startedAt: planningStartedAt) { cancelPlanning() }
@@ -547,27 +573,12 @@ struct DayPlannerView: View {
         // Mid-day re-plan: when re-planning TODAY and the committed plan already has
         // blocks that have elapsed, lock those and rebuild only from now — so moving
         // an anchor at 3pm doesn't wipe the reading/shower already done this morning.
-        let nowMinute = DayPlannerView.minuteOfDay(Date())
-        var replanFrom: Int? = nil
-        var lockedNow: [GeneratedBlock] = []
-        var doneNote: String? = nil
         replanNote = nil
-        if date == today, let current = savedPlan {
-            // Anchors from the NEW inputs, not the old plan: if the gym just
-            // moved to the evening, this morning's commute to it is no longer
-            // a journey the day makes, and must not be preserved as done.
-            let anchors = PlanCoordinator.arrivalAnchors(
-                gymMinute: gymMinute,
-                eventStarts: dayEvents.filter { !$0.isAllDay }.map(\.startMinute))
-            let elapsed = PlanCoordinator.lockedBlocks(current, endedBy: nowMinute,
-                                                       stillArrivingAt: anchors)
-            if !elapsed.isEmpty {
-                replanFrom = nowMinute
-                lockedNow = elapsed
-                doneNote = "Already done earlier today: " + elapsed.map(\.title).joined(separator: ", ")
-                replanNote = "Re-planned from \(DayPlannerView.clockLabel(nowMinute)) · kept \(elapsed.count) earlier block\(elapsed.count == 1 ? "" : "s")"
-            }
-        }
+        // The elapsed-day arithmetic used to live here, and only here plus one
+        // chat tool — so the same button pressed inside chat rebuilt the day
+        // from 08:00. The coordinator owns it now; this hands over the day's
+        // committed plan and lets it decide.
+        let selection = selectedPlanState?.activitySelection ?? .routine
         planningStartedAt = Date()
         planningTask = Task {
             // Hold a background assertion so planning survives the user
@@ -580,13 +591,12 @@ struct DayPlannerView: View {
                     events: dayEvents,
                     locations: locations,
                     prepSessions: prepSessions,
-                    routine: Baseline.routine(from: routineActivities),
+                    routine: Baseline.routine(from: routineActivities, selection: selection),
                     gymSession: Baseline.gymSession(from: routineActivities),
                     adherenceNote: AdherenceHistory.planningNote(context: modelContext, for: date),
-                    replanFromMinute: replanFrom,
-                    alreadyDoneNote: doneNote,
-                    lockedBlocks: lockedNow,
-                    planDate: date
+                    planDate: date,
+                    existingPlan: date == today ? savedPlan : nil,
+                    blankDay: selection.isBlankDay
                 ), context: modelContext, trigger: .planner)
             }
             // Stopping must actually stop. The request can still finish (or
@@ -597,15 +607,19 @@ struct DayPlannerView: View {
                 return
             }
             // Commit to this date's plan state so it persists and displays here.
-            let state = DailyPlanState.fetchOrCreate(for: date, in: modelContext,
-                                                     hasGymToday: hasGymToday, gymMinute: gymMinute)
-            state.storePlan(result.plan, isOffline: result.isOffline)
-            modelContext.saveOrLog()
-            await NotificationService.reschedule(plan: result.plan, on: date)
+            // ONE shared commit: this path used to schedule the block reminders
+            // but never the timing nudges, so the T-10/+15/+30 chain simply did
+            // not exist on any day planned from this button.
+            await PlanCoordinator.commit(result, on: date, context: modelContext,
+                                         hasGymToday: hasGymToday, gymMinute: gymMinute)
+            // Describe what actually happened rather than predicting it.
+            if let from = result.resumedFromMinute {
+                let kept = result.keptBlocks
+                replanNote = "Re-planned from \(DayPlannerView.clockLabel(from))"
+                    + (kept > 0 ? " · kept \(kept) earlier block\(kept == 1 ? "" : "s")" : "")
+            }
             // If they backgrounded the app while it planned, tell them it's ready.
             await NotificationService.notifyPlanReady(isOffline: result.isOffline)
-            // Arm a background traffic re-check ~90 min before the next commute.
-            CommuteBackgroundRefresh.scheduleNext(context: modelContext)
             if result.isOffline {
                 planError = "Couldn't reach the planning service — showing an offline plan.\(result.error.map { " (\($0))" } ?? "")"
                 // A fallback plan is a real plan, but not the one that was

@@ -34,6 +34,11 @@ struct PlanRequest {
     /// historical fixed session so an old caller still produces the old plan.
     var gymSession: [(name: String, minutes: Int)] = Baseline.gymParts
     var referenceNow: Date? = nil      // pinned "now" for evals; nil = real device clock
+    /// The user asked for a day with nothing scheduled. An EMPTY routine alone
+    /// can't say this — the prompt would just show a short list and the model
+    /// would fill the hours with something helpful, which is the opposite of
+    /// what was asked.
+    var blankDay: Bool = false
 }
 
 enum PlanGenerationError: LocalizedError {
@@ -217,11 +222,18 @@ enum PlanGenerationService {
             s += "Absorb whatever delay the user described by pushing the remaining activities into the shorter window, dropping/shrinking per the usual tier rules. A Must-do (like lunch) that already happened is in the done list — don't re-add it; one that hasn't AND still fits its window, keep it.\n\n"
         }
 
-        s += "BASELINE ROUTINE (movable blocks, each with a priority tier):\n"
-        for a in (req.routine ?? Baseline.activities) {
-            s += "- \(a.name): \(a.durationMinutes) min [\(a.tier.rawValue)]"
-            if let n = a.note { s += " — \(n)" }
-            s += "\n"
+        s += "BASELINE ROUTINE (movable blocks, IN FILL ORDER, each with a priority tier):\n"
+        let routine = req.routine ?? Baseline.activities
+        if req.blankDay {
+            s += "(NONE — the user has explicitly cleared this day. Schedule NO activities: no prep, no reading, no chores, no photography, not even a helpful suggestion. Any real anchors below — events, the gym — still stand, with their commutes. Everything else is a single free block. An empty day is what was asked for; filling it is the one wrong answer.)\n"
+        } else if routine.isEmpty {
+            s += "(none configured — use your judgement, but keep the day light)\n"
+        } else {
+            for a in routine {
+                s += "- \(a.name): \(a.durationMinutes) min [\(a.tier.rawValue)]"
+                if let n = a.note { s += " — \(n)" }
+                s += "\n"
+            }
         }
         if let neglect = req.prepNeglectNote {
             s += "Practice split guidance: \(neglect). Give the most-neglected the most time (deterministic default 45/35/25/15 by rank).\n"
@@ -337,8 +349,11 @@ enum PlanGenerationService {
         if hasEvents {
             s += "- Events are FIXED ANCHORS you schedule work AROUND, not a wall that ends the day. Each event is an out-and-back trip: leave in time, attend, return home. Fill EVERY free window with productive work — before the first event, between events, and (crucially) AFTER you return home from an event, right up to 20:30.\n"
             s += "- Do NOT drop work just because it doesn't fit before an event. A midday event (e.g. a 2 PM appointment) leaves the whole afternoon and evening free after you return — use it. The ONLY time post-event hours are unavailable is when the event itself runs so late that you get home near or after 20:30.\n"
-            s += "- STRONGLY PREFER placing Interview prep — Reading early in the morning (the 08:00 peak-focus slot) when it's free — but it is a HIGH-PREFERENCE Important item, NOT an anchor: it may move later, or be dropped like any Important item when the day is genuinely too full. Do not lock it to 08:00.\n"
         }
+        // Applies to every day, not just event days: the hardcoded "reading in
+        // the 08:00 peak-focus slot" this replaced outranked the user's own
+        // ordering, and their routine has led with chores for weeks.
+        s += "- The ROUTINE LIST above is in the user's own fill order — follow it. Whatever sits at the top of it is what the morning opens with, from the day start. Do not promote a different activity into the first slot because it seems higher-value; the order is a decision the user already made.\n"
         s += "\n"
 
         s += "CHAINING & INTELLIGENCE (reason like a human, not a packer):\n"

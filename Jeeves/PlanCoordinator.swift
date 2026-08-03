@@ -30,6 +30,27 @@ enum PlanCoordinator {
         var lockedBlocks: [GeneratedBlock] = [] // already-elapsed blocks to preserve verbatim across a re-plan
         var planDate: Date = Date()     // the day being planned — commute legs use its scheduled departure times for predictive traffic
         var referenceNow: Date? = nil   // pinned "now" for evals; nil = real clock
+
+        // MARK: what a mid-day plan needs to work the elapsed day out for itself
+        //
+        // Callers used to compute this and hand over the ANSWERS
+        // (replanFromMinute / lockedBlocks). Three of the five forgot, so a plan
+        // asked for at 12:45 came back laid out from 07:00. They now hand over
+        // the INPUTS and `resolved` does the arithmetic once.
+
+        /// Today's committed plan, when there is one. Its elapsed blocks are
+        /// what a re-plan preserves.
+        var existingPlan: GeneratedPlan? = nil
+        /// Blocks that ELAPSED but did not HAPPEN — named by the user, excluded
+        /// from the preserved set so a re-plan can offer them again.
+        var missedBlocks: [String] = []
+        /// The user's stated ETA ("20 more minutes"), when they gave one. The
+        /// remainder starts here rather than at the clock.
+        var resumeAtMinute: Int? = nil
+        /// This day was deliberately emptied. Distinct from an empty `routine`,
+        /// which both planners would otherwise treat as "nothing configured"
+        /// and helpfully fill.
+        var blankDay: Bool = false
     }
 
     struct Result {
@@ -39,6 +60,113 @@ enum PlanCoordinator {
         var retryCount: Int = 0   // 1 when a repair round-trip was made
         var commuteMs: Int = 0    // time spent fetching commute times (Maps)
         var claudeMs: Int = 0     // time spent in the Claude call(s)
+        /// Where this plan actually began, when it began mid-day. Reported so
+        /// the UI describes what happened instead of predicting it.
+        var resumedFromMinute: Int? = nil
+        var keptBlocks: Int = 0
+    }
+
+    // MARK: Where the plan starts
+
+    /// What a plan for a day already under way must begin from, and keep.
+    struct Resumption: Equatable {
+        /// The first minute the new plan may schedule.
+        var fromMinute: Int
+        /// Blocks that already elapsed and are preserved verbatim.
+        var locked: [GeneratedBlock]
+        /// Their titles, for the prompt — so the remainder doesn't re-offer them.
+        var alreadyDoneNote: String?
+    }
+
+    /// Whether this is a whole day or the rest of one, worked out from the
+    /// clock rather than from whether the caller remembered to say so.
+    ///
+    /// A plan asked for at 12:45 that opens with a 07:00 block is not a plan,
+    /// it is a transcript. Returns nil when the day genuinely hasn't started
+    /// (planning tomorrow, or planning today before the day-start minute),
+    /// which is the only case where a full day is the right answer.
+    ///
+    /// Pure — the clock arrives as a parameter, so this is testable at any hour.
+    static func resumption(planDate: Date, existingPlan: GeneratedPlan?,
+                           hasGym: Bool, gymMinute: Int?, events: [DailyEvent],
+                           missedBlocks: [String] = [], resumeAtMinute: Int? = nil,
+                           now: Date = Date()) -> Resumption? {
+        let cal = Calendar.current
+        guard cal.isDate(planDate, inSameDayAs: now) else { return nil }
+        let nowMinute = cal.component(.hour, from: now) * 60 + cal.component(.minute, from: now)
+        // Never behind the clock: a stated ETA can push the start later, never
+        // earlier. "I'll be back in 20 minutes" moves the day; "start at 9"
+        // said at 11 does not un-spend the morning.
+        let from = max(resumeAtMinute ?? nowMinute, nowMinute)
+        guard from > DayPlanner.dayStartMinute else { return nil }
+
+        var locked: [GeneratedBlock] = []
+        if let existingPlan {
+            // Anchors from the NEW inputs, not the old plan: if the gym just
+            // moved to the evening, this morning's commute to it is no longer
+            // a journey the day makes, and must not be preserved as done.
+            let anchors = arrivalAnchors(
+                gymMinute: hasGym ? gymMinute : nil,
+                eventStarts: events.filter { !$0.isAllDay }.map(\.startMinute))
+            locked = lockedBlocks(existingPlan, endedBy: nowMinute, stillArrivingAt: anchors)
+            // ELAPSED IS NOT DONE. A block the user says they missed is dropped
+            // from the preserved set so the remainder can offer it again.
+            if !missedBlocks.isEmpty {
+                locked = locked.filter { block in
+                    !missedBlocks.contains { JeevesChatService.strictMatch(block.title, query: $0) }
+                }
+            }
+        }
+        let doneNote = locked.map(\.title).joined(separator: ", ")
+        return Resumption(fromMinute: from, locked: locked,
+                          alreadyDoneNote: doneNote.isEmpty ? nil : doneNote)
+    }
+
+    /// Inputs with the mid-day arithmetic filled in. An explicit
+    /// `replanFromMinute` still wins — evals and tests pin the clock that way.
+    static func resolved(_ i: Inputs) -> Inputs {
+        guard i.replanFromMinute == nil else { return i }
+        guard let r = resumption(planDate: i.planDate, existingPlan: i.existingPlan,
+                                 hasGym: i.hasGym, gymMinute: i.gymMinute, events: i.events,
+                                 missedBlocks: i.missedBlocks, resumeAtMinute: i.resumeAtMinute,
+                                 now: i.referenceNow ?? Date())
+        else { return i }
+        var out = i
+        out.replanFromMinute = r.fromMinute
+        out.lockedBlocks = r.locked
+        out.alreadyDoneNote = i.alreadyDoneNote ?? r.alreadyDoneNote
+        return out
+    }
+
+    // MARK: Committing
+
+    /// Everything committing a plan entails, in one place.
+    ///
+    /// This used to be spread across the callers, and they disagreed: the Day
+    /// Planner button scheduled reminders but never the timing nudges, the
+    /// overnight pass scheduled neither the nudges nor the traffic re-check.
+    /// The nudge chain therefore did not exist on any day the user planned from
+    /// the planner page — which looked exactly like the notifications being
+    /// broken.
+    @MainActor
+    static func commit(_ result: Result, on date: Date, context: ModelContext,
+                       hasGymToday: Bool = false, gymMinute: Int? = nil) async {
+        let day = date.startOfDay
+        // Fresh-fetch, NOT an @Query snapshot: inside one agentic turn the view
+        // never re-renders, so the snapshot predates a state a set_gym/plan_day
+        // tool already inserted for this day — and reading it would insert a
+        // SECOND row, splitting the gym flag and the plan across two records.
+        let state = DailyPlanState.fetchOrCreate(for: day, in: context,
+                                                 hasGymToday: hasGymToday, gymMinute: gymMinute)
+        state.storePlan(result.plan, isOffline: result.isOffline)
+        context.saveOrLog("plan.commit")
+        // Reminders for the key blocks…
+        await NotificationService.reschedule(plan: result.plan, on: day)
+        // …the timing nudges for the measurable ones, held in a chain so only
+        // the block you're actually up to gets one…
+        await ActivityTimekeeper.scheduleDay(plan: result.plan, on: day, context: context)
+        // …and a background traffic re-check ~90 min before the next commute.
+        CommuteBackgroundRefresh.scheduleNext(context: context)
     }
 
     /// Same as `generate`, but records a diagnostics log (duration + outcome,
@@ -65,7 +193,17 @@ enum PlanCoordinator {
     /// against the scheduler's rules; a plan with a SEVERE violation (dropped
     /// Must-do, wasted afternoon, overlap, out-of-bounds work) is retried once
     /// with the problems fed back, and the cleaner of the two is kept.
-    static func generate(_ inputs: Inputs) async -> Result {
+    static func generate(_ raw: Inputs) async -> Result {
+        // Work out what kind of plan this is BEFORE anything else looks at the
+        // inputs, so no path can skip it.
+        let inputs = resolved(raw)
+        var result = await generateResolved(inputs)
+        result.resumedFromMinute = inputs.replanFromMinute
+        result.keptBlocks = inputs.lockedBlocks.count
+        return result
+    }
+
+    private static func generateResolved(_ inputs: Inputs) async -> Result {
         let t0 = Date()
         let request = await buildRequest(inputs)   // Maps commute lookups happen here
         let commuteMs = Int(Date().timeIntervalSince(t0) * 1000)
@@ -278,7 +416,8 @@ enum PlanCoordinator {
             alreadyDoneNote: i.alreadyDoneNote,
             routine: i.routine,
             gymSession: i.gymSession,
-            referenceNow: i.referenceNow
+            referenceNow: i.referenceNow,
+            blankDay: i.blankDay
         )
     }
 
@@ -288,7 +427,16 @@ enum PlanCoordinator {
         var blocks = DayPlanner.generate(
             gymMinute: i.hasGym ? i.gymMinute : nil,
             prepSessions: i.prepSessions,
-            leisureLogs: []
+            leisureLogs: [],
+            // The offline engine sized the gym from the frozen defaults even
+            // after the parts became editable — so turning cardio off changed
+            // the online plan and not the fallback.
+            gymSession: i.gymSession,
+            routine: i.routine,
+            // A cleared day stays cleared. Without this the leftover hours come
+            // back as "Discretionary time — suggested: Music", which is still
+            // the planner deciding what the evening is for.
+            fillFreeTime: !i.blankDay
         )
         // The offline engine is event-blind by construction, and it used to
         // stay that way: a fallback plan cheerfully scheduled interview prep
