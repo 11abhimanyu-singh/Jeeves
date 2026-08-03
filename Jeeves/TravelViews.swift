@@ -219,9 +219,14 @@ struct LeaveByCard: View {
                 // default calls Bali → Singapore a drive. Saying so is the
                 // difference between an assumption and a claim.
                 if segment.modeIsAssumed {
-                    HStack(spacing: 6) {
+                    HStack(alignment: .top, spacing: 6) {
                         Image(systemName: "questionmark.circle").font(.ui(10))
-                        Text("I've assumed you're driving. Tap Measure, or set the mode yourself.")
+                        // When the road has refuted it, say what it said. "I've
+                        // assumed you're driving" alone tells you there is a
+                        // doubt; it does not tell you the Java Sea is in the way.
+                        Text(segment.modeRefutation.isEmpty
+                             ? "I've assumed you're driving. Tap Measure, or set the mode yourself."
+                             : segment.modeRefutation)
                             .font(.ui(10.5))
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -273,7 +278,9 @@ struct LeaveByCard: View {
         let target = LeaveBy.plan(for: segment)?.leaveAt ?? Date()
         Task {
             guard let origin = await resolvedOrigin(from) else {
-                measureNote = RoutableOrigin.missingHomeMessage
+                measureNote = from.isEmpty && startsFromAnEarlierStay
+                    ? "I don't know where this starts — the stay before it has no address yet. Add one and I'll measure the drive."
+                    : RoutableOrigin.missingHomeMessage
                 pricing = false
                 return
             }
@@ -304,12 +311,29 @@ struct LeaveByCard: View {
     private func resolvedOrigin(_ raw: String) async -> String? {
         let saved = (try? modelContext.fetch(FetchDescriptor<SavedLocation>())) ?? []
         if raw.isEmpty {
+            // Home is the right default for the journey that LEAVES home. It is
+            // the wrong one for a hotel-to-hotel transfer whose first hotel has
+            // no address yet: that measured Bengaluru → Bandipur and stored it
+            // as the Kabini → Bandipur drive, as a measured fact.
+            if startsFromAnEarlierStay { return nil }
             return RoutableOrigin.address(saved.first { $0.kind == .home }?.address)
         }
         if let match = saved.first(where: { $0.kind.rawValue.lowercased() == raw.lowercased() }) {
             return RoutableOrigin.address(match.address.isEmpty ? raw : match.address)
         }
         return RoutableOrigin.address(raw)
+    }
+
+    /// Does a stay end on or before this journey's day? If so, an empty From
+    /// means "that stay", not "home" — and since the stay has no address, the
+    /// honest answer is that we don't know where this starts.
+    private var startsFromAnEarlierStay: Bool {
+        guard let stays = try? modelContext.fetch(FetchDescriptor<TripStay>()) else { return false }
+        let day = Calendar.current.startOfDay(for: segment.day)
+        return stays.contains {
+            $0.tripID == segment.tripID
+                && Calendar.current.startOfDay(for: $0.arriveDate) < day
+        }
     }
 
     /// "Measured" was one word for two very different things: a traffic
