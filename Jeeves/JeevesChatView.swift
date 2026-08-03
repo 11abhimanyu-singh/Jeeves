@@ -773,6 +773,10 @@ struct PlanTimelineCard: View {
     // a tap handler. When onToggle is nil the card is read-only (e.g. in chat).
     var outcomes: [String: BlockOutcome] = [:]
     var onToggle: ((GeneratedBlock, BlockOutcome) -> Void)? = nil
+    /// Starting a timed session. Nil in read-only contexts (chat, past days).
+    var onStart: ((GeneratedBlock) -> Void)? = nil
+    /// Which blocks may be started — measurable, today, not already logged.
+    var startableKeys: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -824,6 +828,19 @@ struct PlanTimelineCard: View {
                 }
             }
             Spacer(minLength: 6)
+            if let onStart, startableKeys.contains(AdherenceEngine.key(block)) {
+                Button { onStart(block) } label: {
+                    Image(systemName: "play.fill")
+                        .font(.ui(13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 30, height: 30)
+                        .background(Circle().fill(Color.accent))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Start \(block.title)")
+            }
             if let onToggle {
                 let outcome = outcomes[AdherenceEngine.key(block)] ?? .unknown
                 Button { onToggle(block, outcome) } label: { checkbox(outcome) }

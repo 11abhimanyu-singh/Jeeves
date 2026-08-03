@@ -23,6 +23,7 @@ struct DayPlannerView: View {
     @Query private var jobApplications: [JobApplication]
     @Query private var readingLogs: [ReadingLog]
     @Query private var trips: [Trip]
+    @Query private var activitySessions: [ActivitySession]
     @Query private var allTravelSegments: [TravelSegment]
 
     @State private var hasGymToday = true
@@ -399,11 +400,18 @@ struct DayPlannerView: View {
                         .font(.ui(13, weight: .semibold)).foregroundStyle(Color.accentDeep)
                 }
             }
+            // A running session sits above the timeline: one clock, and it is
+            // the thing you'd reach for while it's going.
+            if let live = activitySessions.first(where: { $0.isLive }) {
+                ActivitySessionBar(session: live)
+            }
             PlanTimelineCard(
                 plan: plan,
                 isOffline: selectedPlanState?.generatedPlanIsOffline ?? false,
                 outcomes: outcomeMap(plan, effective),
-                onToggle: { block, current in toggleOutcome(block, current: current) }
+                onToggle: { block, current in toggleOutcome(block, current: current) },
+                onStart: isToday ? { block in startSession(block) } : nil,
+                startableKeys: startableKeys(plan)
             )
             adherenceCard(plan: plan, outcomes: effective)
         }
@@ -411,6 +419,33 @@ struct DayPlannerView: View {
 
     private func outcomeMap(_ plan: GeneratedPlan, _ effective: [BlockOutcome]) -> [String: BlockOutcome] {
         Dictionary(zip(plan.blocks.map(AdherenceEngine.key), effective), uniquingKeysWith: { _, b in b })
+    }
+
+    /// Blocks that can be timed: measurable, and not already logged. Commutes,
+    /// lunch, chores and the gym never offer a Start — there is nothing to
+    /// count, and the gym is logged on the Watch in far more detail.
+    private func startableKeys(_ plan: GeneratedPlan) -> Set<String> {
+        guard isToday, !onTravelDay else { return [] }
+        let logged = Set(ActivitySession.onDay(selectedDate, in: modelContext)
+            .filter { !$0.isLive }.map(\.blockKey))
+        return Set(plan.blocks
+            .filter { ActivityUnit.isMeasurable(title: $0.title, kind: $0.kind) }
+            .map(AdherenceEngine.key)
+            .filter { !logged.contains($0) })
+    }
+
+    /// No timing on travel days — the app already stands the routine plan down
+    /// on any day a trip covers, and nudging a prep block while you're driving
+    /// to Wayanad is the failure that rule exists to prevent.
+    private var onTravelDay: Bool {
+        trips.contains { $0.covers(selectedDate) }
+    }
+
+    private func startSession(_ block: GeneratedBlock) {
+        let planned = (block.endMinute ?? 0) - (block.startMinute ?? 0)
+        ActivityTracker.start(blockKey: AdherenceEngine.key(block), title: block.title,
+                              plannedMinutes: max(0, planned), day: selectedDate,
+                              context: modelContext)
     }
 
     /// Cycle a block's manual mark: none → done → skipped → none.
@@ -436,7 +471,8 @@ struct DayPlannerView: View {
         // Shared with the history builder (AdherenceHistory) so the live card and
         // the adaptive-planning signal read the logs identically.
         AdherenceHistory.evidence(day: date.startOfDay, checkins: checkins, prep: prepSessions,
-                                  jobs: jobApplications, reading: readingLogs, leisure: leisureLogs)
+                                  jobs: jobApplications, reading: readingLogs, leisure: leisureLogs,
+                                  sessions: activitySessions)
     }
 
     /// The "as of now" cutoff for judging the selected day: nil for a past day
