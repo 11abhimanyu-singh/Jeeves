@@ -141,6 +141,8 @@ struct ContentView: View {
     // check-in (and feed the streak) on their own.
     @Query private var allWorkouts: [Workout]
     @Query private var allStretchLogs: [StretchLog]
+    @Query private var allPlanStates: [DailyPlanState]
+    @Query private var allSessions: [ActivitySession]
 
     // Progress became the landing screen; Stats moved into the hamburger and
     // Jeeves became a floating bubble, so neither is a tab any more.
@@ -156,6 +158,8 @@ struct ContentView: View {
     @State private var navigator = AppNavigator()
     @State private var selectedDate: Date = Calendar.current.date(byAdding: .day, value: -1, to: Date())!.startOfDay
     @State private var showDatePicker = false
+    @State private var showCatchUp = false
+    @State private var catchUpPending: [CatchUp.Pending] = []
 
     // Working copy of the fields for the selected date, edited in place then saved.
     @State private var workedOut: Bool? = nil
@@ -258,6 +262,9 @@ struct ContentView: View {
             JeevesChatView(onMinimise: { navigator.chatPresented = false })
                 .environment(navigator)
         }
+        .sheet(isPresented: $showCatchUp) {
+            CatchUpSheet(pending: catchUpPending) { showCatchUp = false }
+        }
         .onAppear {
             loadFields(for: selectedDate)
             // Any plan generation still "pending" from a prior run never
@@ -277,6 +284,9 @@ struct ContentView: View {
             // behind it, so the same sweep applies to activities: close
             // anything past its plan + 30 and let the queue move again.
             ActivityTimekeeper.sweepStale(context: modelContext)
+            // Ask once a day about blocks the app failed to resolve —
+            // the backfill window is only useful if the ask comes to you.
+            offerCatchUpIfNeeded()
         }
         .onChange(of: selectedDate) { _, newDate in loadFields(for: newDate) }
         .onChange(of: scenePhase) { _, phase in
@@ -305,6 +315,27 @@ struct ContentView: View {
             }
         }
     }
+
+    /// Ask once a day, and only when there is something the app genuinely
+    /// failed to resolve. A block you were asked about and skipped is an
+    /// answer, not a question — re-asking would be nagging.
+    private func offerCatchUpIfNeeded() {
+        guard CatchUp.shouldAsk() else { return }
+        let cal = Calendar.current
+        let today = Date().startOfDay
+        let window = [today, cal.date(byAdding: .day, value: -1, to: today) ?? today]
+        let answered = Set(allSessions.filter { $0.state == .done }.map(\.blockKey))
+        let pending = CatchUp.pending(
+            days: window.map { day in
+                let state = allPlanStates.first { $0.date == day }
+                return (day, state?.plan, state?.withheldKeys ?? [], answered)
+            },
+            sessions: allSessions)
+        guard !pending.isEmpty else { return }
+        catchUpPending = pending
+        showCatchUp = true
+    }
+
 
     // MARK: Per-tab chrome
 

@@ -26,6 +26,22 @@ struct AdherenceScreen: View {
     @Query private var trips: [Trip]
 
     @State private var windowDays = 7
+    @State private var showCatchUp = false
+
+    /// What's still answerable — the panel above names the gaps, this is the
+    /// way to close them before the window seals.
+    private var pendingCatchUp: [CatchUp.Pending] {
+        let cal = Calendar.current
+        let today = Date().startOfDay
+        let window = [today, cal.date(byAdding: .day, value: -1, to: today) ?? today]
+        let answered = Set(sessions.filter { $0.state == .done }.map(\.blockKey))
+        return CatchUp.pending(
+            days: window.map { day in
+                let state = dailyPlans.first { $0.date == day }
+                return (day, state?.plan, state?.withheldKeys ?? [], answered)
+            },
+            sessions: sessions)
+    }
 
     var body: some View {
         ScrollView {
@@ -42,6 +58,9 @@ struct AdherenceScreen: View {
         .background(Color.bg)
         .navigationTitle("Adherence")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showCatchUp) {
+            CatchUpSheet(pending: pendingCatchUp)
+        }
     }
 
     // MARK: the honest headline
@@ -290,6 +309,14 @@ struct AdherenceScreen: View {
                 }
                 Text("Editable until the end of the next day — after that it's sealed.")
                     .font(.ui(11.5)).italic().foregroundStyle(Color.textMuted)
+                if !pendingCatchUp.isEmpty {
+                    Button { showCatchUp = true } label: {
+                        Text("Fix \(pendingCatchUp.count) of these →")
+                            .font(.ui(13, weight: .semibold)).foregroundStyle(Color.accentDeep)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 2)
+                }
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
