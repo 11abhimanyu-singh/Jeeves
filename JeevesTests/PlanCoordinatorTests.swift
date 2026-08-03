@@ -46,6 +46,125 @@ final class PlanCoordinatorTests: XCTestCase {
                       "nothing has elapsed at 07:00")
     }
 
+    // MARK: What kind of plan is this?
+    //
+    // The user asked at 12:45 for the day to be cleared and re-planned, and got
+    // a day laid out from 07:00 — a transcript, not a plan. The arithmetic
+    // lived in two of five call sites; it lives here now, so no caller can skip
+    // it by forgetting to pass an answer.
+
+    private func at(_ hour: Int, _ minute: Int = 0) -> Date {
+        Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: Date())!
+    }
+    private var morningPlan: GeneratedPlan {
+        GeneratedPlan(blocks: [
+            blk("Chores", "08:00", "08:40"),
+            blk("Interview prep — Reading", "08:40", "10:10"),
+            blk("Job applications", "10:10", "11:25"),
+        ], dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+    }
+
+    func testAMiddayPlanIsTheRestOfTheDayNotTheWholeDay() throws {
+        let r = try XCTUnwrap(PlanCoordinator.resumption(
+            planDate: Date(), existingPlan: morningPlan,
+            hasGym: false, gymMinute: nil, events: [], now: at(12, 45)))
+        XCTAssertEqual(r.fromMinute, 12 * 60 + 45, "the plan starts now, not at the day start")
+        XCTAssertEqual(r.locked.map(\.title),
+                       ["Chores", "Interview prep — Reading", "Job applications"])
+        XCTAssertEqual(r.alreadyDoneNote,
+                       "Chores, Interview prep — Reading, Job applications")
+    }
+
+    /// The screenshot case: the day was cleared, so there is no plan to
+    /// preserve — but it is still 12:45, and a fresh 08:00 morning is still
+    /// wrong.
+    func testAMiddayPlanWithNothingToPreserveStillStartsNow() throws {
+        let r = try XCTUnwrap(PlanCoordinator.resumption(
+            planDate: Date(), existingPlan: nil,
+            hasGym: false, gymMinute: nil, events: [], now: at(12, 45)))
+        XCTAssertEqual(r.fromMinute, 12 * 60 + 45)
+        XCTAssertTrue(r.locked.isEmpty, "nothing was preserved, and nothing was invented")
+        XCTAssertNil(r.alreadyDoneNote)
+    }
+
+    func testPlanningBeforeTheDayStartsIsAWholeDay() {
+        XCTAssertNil(PlanCoordinator.resumption(
+            planDate: Date(), existingPlan: morningPlan,
+            hasGym: false, gymMinute: nil, events: [], now: at(6, 30)),
+            "at 06:30 the day hasn't started — this is a full day, not a remainder")
+    }
+
+    func testPlanningAnotherDayIsNeverARemainder() {
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date())!
+        XCTAssertNil(PlanCoordinator.resumption(
+            planDate: tomorrow, existingPlan: morningPlan,
+            hasGym: false, gymMinute: nil, events: [], now: at(12, 45)),
+            "tomorrow gets all of itself, whatever time it is today")
+    }
+
+    /// ELAPSED IS NOT DONE.
+    func testABlockTheUserSaysTheyMissedIsNotPreserved() throws {
+        let r = try XCTUnwrap(PlanCoordinator.resumption(
+            planDate: Date(), existingPlan: morningPlan,
+            hasGym: false, gymMinute: nil, events: [],
+            missedBlocks: ["Job applications"], now: at(12, 45)))
+        XCTAssertEqual(r.locked.map(\.title), ["Chores", "Interview prep — Reading"])
+    }
+
+    /// A stated ETA moves the start later. It can never move it earlier —
+    /// "start at 9" said at 11 does not un-spend the morning.
+    func testAnETAMovesTheStartForwardOnly() throws {
+        let later = try XCTUnwrap(PlanCoordinator.resumption(
+            planDate: Date(), existingPlan: morningPlan, hasGym: false, gymMinute: nil,
+            events: [], resumeAtMinute: 19 * 60 + 25, now: at(19, 5)))
+        XCTAssertEqual(later.fromMinute, 19 * 60 + 25)
+
+        let earlier = try XCTUnwrap(PlanCoordinator.resumption(
+            planDate: Date(), existingPlan: morningPlan, hasGym: false, gymMinute: nil,
+            events: [], resumeAtMinute: 9 * 60, now: at(11, 0)))
+        XCTAssertEqual(earlier.fromMinute, 11 * 60, "the clock wins")
+    }
+
+    /// The rule the planner button had and the chat tools didn't: a commute is
+    /// preserved only while the arrival it was for is still on the day.
+    func testAnOrphanedCommuteIsNotPreservedWhenTheGymMoved() throws {
+        let plan = GeneratedPlan(blocks: [
+            blk("Chores", "08:00", "08:40"),
+            blk("Commute Home → Gym", "09:00", "09:40", kind: "commute"),
+        ], dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        // The gym has moved to the evening, so this morning's trip to it is no
+        // longer a journey the day makes.
+        let r = try XCTUnwrap(PlanCoordinator.resumption(
+            planDate: Date(), existingPlan: plan,
+            hasGym: true, gymMinute: 19 * 60, events: [], now: at(12, 45)))
+        XCTAssertEqual(r.locked.map(\.title), ["Chores"])
+    }
+
+    /// `resolved` is what every caller actually goes through.
+    func testResolvedFillsInWhatCallersUsedToForget() {
+        var i = PlanCoordinator.Inputs(hasGym: false, gymMinute: nil, events: [],
+                                       locations: [], prepSessions: [])
+        i.existingPlan = morningPlan
+        i.referenceNow = at(12, 45)
+        let out = PlanCoordinator.resolved(i)
+        XCTAssertEqual(out.replanFromMinute, 12 * 60 + 45)
+        XCTAssertEqual(out.lockedBlocks.count, 3)
+        XCTAssertNotNil(out.alreadyDoneNote)
+    }
+
+    /// Evals and tests pin the clock by passing the answer directly; that must
+    /// keep winning over the derivation.
+    func testAnExplicitReplanMinuteIsLeftAlone() {
+        var i = PlanCoordinator.Inputs(hasGym: false, gymMinute: nil, events: [],
+                                       locations: [], prepSessions: [])
+        i.existingPlan = morningPlan
+        i.referenceNow = at(12, 45)
+        i.replanFromMinute = 16 * 60
+        let out = PlanCoordinator.resolved(i)
+        XCTAssertEqual(out.replanFromMinute, 16 * 60)
+        XCTAssertTrue(out.lockedBlocks.isEmpty, "an explicit caller owns its own locked set")
+    }
+
     // MARK: Gym legs
 
     func testHomeToGymLeavesFiftyMinutesBeforeWeights() {
