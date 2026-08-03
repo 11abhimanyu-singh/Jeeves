@@ -278,9 +278,26 @@ struct DayPlannerView: View {
                         endDate: bounds?.end ?? s.endDay)
         modelContext.insert(trip)
         for span in resolved {
+            // A Span's `end` is the last NIGHT; a TripStay's `departDate` is the
+            // last day you are PRESENT — the day you leave, which is what
+            // covers() needs and what the ticket importer writes. Converting
+            // here is what stops one field meaning two things depending on
+            // which importer filled it.
+            //
+            // A settled end converts exactly: moving on the 20th means the 19th
+            // was the last night, so you are present on the 20th. An unsettled
+            // end cannot be converted, because we do not know whether the
+            // calendar's last day was a night or a departure — so it is stored
+            // as-is and the flag travels with it.
+            let depart = span.endIsUnsettled
+                ? span.end
+                : (cal.date(byAdding: .day, value: 1, to: span.end) ?? span.end)
             modelContext.insert(TripStay(tripID: trip.id, place: span.place, address: span.address,
-                                         arriveDate: span.start, departDate: span.end,
-                                         externalID: span.externalID))
+                                         arriveDate: span.start, departDate: depart,
+                                         externalID: span.externalID,
+                                         // Carry the doubt into the store. A Span
+                                         // lives for one call; the stay outlives it.
+                                         endIsUnsettled: span.endIsUnsettled))
         }
         // Each move gets a journey ready for its times — the only days of a
         // trip where anything is time-critical. A "move" between the same
