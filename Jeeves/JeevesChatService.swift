@@ -771,7 +771,7 @@ enum JeevesChatService {
         ],
         [
             "name": "set_day_activities",
-            "description": "Choose which of the user's ROUTINE activities a single day is for. This is the ONLY way to take a routine activity off one day — deleting events does not touch the routine, and the routine's own on/off switch is permanent configuration, not 'not today'. Use it for 'cancel everything today', 'keep the day free', 'today just interview prep and reading', 'skip chores tomorrow'. Read fetch_app_data(collection='routine') first if you are unsure what the activities are called. This does NOT re-plan — call plan_day (or replan_today for today) afterwards.",
+            "description": "Choose which of the user's ROUTINE activities a single day is for. This is the ONLY way to take a routine activity off one day — deleting events does not touch the routine, and the routine's own on/off switch is permanent configuration, not 'not today'. Use it for 'cancel everything today', 'keep the day free', 'today just interview prep and reading', 'skip chores tomorrow'. Read fetch_app_data(collection='routine') first if you are unsure what the activities are called. It REBUILDS AND SAVES the day itself, so never call plan_day or replan_today after it — just describe the day it gives you back.",
             "input_schema": [
                 "type": "object",
                 "properties": [

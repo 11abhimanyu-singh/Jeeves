@@ -81,7 +81,7 @@ final class ChatToolExecutor {
         case "fetch_calendar": return await toolFetchCalendar(call.input)
         case "plan_day":       return await toolPlanDay(call.input)
         case "replan_today":   return await toolReplanToday(call.input)
-        case "set_day_activities": return toolSetDayActivities(call.input)
+        case "set_day_activities": return await toolSetDayActivities(call.input)
         case "show_activity_picker": return toolShowActivityPicker(call.input)
         case "fetch_app_data": return toolFetchAppData(call.input)
         case "add_todo":       return toolAddTodo(call.input)
@@ -1937,19 +1937,23 @@ final class ChatToolExecutor {
     /// because the routine's `enabled` flag is permanent configuration and
     /// there was nowhere to say "not today".
     @MainActor
-    private func toolSetDayActivities(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+    private func toolSetDayActivities(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
         let date = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
         let mode = (input["mode"] as? String ?? "").lowercased()
         let rows = routineActivities.filter { $0.enabled && $0.group != .gym }
         let state = planState(on: date)
         let hadGym = state.hasGymToday
-        let isToday = Calendar.current.isDateInToday(date)
+        // A trip owns its days — changing what a travel day is "for" would
+        // hand it to a generator that must never touch it.
+        if let trip = TravelGuard.tripCovering(date, context: modelContext) {
+            return .init(text: TravelGuard.refusalMessage(for: date, trip: trip))
+        }
 
         switch mode {
         case "routine":
             state.activitySelection = .routine
             modelContext.saveOrLog("dayActivities.routine")
-            return .init(text: "\(dayLabel(date).capitalized) is back on the normal routine — no per-day picks. Re-plan the day so the change takes effect (\(isToday ? "replan_today" : "plan_day")).")
+            return await replanned(date, lead: "\(dayLabel(date).capitalized) is back on the normal routine — no per-day picks.")
 
         case "clear":
             state.activitySelection = .only([])
@@ -1957,7 +1961,7 @@ final class ChatToolExecutor {
             state.gymMinute = nil
             modelContext.saveOrLog("dayActivities.clear")
             let gymNote = hadGym ? " The gym is cleared too." : ""
-            return .init(text: "Cleared \(dayLabel(date)) — no routine activities at all (all \(rows.count) of them are off for the day).\(gymNote) Calendar events and their commutes are NOT touched by this; delete those separately with delete_event if the user wants them gone as well. Now call \(isToday ? "replan_today" : "plan_day") to rebuild the day, then tell the user exactly what is left.")
+            return await replanned(date, lead: "Cleared \(dayLabel(date)) — no routine activities at all (all \(rows.count) of them are off for the day).\(gymNote) Calendar events and their commutes are NOT touched; delete those separately with delete_event if the user wants them gone as well.")
 
         case "only":
             let wanted = (input["activities"] as? [Any])?.compactMap { $0 as? String } ?? []
@@ -1989,11 +1993,35 @@ final class ChatToolExecutor {
             let dropped = rows.map(\.plannerName).filter { !kept.contains($0) }
             let gymNote = (hadGym && !wantsGym) ? " The gym is cleared for the day." : ""
             let droppedNote = dropped.isEmpty ? "" : " Off for the day: \(dropped.joined(separator: ", "))."
-            return .init(text: "\(dayLabel(date).capitalized) is now just: \(kept.sorted().joined(separator: ", ")).\(droppedNote)\(gymNote) Calendar events are NOT affected. Now call \(isToday ? "replan_today" : "plan_day") to rebuild the day around this.")
+            return await replanned(date, lead: "\(dayLabel(date).capitalized) is now just: \(kept.sorted().joined(separator: ", ")).\(droppedNote)\(gymNote) Calendar events are NOT affected.")
 
         default:
             return .init(text: "mode must be 'only', 'clear' or 'routine'. Nothing was changed.")
         }
+    }
+
+    /// Store the choice AND rebuild the day, in one tool call.
+    ///
+    /// The first build asked the model to follow up with replan_today. It
+    /// didn't — it answered "nothing else was on your calendar, so there's
+    /// nothing left to plan", conflating the calendar with the plan, and left
+    /// chat claiming the day was wiped while the planner still showed the old
+    /// schedule. A rule stated only in a tool result is a request; doing it
+    /// here makes it a rule.
+    @MainActor
+    private func replanned(_ date: Date, lead: String) async -> JeevesChatService.ToolResult {
+        let result = await planDay(date, note: "The user has just changed which activities this day is for. Plan it accordingly.")
+        await NotificationService.notifyPlanReady(isOffline: result.isOffline)
+        guard !result.isOffline else {
+            // Still tell it not to re-plan: a retry would take the same
+            // unreachable path and stack a second fallback plan on the day.
+            return .init(text: "\(lead) The day is saved and a built-in fallback schedule is in place, but I couldn't reach the planner to build a proper one.\(result.error.map { " (\($0))" } ?? "") Say that plainly — do NOT claim the day was re-planned properly, and do NOT call plan_day or replan_today to retry; they would fail the same way.",
+                         plan: result.plan, isOfflinePlan: true)
+        }
+        // The day is already rebuilt and committed. Saying otherwise, or
+        // calling a planning tool again, would undo the point of this.
+        return .init(text: "\(lead) The day has ALREADY been re-planned and saved — do NOT call plan_day or replan_today now. Tell the user what the day looks like from here: \(result.plan.summary)",
+                     plan: result.plan, isOfflinePlan: false)
     }
 
     @MainActor

@@ -26,7 +26,8 @@ final class ChatToolExecutorTests: XCTestCase {
         let schema = Schema([
             Trip.self, TravelSegment.self, TripStay.self, DailyEvent.self,
             SavedLocation.self, AppEvent.self, CalendarTombstone.self,
-            DailyPlanState.self, ChatTurn.self,
+            DailyPlanState.self, ChatTurn.self, RoutineActivity.self,
+            PlanGenerationLog.self,
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true,
                                         cloudKitDatabase: .none)
@@ -46,6 +47,68 @@ final class ChatToolExecutorTests: XCTestCase {
         let d = Calendar.current.date(byAdding: .day, value: offset, to: Date())!
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
         return f.string(from: d)
+    }
+
+    // MARK: set_day_activities — the day is chosen AND rebuilt
+
+    private func seedRoutine() {
+        let context = container.mainContext
+        for (i, n) in ["Chores", "Job applications", "Reading habit"].enumerated() {
+            context.insert(RoutineActivity(name: n, durationMinutes: 40, tier: .flexible,
+                                           note: nil, enabled: true, sortOrder: i))
+        }
+        try? context.save()
+    }
+
+    /// The first build wrote the choice and asked the model to follow up with
+    /// replan_today. It didn't — it answered "nothing left to plan" and left
+    /// chat claiming the day was wiped while the planner still showed the old
+    /// schedule. Storing the choice and rebuilding the day is ONE call now.
+    func testClearingTheDayAlsoRebuildsIt() async {
+        seedRoutine()
+        let state = DailyPlanState.forDay(Date().startOfDay, in: container.mainContext)
+        state.hasGymToday = true
+        state.gymMinute = 7 * 60
+        try? container.mainContext.save()
+
+        let result = await executor.run(.init(id: "1", name: "set_day_activities",
+                                              input: ["mode": "clear"]))
+
+        XCTAssertEqual(state.activitySelection, .only([]), "the choice is stored")
+        XCTAssertFalse(state.hasGymToday, "clearing the day clears the gym")
+        XCTAssertNotNil(state.plan, "and the day is rebuilt in the same call")
+        XCTAssertNotNil(result.plan, "the turn carries the new plan back to the UI")
+        // The model must not undo the work by planning again on top of it.
+        XCTAssertTrue(result.text.contains("do NOT call plan_day"), result.text)
+
+        let titles = state.plan?.blocks.map(\.title) ?? []
+        XCTAssertFalse(titles.contains("Chores"), "a cleared day has no routine blocks: \(titles)")
+        XCTAssertFalse(titles.contains("Discretionary time"),
+                       "nor is the gap helpfully refilled: \(titles)")
+    }
+
+    func testKeepingTwoActivitiesRebuildsTheDayAroundThem() async {
+        seedRoutine()
+        let result = await executor.run(.init(id: "1", name: "set_day_activities",
+                                              input: ["mode": "only",
+                                                      "activities": ["chores", "reading habit"]]))
+        let state = DailyPlanState.forDay(Date().startOfDay, in: container.mainContext)
+        XCTAssertEqual(state.activitySelection, .only(["Chores", "Reading habit"]))
+        XCTAssertNotNil(state.plan)
+        XCTAssertFalse(result.text.contains("Now call"), "it does the re-plan itself")
+    }
+
+    /// A name that matches nothing must change NOTHING — not the selection,
+    /// and not the day.
+    func testAnUnknownActivityChangesNeitherTheChoiceNorThePlan() async {
+        seedRoutine()
+        let result = await executor.run(.init(id: "1", name: "set_day_activities",
+                                              input: ["mode": "only",
+                                                      "activities": ["chores", "kite surfing"]]))
+        let state = DailyPlanState.forDay(Date().startOfDay, in: container.mainContext)
+        XCTAssertEqual(state.activitySelection, .routine, "nothing was chosen")
+        XCTAssertNil(state.plan, "and nothing was planned")
+        XCTAssertTrue(result.text.contains("NOTHING was changed"), result.text)
     }
 
     // MARK: add_stay trip resolution

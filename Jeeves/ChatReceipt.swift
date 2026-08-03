@@ -317,6 +317,8 @@ enum ToolActivity {
             default:         return "Reading your data…"
             }
         case "plan_day", "replan_today":     return "Planning your day…"
+        case "set_day_activities":           return "Re-planning around what you kept…"
+        case "show_activity_picker":         return "Fetching your activities…"
         case "add_event", "edit_event":      return "Updating your calendar…"
         case "delete_event":                 return "Removing that event…"
         case "add_trip", "update_trip":      return "Updating the trip…"
