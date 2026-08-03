@@ -210,10 +210,24 @@ struct LeaveByCard: View {
                         : "No airport run yet — this chain budgets zero minutes to the terminal. Add the airport in the To field and I'll redo it; no nudge until then.")
                      : plan.travelIsEstimated
                      ? "Journey time is an estimate — tap Measure to price it against live traffic. Cut-off, security and buffer are always your assumptions."
-                     : "Journey measured against live traffic. Cut-off, security and buffer are your assumptions.")
+                     : freshnessNote)
                     .font(.ui(10.5))
                     .foregroundStyle(segment.travelMinutes == 0 ? Color.accentDeep : Color.textMuted)
                     .padding(.top, 2)
+
+                // Nobody chose this mode — the calendar picked it, and the same
+                // default calls Bali → Singapore a drive. Saying so is the
+                // difference between an assumption and a claim.
+                if segment.modeIsAssumed {
+                    HStack(spacing: 6) {
+                        Image(systemName: "questionmark.circle").font(.ui(10))
+                        Text("I've assumed you're driving. Tap Measure, or set the mode yourself.")
+                            .font(.ui(10.5))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .foregroundStyle(Color.accentDeep)
+                    .padding(.top, 1)
+                }
 
                 if !segment.toPlace.isEmpty {
                     Button { measure() } label: {
@@ -296,6 +310,22 @@ struct LeaveByCard: View {
             return RoutableOrigin.address(match.address.isEmpty ? raw : match.address)
         }
         return RoutableOrigin.address(raw)
+    }
+
+    /// "Measured" was one word for two very different things: a traffic
+    /// PREDICTION for a departure a fortnight out, and a reading taken minutes
+    /// ago. Only the second should let a leave-by stand unquestioned.
+    private var freshnessNote: String {
+        switch segment.freshness() {
+        case .never:
+            return "Journey measured against live traffic. Cut-off, security and buffer are your assumptions."
+        case .predicted(let days):
+            return "Journey time is Google's forecast for that time of day, taken \(days) day\(days == 1 ? "" : "s") ahead — not a road anyone has driven yet. Re-measure nearer the day."
+        case .live(let age):
+            return age < 60
+                ? "Journey measured against live traffic just now. Cut-off, security and buffer are your assumptions."
+                : "Journey measured against live traffic \(LeaveBy.hours(age)) ago. Cut-off, security and buffer are your assumptions."
+        }
     }
 
     /// Every step of the chain happens where the journey STARTS, so the whole
@@ -428,6 +458,7 @@ struct TripEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query private var allSegments: [TravelSegment]
+    @Query private var allStays: [TripStay]
 
     @State private var editing: TravelSegment?
     // Segments minted this session by the add buttons: dismissing their
@@ -438,6 +469,11 @@ struct TripEditorView: View {
     private var segments: [TravelSegment] {
         allSegments.filter { $0.tripID == trip.id }
             .sorted { ($0.arriveBy ?? $0.departAt) < ($1.arriveBy ?? $1.departAt) }
+    }
+
+    private var stayRows: [TripStay] {
+        allStays.filter { $0.tripID == trip.id }
+            .sorted { $0.arriveDate < $1.arriveDate }
     }
 
     var body: some View {
@@ -474,6 +510,47 @@ struct TripEditorView: View {
                         }
                         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                         .background(RoundedRectangle(cornerRadius: 13).fill(Color.travelInk.opacity(0.08)))
+                    }
+
+                    // Where you sleep. The editor listed journeys and never the
+                    // stays, so a trip built from a calendar showed its flights
+                    // and kept its hotels invisible — and a nights count that
+                    // was wrong by one had nowhere to be noticed.
+                    if !stayRows.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("WHERE YOU'RE STAYING")
+                                .font(.ui(10.5, weight: .bold)).kerning(1.1)
+                                .foregroundStyle(Color.travelInk)
+                            ForEach(stayRows, id: \.id) { st in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                        Text(st.place.isEmpty ? "Somewhere" : st.place)
+                                            .font(Font.serif(15, weight: .semibold))
+                                            .foregroundStyle(Color.textPrimary)
+                                        Spacer(minLength: 4)
+                                        Text(st.nightsText())
+                                            .font(.ui(11.5, weight: .semibold))
+                                            .foregroundStyle(st.endIsUnsettled ? Color.accentDeep : Color.textSoft)
+                                    }
+                                    Text(st.address.isEmpty ? "No address yet — no drive, no leave-by."
+                                                            : st.address)
+                                        .font(.ui(10.5))
+                                        .foregroundStyle(st.address.isEmpty ? Color.accentDeep : Color.textMuted)
+                                        .lineLimit(2)
+                                    if st.endIsUnsettled {
+                                        // The calendar cannot say whether its last
+                                        // day is a night here or the morning you go.
+                                        Text("Your calendar doesn't say whether the last day is a night here or the day you leave.")
+                                            .font(.ui(10))
+                                            .foregroundStyle(Color.accentDeep)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                                .padding(.vertical, 4)
+                            }
+                        }
+                        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 13).fill(Color.surface))
                     }
 
                     ForEach(segments, id: \.id) { s in

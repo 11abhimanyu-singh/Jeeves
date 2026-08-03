@@ -95,6 +95,60 @@ final class TravelCorrectnessTests: XCTestCase {
                        "nights of the 4th to the 10th — the ticket's 169 h layover agrees")
     }
 
+    // MARK: - A stay's end means one thing once it is stored
+
+    private func stay(_ place: String, _ from: (Int, Int, Int), _ to: (Int, Int, Int),
+                      unsettled: Bool = false) -> TripStay {
+        TripStay(tripID: UUID(), place: place,
+                 arriveDate: day(from.0, from.1, from.2),
+                 departDate: day(to.0, to.1, to.2),
+                 endIsUnsettled: unsettled)
+    }
+
+    /// The ticket path's own fixture: Singapore 11–14 Sep, where SQ 510 leaves
+    /// at 20:05 on the 14th. Three nights — the 11th, 12th and 13th. The day you
+    /// leave is not a night, which is why the count is the plain difference.
+    func testATicketDerivedStayCountsTheDayYouLeaveAsNotANight() {
+        XCTAssertEqual(stay("Singapore", (2026, 9, 11), (2026, 9, 14)).nights(calendar: cal), 3)
+        XCTAssertEqual(stay("Bali", (2026, 9, 4), (2026, 9, 11)).nights(calendar: cal), 7)
+    }
+
+    /// The calendar path converts a Span's last-NIGHT end into a last-day-
+    /// PRESENT departDate, so both importers agree. Kabini's last night is the
+    /// 19th and the drive is on the 20th, so departDate is the 20th and the
+    /// count is still two.
+    func testACalendarStayAgreesWithTheTicketPathOnceConverted() {
+        XCTAssertEqual(stay("Kabini", (2026, 8, 18), (2026, 8, 20)).nights(calendar: cal), 2)
+    }
+
+    /// An unsettled end cannot be converted, so the doubt runs upward: the 23rd
+    /// is either the day you leave (3 nights) or a last night (4).
+    func testAnUnsettledStayShowsBothReadings() {
+        let s = stay("Bandipur", (2026, 8, 20), (2026, 8, 23), unsettled: true)
+        XCTAssertEqual(s.nights(calendar: cal), 3)
+        XCTAssertEqual(s.nightsRange(calendar: cal), 3...4)
+        XCTAssertEqual(s.nightsText(calendar: cal), "3 or 4 nights")
+    }
+
+    func testASettledStayStatesOneNumber() {
+        let s = stay("Singapore", (2026, 9, 11), (2026, 9, 14))
+        XCTAssertEqual(s.nightsRange(calendar: cal), 3...3)
+        XCTAssertEqual(s.nightsText(calendar: cal), "3 nights")
+    }
+
+    /// THE ONE THE STORE USED TO LOSE. endIsUnsettled has to survive a save and
+    /// reload — it lived only on the transient Span, so every stay was written
+    /// with the doubt dropped and a re-sync rebuilt the same ambiguity.
+    func testTheDoubtIsAStoredPropertyNotATransientOne() {
+        let s = stay("Bandipur", (2026, 8, 20), (2026, 8, 23), unsettled: true)
+        XCTAssertTrue(s.endIsUnsettled, "must be on TripStay, not just Itinerary.Span")
+    }
+
+    func testASingleNightStayReadsAsOneNight() {
+        XCTAssertEqual(stay("Overnight", (2026, 8, 18), (2026, 8, 19)).nightsText(calendar: cal),
+                       "1 night")
+    }
+
     // MARK: - Detecting a trip that has no address
 
     private func candidate(_ title: String, _ d: (Int, Int, Int),

@@ -289,12 +289,22 @@ final class TripStay {
     // checkouts. Defaults are the common Indian hotel windows.
     var checkinMinute: Int = StayWindow.defaultCheckin    // 14:00
     var checkoutMinute: Int = StayWindow.defaultCheckout  // 11:30
+    /// Whether `departDate` is known to be the last night, or is still the
+    /// calendar's unresolved guess.
+    ///
+    /// `Itinerary.Span` learned this distinction, but a Span is transient — it
+    /// exists for the length of one `acceptTravel` call. Every stay it produced
+    /// was saved here with the flag dropped, so the fix evaporated at the first
+    /// save and a re-sync rebuilt the same ambiguity. A meaning that only holds
+    /// in memory is not a meaning the store has.
+    var endIsUnsettled: Bool = false
 
     init(id: UUID = UUID(), tripID: UUID, place: String, address: String = "",
          lat: Double? = nil, lng: Double? = nil, timeZoneID: String = "",
          arriveDate: Date, departDate: Date, externalID: String = "",
          checkinMinute: Int = StayWindow.defaultCheckin,
-         checkoutMinute: Int = StayWindow.defaultCheckout) {
+         checkoutMinute: Int = StayWindow.defaultCheckout,
+         endIsUnsettled: Bool = false) {
         self.id = id
         self.tripID = tripID
         self.place = place
@@ -307,9 +317,50 @@ final class TripStay {
         self.externalID = externalID
         self.checkinMinute = checkinMinute
         self.checkoutMinute = checkoutMinute
+        self.endIsUnsettled = endIsUnsettled
     }
 
     var timeZone: TimeZone { TimeZone(identifier: timeZoneID) ?? .current }
+
+    /// Nights slept here.
+    ///
+    /// `departDate` is the last day you are PRESENT — the day you leave — which
+    /// is what `covers()` needs and what the ticket importer already writes
+    /// (Singapore 11–14 Sep is three nights, because SQ 510 goes at 20:05 on
+    /// the 14th). So the count is the plain difference, not the difference plus
+    /// one: the day you leave is not a night.
+    ///
+    /// The calendar path used to write the last NIGHT here instead, which made
+    /// the same field mean two different things depending on which importer
+    /// filled it, and any count over a trip wrong for one of its stays.
+    nonisolated func nights(calendar: Calendar = .current) -> Int {
+        let days = calendar.dateComponents([.day],
+                                           from: calendar.startOfDay(for: arriveDate),
+                                           to: calendar.startOfDay(for: departDate)).day ?? 0
+        return max(0, days)
+    }
+
+    /// What may be shown. One answer when the end is settled; two when it is
+    /// not — and "3 or 4" is the honest rendering, never the mean and never the
+    /// lower one because it reads more tidily.
+    ///
+    /// The doubt runs UPWARD: an unsettled `departDate` might be the day you
+    /// leave (n nights) or a final night with departure the morning after
+    /// (n + 1). An all-day block "20–23 Aug" is three nights or four, and
+    /// nothing in a calendar can say which.
+    nonisolated func nightsRange(calendar: Calendar = .current) -> ClosedRange<Int> {
+        let n = nights(calendar: calendar)
+        return endIsUnsettled ? n...(n + 1) : n...n
+    }
+
+    /// The nights count as a string, carrying its own uncertainty.
+    nonisolated func nightsText(calendar: Calendar = .current) -> String {
+        let r = nightsRange(calendar: calendar)
+        let unit = r.upperBound == 1 ? "night" : "nights"
+        return r.lowerBound == r.upperBound
+            ? "\(r.lowerBound) \(unit)"
+            : "\(r.lowerBound) or \(r.upperBound) \(unit)"
+    }
 
     nonisolated func covers(_ day: Date, calendar: Calendar = .current) -> Bool {
         let d = calendar.startOfDay(for: day)
