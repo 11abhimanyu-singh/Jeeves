@@ -53,7 +53,8 @@ enum AdherenceHistory {
     /// The day's ground-truth evidence, reduced from its logs. Shared by the
     /// live adherence card and the history builder so the two never drift.
     static func evidence(day: Date, checkins: [CheckIn], prep: [PrepSession],
-                         jobs: [JobApplication], reading: [ReadingLog], leisure: [LeisureLog]) -> DayEvidence {
+                         jobs: [JobApplication], reading: [ReadingLog], leisure: [LeisureLog],
+                         sessions: [ActivitySession] = []) -> DayEvidence {
         let cal = Calendar.current
         var e = DayEvidence()
         if let c = checkins.first(where: { cal.isDate($0.date, inSameDayAs: day) }) { e.workedOut = c.workedOut }
@@ -61,6 +62,9 @@ enum AdherenceHistory {
         e.appliedToJobs = jobs.contains { cal.isDate($0.date, inSameDayAs: day) && $0.appliedToday }
         e.readToday = reading.contains { cal.isDate($0.date, inSameDayAs: day) }
         e.leisureLogged = Set(leisure.filter { cal.isDate($0.date, inSameDayAs: day) }.map(\.activity))
+        e.sessionsCompleted = Set(sessions
+            .filter { cal.isDate($0.day, inSameDayAs: day) && $0.state == .done }
+            .map(\.blockKey))
         return e
     }
 }

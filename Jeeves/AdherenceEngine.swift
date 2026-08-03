@@ -33,6 +33,10 @@ struct DayEvidence {
     var appliedToJobs: Bool = false
     var readToday: Bool = false
     var leisureLogged: Set<DiscretionaryActivity> = []
+    /// Block keys with a completed session today. A session IS evidence — it
+    /// is the only record for the reading habit, whose ReadingLog is
+    /// book-linked and belongs to the library rather than to a day's plan.
+    var sessionsCompleted: Set<String> = []
 }
 
 enum AdherenceEngine {
@@ -47,6 +51,9 @@ enum AdherenceEngine {
     }
 
     private static func outcome(for block: GeneratedBlock, evidence: DayEvidence, cutoffMinute: Int?) -> BlockOutcome {
+        // A finished session settles it outright. You did the thing and told
+        // the app so — no inference needed, and no legacy table to consult.
+        if evidence.sessionsCompleted.contains(key(block)) { return .done }
         // Not yet elapsed → not judgeable. (Keyed on the END time: an activity
         // still in progress hasn't been skipped.) Sleep wraps past midnight, but
         // it's `.unknown` regardless, so the end-time compare is harmless there.

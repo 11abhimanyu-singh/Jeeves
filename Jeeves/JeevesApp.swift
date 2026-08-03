@@ -73,6 +73,7 @@ struct JeevesApp: App {
             TripStay.self,
             AppEvent.self,
             CalendarTombstone.self,
+            ActivitySession.self,
         ])
         // Sync to the user's private iCloud database so their data backs up and
         // follows them across devices. The iCloud/CloudKit capability is present
