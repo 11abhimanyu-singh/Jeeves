@@ -246,4 +246,86 @@ final class DataRepairTests: XCTestCase {
         XCTAssertTrue(second.isEmpty, "nothing left to do the second time")
         XCTAssertEqual(((try? context.fetch(FetchDescriptor<Trip>())) ?? []).count, 1)
     }
+
+    // MARK: Stays written before departDate had one meaning
+
+    /// The calendar importer used to store the last NIGHT; the ticket importer
+    /// stored the day you FLY OUT. A real store held a stay whose arrive and
+    /// depart were the same day, which under the new reading is nought nights.
+    ///
+    /// The stay that FOLLOWS settles it: if a stay ends the day before the next
+    /// one begins, it was written the old way and is a day short.
+    func testAStayEndingTheDayBeforeTheNextOneIsMovedForward() {
+        let trip = Trip(title: "Kabini + Bandipur", startDate: day(1), endDate: day(6))
+        context.insert(trip)
+        // Old-style: Kabini's end is its last NIGHT (day 2), and Bandipur
+        // starts on day 3. The truth is that you are at Kabini until day 3.
+        let kabini = TripStay(tripID: trip.id, place: "Kabini",
+                              arriveDate: day(1), departDate: day(2))
+        let bandipur = TripStay(tripID: trip.id, place: "Bandipur",
+                                arriveDate: day(3), departDate: day(6))
+        context.insert(kabini); context.insert(bandipur)
+        try? context.save()
+
+        let receipts = applyAll()
+
+        XCTAssertEqual(kabini.departDate, day(3), "the next stay proves the right value")
+        XCTAssertEqual(kabini.nights(), 2, "nights of day 1 and day 2")
+        XCTAssertTrue(receipts.contains { $0.contains("forward a day") })
+    }
+
+    /// A stay already written the new way — its end IS the next one's start —
+    /// must be left alone. Moving it again would add a night that isn't there.
+    func testAStayAlreadyInTheNewMeaningIsNotTouched() {
+        let trip = Trip(title: "Two stops", startDate: day(1), endDate: day(6))
+        context.insert(trip)
+        let first = TripStay(tripID: trip.id, place: "First",
+                             arriveDate: day(1), departDate: day(3))
+        let second = TripStay(tripID: trip.id, place: "Second",
+                              arriveDate: day(3), departDate: day(6))
+        context.insert(first); context.insert(second)
+        try? context.save()
+
+        _ = applyAll()
+
+        XCTAssertEqual(first.departDate, day(3), "unchanged")
+        XCTAssertEqual(first.nights(), 2)
+    }
+
+    /// Nothing follows the last stay, so nothing can settle it. It is marked
+    /// unsettled rather than guessed at, and then renders as a pair.
+    func testAStayWithNothingAfterItIsMarkedUnsettledRatherThanGuessed() {
+        let trip = Trip(title: "Bali", startDate: day(1), endDate: day(8))
+        context.insert(trip)
+        let bali = TripStay(tripID: trip.id, place: "Bali",
+                            arriveDate: day(1), departDate: day(8))
+        context.insert(bali)
+        try? context.save()
+
+        _ = applyAll()
+
+        XCTAssertTrue(bali.endIsUnsettled)
+        XCTAssertEqual(bali.nightsRange(), 7...8, "either reading, stated as both")
+        XCTAssertEqual(bali.nightsText(), "7 or 8 nights")
+    }
+
+    /// The repair must be idempotent: a second pass moves nothing again.
+    /// Running it twice used to be how an off-by-one became an off-by-two.
+    func testTheDepartMeaningRepairIsIdempotent() {
+        let trip = Trip(title: "Kabini + Bandipur", startDate: day(1), endDate: day(6))
+        context.insert(trip)
+        let kabini = TripStay(tripID: trip.id, place: "Kabini",
+                              arriveDate: day(1), departDate: day(2))
+        let bandipur = TripStay(tripID: trip.id, place: "Bandipur",
+                                arriveDate: day(3), departDate: day(6))
+        context.insert(kabini); context.insert(bandipur)
+        try? context.save()
+
+        _ = applyAll()
+        let firstEnd = kabini.departDate
+        _ = applyAll()
+
+        XCTAssertEqual(kabini.departDate, firstEnd, "a second pass must move nothing")
+        XCTAssertEqual(kabini.nights(), 2)
+    }
 }
