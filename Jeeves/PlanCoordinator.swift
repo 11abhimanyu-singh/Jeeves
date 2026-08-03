@@ -125,6 +125,11 @@ enum PlanCoordinator {
     /// Inputs with the mid-day arithmetic filled in. An explicit
     /// `replanFromMinute` still wins — evals and tests pin the clock that way.
     static func resolved(_ i: Inputs) -> Inputs {
+        // A cleared day is cleared all the way. Preserving the elapsed morning
+        // is exactly right when re-planning around a delay, and exactly wrong
+        // here: "cancel everything today and keep the day free" left fourteen
+        // blocks on screen and looked like the button had done nothing.
+        guard !i.blankDay else { return i }
         guard i.replanFromMinute == nil else { return i }
         guard let r = resumption(planDate: i.planDate, existingPlan: i.existingPlan,
                                  hasGym: i.hasGym, gymMinute: i.gymMinute, events: i.events,

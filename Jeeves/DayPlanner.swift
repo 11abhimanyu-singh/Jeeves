@@ -246,7 +246,13 @@ enum DayPlanner {
     private static func appendEvening(_ blocks: inout [PlanBlock], from lastEnd: Int) {
         let windDownStart = min(lastEnd, sleepMinute)
         if sleepMinute - windDownStart >= minDiscretionaryMinutes {
-            blocks.append(PlanBlock(title: "Wind-down / personal time", startMinute: windDownStart, durationMinutes: sleepMinute - windDownStart, note: "Evening — no scheduled work", isAnchor: false))
+            // On a cleared day this block IS the day, so it opens at 08:00 —
+            // and calling that "Evening" reads as a bug rather than an empty
+            // day. Say what's true instead.
+            let note = windDownStart < dayEndMinute
+                ? "Nothing scheduled — the day is yours"
+                : "Evening — no scheduled work"
+            blocks.append(PlanBlock(title: "Wind-down / personal time", startMinute: windDownStart, durationMinutes: sleepMinute - windDownStart, note: note, isAnchor: false))
         }
         blocks.append(PlanBlock(title: "Sleep", startMinute: sleepMinute, durationMinutes: 8 * 60, note: "11 PM – 7 AM", isAnchor: true))
     }

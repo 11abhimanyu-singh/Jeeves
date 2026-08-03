@@ -152,6 +152,22 @@ final class PlanCoordinatorTests: XCTestCase {
         XCTAssertNotNil(out.alreadyDoneNote)
     }
 
+    /// A cleared day is cleared all the way. Preserving the elapsed morning is
+    /// right when absorbing a delay and wrong when the user asked for an empty
+    /// day — the first build of this kept fourteen blocks on screen and looked
+    /// like the button had done nothing.
+    func testAClearedDayKeepsNothingNotEvenTheElapsedMorning() {
+        var i = PlanCoordinator.Inputs(hasGym: false, gymMinute: nil, events: [],
+                                       locations: [], prepSessions: [])
+        i.existingPlan = morningPlan
+        i.referenceNow = at(17, 21)
+        i.blankDay = true
+        let out = PlanCoordinator.resolved(i)
+        XCTAssertTrue(out.lockedBlocks.isEmpty, "an emptied day has nothing to preserve")
+        XCTAssertNil(out.replanFromMinute, "the whole day is cleared, not the remainder")
+        XCTAssertNil(out.alreadyDoneNote)
+    }
+
     /// Evals and tests pin the clock by passing the answer directly; that must
     /// keep winning over the derivation.
     func testAnExplicitReplanMinuteIsLeftAlone() {
