@@ -114,6 +114,14 @@ final class TravelSegment {
     /// Bali → Singapore, from inputs that look identical, so the assumption has
     /// to be visible rather than silent.
     var modeIsAssumed: Bool = false
+    /// Why the assumed mode was refuted, in the user's terms. Empty when
+    /// nothing has contradicted it.
+    ///
+    /// The road answer arrives once, in a background measurement, and is gone.
+    /// Without somewhere to put the verdict the card could say "I've assumed
+    /// you're driving" but never "…and there is no road route to Singapore",
+    /// which is the half that tells you what to do about it.
+    var modeRefutation: String = ""
 
     init(id: UUID = UUID(), tripID: UUID, mode: TravelMode, label: String,
          fromPlace: String = "", toPlace: String = "",
@@ -122,7 +130,8 @@ final class TravelSegment {
          checkInMinutes: Int = defaultInternationalCheckInMinutes,
          securityMinutes: Int = 30, bufferMinutes: Int = 20,
          stopMinutes: Int = 0, travelMinutes: Int = 0, travelIsEstimated: Bool = true,
-         measuredAt: Date? = nil, modeIsAssumed: Bool = false) {
+         measuredAt: Date? = nil, modeIsAssumed: Bool = false,
+         modeRefutation: String = "") {
         self.id = id
         self.tripID = tripID
         self.modeRaw = mode.rawValue
@@ -142,6 +151,7 @@ final class TravelSegment {
         self.travelIsEstimated = travelIsEstimated
         self.measuredAt = measuredAt
         self.modeIsAssumed = modeIsAssumed
+        self.modeRefutation = modeRefutation
     }
 
     /// Airline guidance for an international departure, and the value a
@@ -173,7 +183,10 @@ final class TravelSegment {
         travelMinutes = minutes
         travelIsEstimated = false
         measuredAt = now
-        if settlesMode { modeIsAssumed = false }
+        if settlesMode {
+            modeIsAssumed = false
+            modeRefutation = ""   // the road agreed; nothing left to explain
+        }
     }
 
     /// The instant this journey actually happens. A drive has no departure —

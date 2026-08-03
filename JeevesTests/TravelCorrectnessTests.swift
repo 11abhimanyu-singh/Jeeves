@@ -282,6 +282,38 @@ final class TravelCorrectnessTests: XCTestCase {
         XCTAssertFalse(TransferMode.settlesTheAssumption(v))
     }
 
+    /// The refutation has to reach the user in words. note() existed and was
+    /// called by nothing, so a card could say "I've assumed you're driving" and
+    /// never that the Java Sea is in the way.
+    func testARefusedTransferExplainsItself() {
+        let noRoad = TransferMode.note(for: .notRoutableByRoad, from: "Bali", to: "Singapore")
+        XCTAssertNotNil(noRoad)
+        XCTAssertTrue(noRoad!.contains("Bali") && noRoad!.contains("Singapore"))
+        XCTAssertTrue(noRoad!.contains("no road route"))
+
+        let tooFar = TransferMode.note(for: .tooFarToDrive(minutes: 660), from: "A", to: "B")
+        XCTAssertNotNil(tooFar)
+        XCTAssertTrue(tooFar!.contains("11 h"), "quotes the road answer it is rejecting: \(tooFar!)")
+    }
+
+    /// A settled drive says nothing — silence is the correct output when the
+    /// road agreed with the assumption.
+    func testASettledDriveHasNothingToExplain() {
+        XCTAssertNil(TransferMode.note(for: .drive(minutes: 95), from: "Kabini", to: "Bandipur"))
+    }
+
+    /// Recording a plausible drive clears both the doubt and any stale
+    /// explanation left from an earlier measurement.
+    func testSettlingTheModeClearsAnOldRefutation() {
+        let s = TravelSegment(tripID: UUID(), mode: .drive, label: "x",
+                              arriveBy: Date().addingTimeInterval(3600),
+                              modeIsAssumed: true,
+                              modeRefutation: "There's no road route from A to B.")
+        s.record(minutes: 95)
+        XCTAssertFalse(s.modeIsAssumed)
+        XCTAssertTrue(s.modeRefutation.isEmpty, "a stale reason is worse than none")
+    }
+
     /// The boundary, pinned. Ten hours is still a drive; a minute more is not.
     func testThePlausibleDriveBoundary() {
         XCTAssertTrue(TransferMode.settlesTheAssumption(

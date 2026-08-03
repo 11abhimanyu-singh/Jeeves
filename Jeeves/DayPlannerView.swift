@@ -359,10 +359,14 @@ struct DayPlannerView: View {
                     // doubt trades one silent wrong answer for a silent missing
                     // one. The mode stays assumed — that is what was in question.
                     seg.record(minutes: m, settlesMode: false)
+                    seg.modeRefutation = TransferMode.note(for: verdict,
+                                                           from: t2From(seg), to: t2To(seg)) ?? ""
                     EventLog.log(.journeyMeasured,
                                  "\(seg.label) — \(m) min by road, too far to assume a drive",
                                  subject: seg.id, context: modelContext)
                 case .notRoutableByRoad:
+                    seg.modeRefutation = TransferMode.note(for: verdict,
+                                                           from: t2From(seg), to: t2To(seg)) ?? ""
                     EventLog.log(.journeyMeasured,
                                  "\(seg.label) — no road route; assumed drive not settled",
                                  subject: seg.id, context: modelContext)
@@ -375,6 +379,15 @@ struct DayPlannerView: View {
             }
         }
         editingTrip = trip
+    }
+
+    /// The two ends of a transfer, named for a sentence rather than a route.
+    /// The label is "Kabini → Bandipur"; the places are what a person calls them.
+    private func t2From(_ s: TravelSegment) -> String {
+        s.label.components(separatedBy: " → ").first ?? s.fromPlace
+    }
+    private func t2To(_ s: TravelSegment) -> String {
+        s.label.components(separatedBy: " → ").last ?? s.toPlace
     }
 
     /// Measure the journey to each of the day's venues once, so the distance
