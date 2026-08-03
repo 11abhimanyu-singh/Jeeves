@@ -30,17 +30,25 @@ enum WorkoutWatchdog {
     static let closeAction = "jeeves.workout.close"
     static let keepAction = "jeeves.workout.keep"
 
-    /// The notification's actions — registered once at launch so "Close it"
-    /// works straight from the banner without opening the app.
-    static func registerCategory() {
+    /// This category's own definition.
+    static func stuckCategory() -> UNNotificationCategory {
         let close = UNNotificationAction(identifier: closeAction, title: "Close it",
                                          options: [.destructive])
         let keep = UNNotificationAction(identifier: keepAction, title: "Still going",
                                         options: [])
-        let category = UNNotificationCategory(identifier: category,
-                                              actions: [close, keep],
-                                              intentIdentifiers: [], options: [])
-        UNUserNotificationCenter.current().setNotificationCategories([category])
+        return UNNotificationCategory(identifier: category, actions: [close, keep],
+                                      intentIdentifiers: [], options: [])
+    }
+
+    /// Registered once at launch so "Close it" works straight from the banner.
+    ///
+    /// EVERY category the app uses is registered here in one call, because
+    /// `setNotificationCategories` REPLACES the set rather than adding to it —
+    /// a second registration elsewhere would silently delete these actions.
+    static func registerCategory() {
+        var all = ActivityTimekeeper.categories()
+        all.insert(stuckCategory())
+        UNUserNotificationCenter.current().setNotificationCategories(all)
     }
 
     /// What to do with a workout that is still live, given how long it has

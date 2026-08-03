@@ -403,7 +403,7 @@ struct DayPlannerView: View {
             // A running session sits above the timeline: one clock, and it is
             // the thing you'd reach for while it's going.
             if let live = activitySessions.first(where: { $0.isLive }) {
-                ActivitySessionBar(session: live)
+                ActivitySessionBar(session: live, plan: plan)
             }
             PlanTimelineCard(
                 plan: plan,
@@ -472,7 +472,8 @@ struct DayPlannerView: View {
         // the adaptive-planning signal read the logs identically.
         AdherenceHistory.evidence(day: date.startOfDay, checkins: checkins, prep: prepSessions,
                                   jobs: jobApplications, reading: readingLogs, leisure: leisureLogs,
-                                  sessions: activitySessions)
+                                  sessions: activitySessions,
+                                  neverAsked: selectedPlanState?.withheldKeys ?? [])
     }
 
     /// The "as of now" cutoff for judging the selected day: nil for a past day

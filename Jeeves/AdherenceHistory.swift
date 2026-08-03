@@ -54,7 +54,8 @@ enum AdherenceHistory {
     /// live adherence card and the history builder so the two never drift.
     static func evidence(day: Date, checkins: [CheckIn], prep: [PrepSession],
                          jobs: [JobApplication], reading: [ReadingLog], leisure: [LeisureLog],
-                         sessions: [ActivitySession] = []) -> DayEvidence {
+                         sessions: [ActivitySession] = [],
+                         neverAsked: Set<String> = []) -> DayEvidence {
         let cal = Calendar.current
         var e = DayEvidence()
         if let c = checkins.first(where: { cal.isDate($0.date, inSameDayAs: day) }) { e.workedOut = c.workedOut }
@@ -65,6 +66,7 @@ enum AdherenceHistory {
         e.sessionsCompleted = Set(sessions
             .filter { cal.isDate($0.day, inSameDayAs: day) && $0.state == .done }
             .map(\.blockKey))
+        e.neverAsked = neverAsked
         return e
     }
 }

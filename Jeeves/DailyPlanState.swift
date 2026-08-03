@@ -31,6 +31,11 @@ final class DailyPlanState {
     // Manual done/skipped marks the user tapped, keyed by block (JSON). These
     // override the inferred outcome for that block.
     var manualOutcomesJSON: String? = nil
+    /// Block keys whose start nudge the chain WITHHELD because a session was
+    /// still running. These were never asked about, so they are `unknown` —
+    /// marking them skipped would be the app recording its own gap as the
+    /// user's miss.
+    var withheldKeysJSON: String? = nil
 
     init(date: Date, hasGymToday: Bool, gymMinute: Int?, planConfirmed: Bool = false) {
         self.date = date
@@ -61,6 +66,23 @@ final class DailyPlanState {
         var raw = manualOutcomes.mapValues(\.rawValue)
         if let outcome { raw[key] = outcome.rawValue } else { raw[key] = nil }
         manualOutcomesJSON = raw.isEmpty ? nil : (try? JSONEncoder().encode(raw)).flatMap { String(data: $0, encoding: .utf8) }
+    }
+
+    var withheldKeys: Set<String> {
+        get {
+            guard let json = withheldKeysJSON, let data = json.data(using: .utf8),
+                  let keys = try? JSONDecoder().decode(Set<String>.self, from: data) else { return [] }
+            return keys
+        }
+        set {
+            withheldKeysJSON = newValue.isEmpty ? nil
+                : (try? JSONEncoder().encode(newValue)).flatMap { String(data: $0, encoding: .utf8) }
+        }
+    }
+
+    /// Convenience for the timekeeper, which works in day terms.
+    static func forDay(_ day: Date, in context: ModelContext) -> DailyPlanState {
+        fetchOrCreate(for: day, in: context)
     }
 
     // MARK: One-record-per-day

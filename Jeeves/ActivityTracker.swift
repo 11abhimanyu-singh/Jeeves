@@ -46,6 +46,12 @@ enum ActivityTracker {
         context.saveOrLog("activity.start")
         EventLog.log(.toolCall, "session started: \(title) (planned \(plannedMinutes)m)",
                      subject: session.id, context: context)
+        // Ask once, later, whether it's still going — and hold the queue in
+        // the meantime. Values only: the task outlives this context.
+        let (key, name, planned, began) = (session.blockKey, session.title,
+                                           session.plannedMinutes, session.startedAt)
+        Task { await ActivityTimekeeper.scheduleStopNudge(blockKey: key, title: name,
+                                                          plannedMinutes: planned, startedAt: began) }
         return session
     }
 

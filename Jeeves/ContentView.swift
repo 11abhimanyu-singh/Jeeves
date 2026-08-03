@@ -273,6 +273,10 @@ struct ContentView: View {
             // A workout can go stale while the app is closed, so the watchdog
             // sweeps on launch as well as on every foreground.
             Task { await WorkoutWatchdog.sweep(context: modelContext) }
+            // A session left running holds the whole notification chain
+            // behind it, so the same sweep applies to activities: close
+            // anything past its plan + 30 and let the queue move again.
+            ActivityTimekeeper.sweepStale(context: modelContext)
         }
         .onChange(of: selectedDate) { _, newDate in loadFields(for: newDate) }
         .onChange(of: scenePhase) { _, phase in
@@ -290,6 +294,7 @@ struct ContentView: View {
                     await AutoPlanService.ensureUpcomingPlans(context: modelContext)
                     AutoPlanService.scheduleNext(context: modelContext)
                     await WorkoutWatchdog.sweep(context: modelContext)
+                    ActivityTimekeeper.sweepStale(context: modelContext)
                 }
             }
             if phase == .background {

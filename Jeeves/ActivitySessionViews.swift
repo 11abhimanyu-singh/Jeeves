@@ -24,6 +24,9 @@ import SwiftData
 struct ActivitySessionBar: View {
     @Environment(\.modelContext) private var context
     @Bindable var session: ActivitySession
+    /// The day's plan, so finishing can release whatever the chain was holding
+    /// behind this session.
+    var plan: GeneratedPlan? = nil
     var onFinished: () -> Void = {}
 
     @State private var showLog = false
@@ -83,7 +86,15 @@ struct ActivitySessionBar: View {
                     .stroke(Color.accent.opacity(session.state == .paused ? 0.2 : 0.45), lineWidth: 1.5))
         )
         .sheet(isPresented: $showLog) {
-            ActivityLogSheet(session: session) { onFinished() }
+            ActivityLogSheet(session: session) {
+                // The queue moves the moment this stops — that is the whole
+                // chaining rule: stop at 2:15 and the next nudge goes at 2:15.
+                if let plan {
+                    let day = session.day, ctx = context
+                    Task { await ActivityTimekeeper.releaseChain(plan: plan, on: day, context: ctx) }
+                }
+                onFinished()
+            }
         }
     }
 

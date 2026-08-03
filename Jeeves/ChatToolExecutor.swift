@@ -2009,6 +2009,10 @@ final class ChatToolExecutor {
         modelContext.saveOrLog()
         // Schedule on-device reminders for this plan's key blocks.
         Task { await NotificationService.reschedule(plan: plan, on: day) }
+        // And the timing nudges for the measurable ones — held in a chain, so
+        // only the block you're actually up to gets one.
+        let context = modelContext
+        Task { await ActivityTimekeeper.scheduleDay(plan: plan, on: day, context: context) }
         // Arm a background traffic re-check ~90 min before the next commute.
         CommuteBackgroundRefresh.scheduleNext(context: modelContext)
     }
