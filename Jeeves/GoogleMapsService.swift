@@ -46,6 +46,13 @@ enum GoogleMapsService {
     /// traffic, not midnight's empty roads. A nil or past departure falls back
     /// to live "leave now" traffic (the API rejects past departure times).
     static func commuteMinutes(from origin: String, to destination: String, departure: Date? = nil) async -> Int? {
+        await commuteRoute(from: origin, to: destination, departure: departure)?.minutes
+    }
+
+    /// The same call, keeping the distance. Callers deciding whether a move is
+    /// even a drive need to tell "no road route" from "a road route nobody
+    /// would take", and minutes alone collapses both to nil.
+    static func commuteRoute(from origin: String, to destination: String, departure: Date? = nil) async -> Route? {
         let o = origin.trimmingCharacters(in: .whitespacesAndNewlines)
         let d = destination.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !o.isEmpty, !d.isEmpty,
@@ -61,13 +68,13 @@ enum GoogleMapsService {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(apiKey, forHTTPHeaderField: "X-Goog-Api-Key")
-        request.setValue("routes.duration", forHTTPHeaderField: "X-Goog-FieldMask")
+        request.setValue("routes.duration,routes.distanceMeters", forHTTPHeaderField: "X-Goog-FieldMask")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
-            return parseMinutes(data)
+            return parseRoute(data)
         } catch {
             return nil
         }
@@ -82,14 +89,38 @@ enum GoogleMapsService {
     /// an API error body, or junk — so a failed route falls back to the user's
     /// default commute minutes.
     static func parseMinutes(_ data: Data) -> Int? {
+        parseRoute(data)?.minutes
+    }
+
+    /// A route reduced to what we asked the field mask for. Distance was not
+    /// requested until now, so nothing could tell a 99 km lodge transfer from a
+    /// cross-water hop the API refuses to route — and every stay-to-stay move
+    /// was assumed to be a drive because of it.
+    nonisolated struct Route: Sendable, Equatable {
+        var minutes: Int
+        var metres: Int?          // nil when the response omitted it
+        var kilometres: Double? { metres.map { Double($0) / 1000 } }
+    }
+
+    /// Pure decode of the Routes API (computeRoutes) response. Duration is a
+    /// protobuf-style seconds string like "2491s" (possibly fractional);
+    /// distance is plain metres. Returns nil — never a throw — on empty routes,
+    /// a missing/malformed duration, an API error body, or junk. A missing
+    /// DISTANCE is not a failure: the duration is still usable, and callers
+    /// that need distance check for nil rather than getting a zero.
+    static func parseRoute(_ data: Data) -> Route? {
         struct Response: Decodable {
-            struct Route: Decodable { let duration: String? } // e.g. "2491s"
+            struct Route: Decodable {
+                let duration: String?         // e.g. "2491s"
+                let distanceMeters: Int?
+            }
             let routes: [Route]
         }
         guard let decoded = try? JSONDecoder().decode(Response.self, from: data),
-              let durationString = decoded.routes.first?.duration,
+              let first = decoded.routes.first,
+              let durationString = first.duration,
               let seconds = Double(durationString.replacingOccurrences(of: "s", with: "")) else { return nil }
-        return Int((seconds / 60).rounded())
+        return Route(minutes: Int((seconds / 60).rounded()), metres: first.distanceMeters)
     }
 
     /// Resolves the commute legs a plan needs, keyed "From→To" to match the

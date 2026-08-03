@@ -28,7 +28,12 @@ enum TravelDetection {
         /// an unknown is never treated as "far" — we don't guess.
         var journeyMinutes: Int?
         /// How many consecutive days this same event covers (1 = single day).
+        /// May be inferred across the store from same-titled rows.
         var spanDays: Int = 1
+        /// The span carried by THIS row alone, from its own end date. A daily
+        /// standup gives spanDays 5 by inference and ownSpanDays 1, and only
+        /// the second of those describes a place-window.
+        var ownSpanDays: Int = 1
     }
 
     nonisolated struct Suggestion: Sendable, Equatable {
@@ -67,6 +72,26 @@ enum TravelDetection {
                                   reason: "\(LeaveBy.hours(j)) each way plus \(LeaveBy.hours(c.eventMinutes)) there — about \(LeaveBy.hours(2 * j + c.eventMinutes)) of your day.",
                                   isStrong: true)
             }
+        }
+        // A multi-day block with NO address. Every rule above needs a location —
+        // the first asks for one outright, the other two need a measured journey,
+        // which needs an address to measure. So "Bali 4–11 Sep" typed as a bare
+        // title reached none of them, and the planner filled all eight days with
+        // the Bengaluru routine and notified for every block on them.
+        //
+        // Weak, because this is also how people record a work sprint or a course.
+        // It proposes; it never switches the days by itself.
+        //
+        // Two guards beyond "multi-day". It must be ALL-DAY, or a 21:00–01:00
+        // party — timed, and stored with an end date on the next day — reads as
+        // a two-day place-window. And it must be this row's OWN span: spanDays
+        // is inferred across same-titled rows anywhere in the store, so a daily
+        // standup synced for a week came through as an eight-day trip.
+        for c in candidates where c.ownSpanDays > 1 && c.isAllDay && !c.hasLocation {
+            let end = calendar.date(byAdding: .day, value: c.spanDays - 1, to: c.day) ?? c.day
+            return Suggestion(title: c.title, startDay: c.day, endDay: end,
+                              reason: "\"\(c.title)\" runs \(c.spanDays) days. There's no address on it, so I can't time any journeys — but that still isn't \(c.spanDays) ordinary days.",
+                              isStrong: false)
         }
         // Weakest signal, and the one most likely to be a birthday or a public
         // holiday: an all-day event that at least names a place.

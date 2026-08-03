@@ -100,13 +100,29 @@ final class TravelSegment {
     /// Cached journey time. Measured by Maps when possible; otherwise entered.
     var travelMinutes: Int = 0
     var travelIsEstimated: Bool = true   // false once Maps has priced it
+    /// When the measurement was taken. A bare Bool made a traffic prediction
+    /// pulled sixteen days out and a live reading taken ten minutes ago render
+    /// identically, and the first of those is a guess about a Thursday evening
+    /// nobody has driven yet. Optional because rows written before this existed
+    /// genuinely don't know — and because CloudKit needs every stored property
+    /// to be optional or defaulted.
+    var measuredAt: Date? = nil
+    /// True when nobody chose this mode — the calendar path picked it. Every
+    /// stay-to-stay move was written as `.drive` because a lodge transfer
+    /// dressed as a flight once demanded a 3 h airline cut-off for a two-hour
+    /// road journey. That default is right for Kabini → Bandipur and wrong for
+    /// Bali → Singapore, from inputs that look identical, so the assumption has
+    /// to be visible rather than silent.
+    var modeIsAssumed: Bool = false
 
     init(id: UUID = UUID(), tripID: UUID, mode: TravelMode, label: String,
          fromPlace: String = "", toPlace: String = "",
          departAt: Date = .distantPast, arriveBy: Date? = nil, arriveAt: Date? = nil,
          fromTimeZoneID: String = "", toTimeZoneID: String = "",
-         checkInMinutes: Int = 180, securityMinutes: Int = 30, bufferMinutes: Int = 20,
-         stopMinutes: Int = 0, travelMinutes: Int = 0, travelIsEstimated: Bool = true) {
+         checkInMinutes: Int = defaultInternationalCheckInMinutes,
+         securityMinutes: Int = 30, bufferMinutes: Int = 20,
+         stopMinutes: Int = 0, travelMinutes: Int = 0, travelIsEstimated: Bool = true,
+         measuredAt: Date? = nil, modeIsAssumed: Bool = false) {
         self.id = id
         self.tripID = tripID
         self.modeRaw = mode.rawValue
@@ -124,6 +140,71 @@ final class TravelSegment {
         self.stopMinutes = stopMinutes
         self.travelMinutes = travelMinutes
         self.travelIsEstimated = travelIsEstimated
+        self.measuredAt = measuredAt
+        self.modeIsAssumed = modeIsAssumed
+    }
+
+    /// Airline guidance for an international departure, and the value a
+    /// hand-entered journey has always started from. Named so the ticket
+    /// importer can share it rather than restate a different number.
+    nonisolated static let defaultInternationalCheckInMinutes = 180
+
+    /// How much a stored journey time is worth right now.
+    ///
+    /// Three states, not two. `travelIsEstimated == false` used to mean "Maps
+    /// priced it" and nothing more, so a traffic PREDICTION for a departure two
+    /// weeks away was indistinguishable from a reading taken minutes ago — and
+    /// only one of those should let a leave-by notification fire unquestioned.
+    nonisolated enum Freshness: Sendable, Equatable {
+        case never                     // nobody has measured this
+        case predicted(daysAhead: Int) // measured for a departure still in the future
+        case live(ageMinutes: Int)     // measured close to the journey itself
+    }
+
+    /// The ONE way a measured journey time is stored. Five call sites used to
+    /// set `travelMinutes` and clear `travelIsEstimated` by hand, and adding a
+    /// timestamp to four of them would have been worse than adding it to none.
+    ///
+    /// `settlesMode` defaults to true because a route that came back at all is
+    /// normally proof the mode was right. The exception is a road answer so
+    /// long that nobody would drive it: the minutes are real and worth keeping,
+    /// but they are not evidence for `.drive`.
+    func record(minutes: Int, now: Date = Date(), settlesMode: Bool = true) {
+        travelMinutes = minutes
+        travelIsEstimated = false
+        measuredAt = now
+        if settlesMode { modeIsAssumed = false }
+    }
+
+    /// The instant this journey actually happens. A drive has no departure —
+    /// it carries an arrive-by — so `departAt` stays `.distantPast` on every
+    /// one the app creates. Reading it directly made `.predicted` unreachable
+    /// for precisely the segments the freshness distinction exists for, and the
+    /// test that was supposed to prove otherwise used a flight-shaped fixture.
+    /// Mirrors how `day` already resolves the same question.
+    nonisolated var journeyInstant: Date? {
+        switch mode {
+        case .drive:            return arriveBy
+        case .flight, .train:   return departAt == .distantPast ? nil : departAt
+        }
+    }
+
+    /// `now` and the journey instant are passed in so this stays pure and testable.
+    nonisolated func freshness(now: Date = Date()) -> Freshness {
+        guard !travelIsEstimated, let taken = measuredAt else { return .never }
+        let ageMinutes = max(0, Int(now.timeIntervalSince(taken) / 60))
+        guard let anchor = journeyInstant else { return .live(ageMinutes: ageMinutes) }
+        let untilDeparture = anchor.timeIntervalSince(taken)
+        // A measurement taken more than a day before the journey is a forecast
+        // of a road nobody has driven yet, however recently it was fetched.
+        if untilDeparture > 24 * 3600 {
+            // Rounded, not truncated. Truncation reported a measurement taken
+            // 15.99 days out as "15 days ahead", which understates how much of
+            // a forecast it is — and understating is the one direction this
+            // number must never err in.
+            return .predicted(daysAhead: Int((untilDeparture / 86_400).rounded()))
+        }
+        return .live(ageMinutes: ageMinutes)
     }
 
     var mode: TravelMode {
@@ -241,12 +322,42 @@ final class TripStay {
 enum Itinerary {
 
     /// A stay reduced to the facts the resolver needs.
+    ///
+    /// `end` is **the last night slept here**, inclusive. That is already what
+    /// `resolveOverlaps` produces when a later stay truncates an earlier one —
+    /// a stay that ends because you moved on the 20th slept its last night on
+    /// the 19th. The trap is the stay nothing follows: its `end` arrives
+    /// straight from the source, and an all-day block "20–23 Aug" cannot say
+    /// whether the 23rd is a last night or the morning you leave. Both ends
+    /// were being read as one thing, so any nights count over a trip was wrong
+    /// for one of its stays. `endIsUnsettled` marks which is which.
     nonisolated struct Span: Sendable, Equatable {
         var place: String
         var start: Date
-        var end: Date          // inclusive
+        var end: Date          // inclusive — the last night slept here
         var externalID: String = ""
         var address: String = ""
+        /// True when `end` came from the source and nothing settled it. A
+        /// nights count over this span is uncertain by exactly one, and must
+        /// be rendered as a pair rather than a number.
+        var endIsUnsettled: Bool = false
+    }
+
+    /// Nights slept in a span. `end` is the last night, so both ends count.
+    nonisolated static func nights(_ span: Span, calendar: Calendar = .current) -> Int {
+        let days = calendar.dateComponents([.day],
+                                           from: calendar.startOfDay(for: span.start),
+                                           to: calendar.startOfDay(for: span.end)).day ?? 0
+        return max(0, days) + 1
+    }
+
+    /// What to show. A settled span has one answer; an unsettled one has two,
+    /// and saying "3 or 4" is the honest rendering — never the mean, never the
+    /// lower one because it looks tidier.
+    nonisolated static func nightsRange(_ span: Span,
+                                        calendar: Calendar = .current) -> ClosedRange<Int> {
+        let n = nights(span, calendar: calendar)
+        return span.endIsUnsettled ? (max(0, n - 1))...n : n...n
     }
 
     /// Calendars overlap, because people add a new leg without trimming the old
@@ -269,6 +380,9 @@ enum Itinerary {
                     out.removeLast()          // fully swallowed by the newer stay
                 } else {
                     previous.end = newEnd
+                    // A stay you moved out of has a settled end: the next stay
+                    // starting on the 20th proves the 19th was the last night.
+                    previous.endIsUnsettled = false
                     out[out.count - 1] = previous
                 }
             }

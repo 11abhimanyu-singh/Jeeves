@@ -501,8 +501,11 @@ final class ChatToolExecutor {
         }
         // Named origins resolve through the user's saved locations.
         let originRaw = (input["origin"] as? String ?? "Home")
-        let origin = locations.first { $0.kind.rawValue.lowercased() == originRaw.lowercased() }
+        let resolvedOrigin = locations.first { $0.kind.rawValue.lowercased() == originRaw.lowercased() }
             .map(\.address).flatMap { $0.isEmpty ? nil : $0 } ?? originRaw
+        guard let origin = RoutableOrigin.address(resolvedOrigin) else {
+            return .init(text: "I don't have an address for \(originRaw), so I can't measure that. Add one in Settings and ask me again.")
+        }
         let day = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: Date())
         let arrival = Calendar.current.date(bySettingHour: arriveMinute / 60, minute: arriveMinute % 60,
                                             second: 0, of: day) ?? day
@@ -826,8 +829,7 @@ final class ChatToolExecutor {
             let day = arrive
             Task {
                 if let m = await self.commuteMinutes(seg.fromPlace, seg.toPlace, max(target, Date())) {
-                    seg.travelMinutes = m
-                    seg.travelIsEstimated = false
+                    seg.record(minutes: m)
                     // Real travel time turns the two hotel policies into an
                     // actual schedule: leave at checkout, and either land after
                     // check-in or wait — the wait is recorded, never hidden.
@@ -1203,8 +1205,7 @@ final class ChatToolExecutor {
             var didMeasure = false
             if !seg.toPlace.isEmpty,
                let m = await commuteMinutes(seg.fromPlace, seg.toPlace, max(anchor, Date())) {
-                seg.travelMinutes = m
-                seg.travelIsEstimated = false
+                seg.record(minutes: m)
                 didMeasure = true
             }
             modelContext.saveOrLog("chat.updateStay.resync")
@@ -1406,9 +1407,10 @@ final class ChatToolExecutor {
         if segment.travelMinutes == 0, !segment.toPlace.isEmpty {
             let saved = (try? modelContext.fetch(FetchDescriptor<SavedLocation>())) ?? []
             let originRaw = segment.fromPlace.isEmpty ? "Home" : segment.fromPlace
-            let origin = saved.first { $0.kind.rawValue.lowercased() == originRaw.lowercased() }
+            let resolved = saved.first { $0.kind.rawValue.lowercased() == originRaw.lowercased() }
                 .map(\.address).flatMap { $0.isEmpty ? nil : $0 } ?? originRaw
-            if let m = await commuteMinutes(origin, segment.toPlace,
+            if let origin = RoutableOrigin.address(resolved),
+               let m = await commuteMinutes(origin, segment.toPlace,
                                             max(when.addingTimeInterval(-3600), Date())) {
                 // Same guard as the editor and the card: days of road time in
                 // a flight's door-to-terminal slot means `to` isn't an airport
@@ -1417,8 +1419,7 @@ final class ChatToolExecutor {
                 if mode != .drive && m > 360 {
                     refusedRoadMinutes = m
                 } else {
-                    segment.travelMinutes = m
-                    segment.travelIsEstimated = false
+                    segment.record(minutes: m)
                     measured = true
                 }
             }

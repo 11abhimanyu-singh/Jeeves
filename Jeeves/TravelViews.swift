@@ -258,7 +258,11 @@ struct LeaveByCard: View {
         let to = segment.toPlace
         let target = LeaveBy.plan(for: segment)?.leaveAt ?? Date()
         Task {
-            let origin = await resolvedOrigin(from)
+            guard let origin = await resolvedOrigin(from) else {
+                measureNote = RoutableOrigin.missingHomeMessage
+                pricing = false
+                return
+            }
             if let minutes = await GoogleMapsService.commuteMinutes(from: origin, to: to,
                                                                    departure: max(target, Date())) {
                 if segment.mode != .drive && minutes > 360 {
@@ -266,8 +270,7 @@ struct LeaveByCard: View {
                     // means To isn't an airport — refuse, don't schedule.
                     measureNote = "That routes \(LeaveBy.hours(minutes)) by road — the To field should be the departure airport, not a city or home."
                 } else {
-                    segment.travelMinutes = minutes
-                    segment.travelIsEstimated = false
+                    segment.record(minutes: minutes)
                     modelContext.saveOrLog("LeaveByCard.measure")
                     // A newly real journey time can move the leave-by day
                     // outside the trip — grow the window so the card doesn't
@@ -281,16 +284,18 @@ struct LeaveByCard: View {
     }
 
     /// "Home"/"Work"/"Gym" resolve to their saved addresses; anything else is
-    /// already a place.
-    private func resolvedOrigin(_ raw: String) async -> String {
+    /// already a place. nil when the result would still be a label rather than
+    /// somewhere a routing API can start — the old code returned the word
+    /// "Home" and let Google geocode it to whatever it fancied.
+    private func resolvedOrigin(_ raw: String) async -> String? {
         let saved = (try? modelContext.fetch(FetchDescriptor<SavedLocation>())) ?? []
         if raw.isEmpty {
-            return saved.first { $0.kind == .home }?.address ?? "Home"
+            return RoutableOrigin.address(saved.first { $0.kind == .home }?.address)
         }
         if let match = saved.first(where: { $0.kind.rawValue.lowercased() == raw.lowercased() }) {
-            return match.address.isEmpty ? raw : match.address
+            return RoutableOrigin.address(match.address.isEmpty ? raw : match.address)
         }
-        return raw
+        return RoutableOrigin.address(raw)
     }
 
     /// Every step of the chain happens where the journey STARTS, so the whole
@@ -1020,8 +1025,16 @@ struct SegmentEditorView: View {
         let originRaw = from.isEmpty ? "Home" : from
         Task {
             let saved = (try? modelContext.fetch(FetchDescriptor<SavedLocation>())) ?? []
-            let origin = saved.first { $0.kind.rawValue.lowercased() == originRaw.lowercased() }
+            let resolved = saved.first { $0.kind.rawValue.lowercased() == originRaw.lowercased() }
                 .map(\.address).flatMap { $0.isEmpty ? nil : $0 } ?? originRaw
+            // This editor measures the moment it opens, so an unresolved label
+            // went to Google unprompted and came back as a leave-by nobody
+            // asked for. A word is not somewhere to start from.
+            guard let origin = RoutableOrigin.address(resolved) else {
+                measureFailed = true
+                measuring = false
+                return
+            }
             if let m = await GoogleMapsService.commuteMinutes(from: origin, to: to,
                                                              departure: max(when, Date())) {
                 // A flight's journey is door-to-terminal. Days of road time

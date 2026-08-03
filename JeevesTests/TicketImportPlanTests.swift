@@ -83,14 +83,30 @@ final class TicketImportPlanTests: XCTestCase {
         XCTAssertEqual(sin?.departDate, day(2026, 9, 14, zone: "Asia/Singapore"))
     }
 
-    func testJourneysCarryTheirOwnClocksAndTheTicketsCheckInRule() {
+    func testJourneysCarryTheirOwnClocks() {
         let plan = TicketImportPlanner.plan(from: itinerary)
         let first = try? XCTUnwrap(plan?.journeys.first)
         XCTAssertEqual(first?.label, "SQ 511")
         XCTAssertEqual(first?.fromTimeZoneID, "Asia/Kolkata")
         XCTAssertEqual(first?.toTimeZoneID, "Asia/Singapore")
-        XCTAssertEqual(first?.checkInMinutes, 240, "the ticket states 4h for international")
         XCTAssertTrue(first?.fromPlace.contains("Kempegowda") ?? false)
+    }
+
+    /// This test used to assert 240 and cite the ticket: "check-in opens 4 h
+    /// before international departures." The ticket does say that, and it is
+    /// not a deadline — an opening time tells you the earliest you MAY arrive,
+    /// never the latest you may. Stored as a cut-off it put the user at the
+    /// terminal at 18:35 for SQ 511's 23:05 departure, four and a half hours
+    /// early, on every imported international leg.
+    ///
+    /// An imported leg now starts from the same assumption as a hand-entered
+    /// one, which is also what BLR itself advises.
+    func testAnImportedLegDoesNotTreatTheCheckInOpeningTimeAsADeadline() {
+        let plan = TicketImportPlanner.plan(from: itinerary)
+        let first = plan?.journeys.first
+        XCTAssertEqual(first?.checkInMinutes, 180)
+        XCTAssertEqual(first?.checkInMinutes, TravelSegment.defaultInternationalCheckInMinutes,
+                       "imported and hand-entered legs must not disagree about this")
     }
 
     // MARK: The collision

@@ -166,7 +166,8 @@ struct DayPlannerView: View {
                 hasLocation: !e.destinationAddress.isEmpty,
                 eventMinutes: max(0, e.endMinute - e.startMinute),
                 journeyMinutes: measuredJourneys[e.destinationAddress],
-                spanDays: max(e.spanDays, inferred))
+                spanDays: max(e.spanDays, inferred),
+                ownSpanDays: e.spanDays)
         }
         return TravelDetection.suggestion(for: candidates, calendar: cal)
     }
@@ -229,9 +230,22 @@ struct DayPlannerView: View {
             return
         }
         let cal = Calendar.current
+        // A single-day event still needs an address to count as a place —
+        // otherwise "Dentist" on day three of a holiday becomes a stay. A
+        // multi-day block is a place-window without one, which is why "Bali
+        // 4–11 Sep" typed as a bare title produced a trip with no stays at all.
+        //
+        // But ONLY the block the banner was about. Admitting every address-less
+        // multi-day event in the range let a "Sprint review 8–9 Sep" become a
+        // stay, and resolveOverlaps then truncated Bali to the 7th and shrank
+        // the trip to 4–9 — so the 10th and 11th were refilled with the
+        // Bengaluru routine and notified for.
         let overlapping = events.filter { e in
             let end = e.spanEndDate ?? e.date
-            return end >= s.startDay && e.date <= s.endDay && !e.destinationAddress.isEmpty
+            let inRange = end >= s.startDay && e.date <= s.endDay
+            let isPlace = !e.destinationAddress.isEmpty
+                || (e.spanDays > 1 && e.title == s.title)
+            return inRange && isPlace
         }
         // The SAME calendar event can exist as several rows (synced from
         // different days before re-syncs became idempotent). Group by identity
@@ -247,7 +261,13 @@ struct DayPlannerView: View {
                                   start: cal.startOfDay(for: first.date),
                                   end: cal.startOfDay(for: end),
                                   externalID: first.externalID,
-                                  address: rows.first { !$0.destinationAddress.isEmpty }?.destinationAddress ?? "")
+                                  address: rows.first { !$0.destinationAddress.isEmpty }?.destinationAddress ?? "",
+                                  // A calendar block cannot say whether its last
+                                  // day is a night there or the morning you go.
+                                  // resolveOverlaps settles it for any stay a
+                                  // later one follows; the last stay keeps the
+                                  // doubt, and the count is rendered as a pair.
+                                  endIsUnsettled: true)
         }
         let resolved = Itinerary.resolveOverlaps(spans, calendar: cal)
         let bounds = Itinerary.bounds(resolved)
@@ -267,19 +287,29 @@ struct DayPlannerView: View {
         // place is a data artifact, never a journey.
         var createdTransitions: [TravelSegment] = []
         for t in Itinerary.transitions(resolved)
-        where t.from.place != t.to.place && t.from.address != t.to.address {
+        // Different places, and not the same address twice. The old test was
+        // `from.address != to.address`, which is FALSE when both are empty — so
+        // two address-less stays produced no journey at all, and the move on
+        // the handover day existed nowhere.
+        where t.from.place != t.to.place
+           && !(!t.from.address.isEmpty && t.from.address == t.to.address) {
             let noon = cal.date(bySettingHour: 12, minute: 0, second: 0, of: t.day) ?? t.day
             // A move between two stays is a DRIVE until the user says
             // otherwise: both ends are street addresses, and .flight dressed a
             // 2 h lodge transfer in a 3 h airline cut-off, telling the user to
             // leave at 05:55 for a noon drive. Drives take an arrive-by, not a
             // departure.
+            //
+            // But nobody CHOSE it, and the same default calls Bali → Singapore
+            // a drive. `modeIsAssumed` carries that, so the card can say so and
+            // the first measurement can refute it.
             let seg = TravelSegment(
                 tripID: trip.id, mode: .drive,
                 label: "\(t.from.place) → \(t.to.place)",
                 fromPlace: t.from.address, toPlace: t.to.address,
                 arriveBy: noon,
-                checkInMinutes: 0, securityMinutes: 0)
+                checkInMinutes: 0, securityMinutes: 0,
+                modeIsAssumed: true)
             modelContext.insert(seg)
             createdTransitions.append(seg)
         }
@@ -295,17 +325,37 @@ struct DayPlannerView: View {
         let toMeasure = createdTransitions
         Task {
             for seg in toMeasure where seg.travelMinutes == 0 && !seg.toPlace.isEmpty {
-                if let m = await GoogleMapsService.commuteMinutes(
+                let route = await GoogleMapsService.commuteRoute(
                     from: seg.fromPlace, to: seg.toPlace,
-                    departure: max(seg.arriveBy ?? Date(), Date())) {
-                    seg.travelMinutes = m
-                    seg.travelIsEstimated = false
-                    modelContext.saveOrLog("DayPlanner.measureTransition")
+                    departure: max(seg.arriveBy ?? Date(), Date()))
+                let verdict = TransferMode.classify(route: route)
+                // The road answer decides whether the assumed drive survives.
+                // Bali → Singapore comes back with no route at all, and the old
+                // code left `.drive` standing with no minutes — a mode nobody
+                // chose, a chain nobody could use, and nothing saying either.
+                switch verdict {
+                case .drive(let m):
+                    seg.record(minutes: m)    // clears modeIsAssumed
                     EventLog.log(.journeyMeasured, "\(seg.label) — \(m) min at acceptance",
                                  subject: seg.id, context: modelContext)
-                    await TravelGuard.absorb(seg, context: modelContext)
-                    await TravelNotifier.schedule(segment: seg)
+                case .tooFarToDrive(let m):
+                    // KEEP the minutes. Throwing away a real reading to signal
+                    // doubt trades one silent wrong answer for a silent missing
+                    // one. The mode stays assumed — that is what was in question.
+                    seg.record(minutes: m, settlesMode: false)
+                    EventLog.log(.journeyMeasured,
+                                 "\(seg.label) — \(m) min by road, too far to assume a drive",
+                                 subject: seg.id, context: modelContext)
+                case .notRoutableByRoad:
+                    EventLog.log(.journeyMeasured,
+                                 "\(seg.label) — no road route; assumed drive not settled",
+                                 subject: seg.id, context: modelContext)
+                    modelContext.saveOrLog("DayPlanner.measureTransition")
+                    continue
                 }
+                modelContext.saveOrLog("DayPlanner.measureTransition")
+                await TravelGuard.absorb(seg, context: modelContext)
+                await TravelNotifier.schedule(segment: seg)
             }
         }
         editingTrip = trip
@@ -320,7 +370,10 @@ struct DayPlannerView: View {
             .map(\.destinationAddress))
         let pending = venues.subtracting(measuredJourneys.keys)
         guard !pending.isEmpty else { return }
-        let home = locations.first { $0.kind == .home }?.address ?? "Home"
+        // No saved home means no measurement. The old fallback POSTed the word
+        // "Home" to Routes and rendered whatever came back as measured.
+        guard let home = RoutableOrigin.address(locations.first(where: { $0.kind == .home })?.address)
+        else { return }
         Task {
             for v in pending {
                 if let m = await GoogleMapsService.commuteMinutes(from: home, to: v) {

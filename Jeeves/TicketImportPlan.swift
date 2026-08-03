@@ -190,8 +190,14 @@ enum TicketImportPlanner {
             toTimeZoneID: leg.toZoneID,
             fromTerminal: leg.leg.fromTerminal,
             toTerminal: leg.leg.toTerminal,
-            // The ticket's own words: international check-in opens 4h before.
-            checkInMinutes: 240)
+            // The ticket says check-in OPENS 4 h before. That was read as
+            // "be there 4 h before" and stored as 240, which put you at the
+            // terminal at 18:35 for a 23:05 departure — four and a half hours
+            // early, every time. Opens is not a deadline. 180 is both the
+            // airline guidance for an international departure and
+            // TravelSegment's own default, so an imported leg and a
+            // hand-entered one now start from the same assumption.
+            checkInMinutes: TravelSegment.defaultInternationalCheckInMinutes)
     }
 
     /// "Bali & Singapore" — named for where you actually stay, in order.
