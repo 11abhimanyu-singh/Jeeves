@@ -14,18 +14,20 @@ import SwiftUI
 /// What the Stats menu can open. Progress left this group when it became the
 /// app's landing screen — Stats is now the two views you go looking for.
 enum StatsScreen: String, Identifiable, CaseIterable {
-    case health, history
+    case health, history, adherence
     var id: String { rawValue }
     var label: String {
         switch self {
         case .health:  return "App Health"
         case .history: return "History"
+        case .adherence: return "Adherence"
         }
     }
     var icon: String {
         switch self {
         case .health:  return "stethoscope"
         case .history: return "clock.arrow.circlepath"
+        case .adherence: return "chart.bar.xaxis"
         }
     }
 }
@@ -135,6 +137,7 @@ struct StatsScreenView: View {
             switch screen {
             case .health:  DailyDigestView()
             case .history: UnifiedHistoryList()
+            case .adherence: AdherenceScreen()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
