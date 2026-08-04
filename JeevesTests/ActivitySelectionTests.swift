@@ -130,3 +130,60 @@ final class ActivitySelectionTests: XCTestCase {
             query: "interview prep reading"))
     }
 }
+
+/// The plan can go out of date without anything noticing.
+///
+/// Five tools move something the day was planned from. Only one rebuilt the
+/// day. The rest left a plan on screen that disagreed with the events listed
+/// directly above it — and left its notifications armed, so a cancelled
+/// appointment still pushed "time to leave".
+final class StalePlanMarkerTests: XCTestCase {
+
+    private func state(withPlan: Bool) -> DailyPlanState {
+        let s = DailyPlanState(date: Date().startOfDay, hasGymToday: false, gymMinute: nil)
+        if withPlan {
+            s.storePlan(GeneratedPlan(blocks: [], dropped: [], shrunk: [],
+                                      summary: "x", boundaryTime: nil), isOffline: false)
+        }
+        return s
+    }
+
+    func testAPlannedDayGoesStaleWhenAnInputMoves() {
+        let s = state(withPlan: true)
+        XCTAssertFalse(s.isPlanStale, "a freshly built plan is current")
+        s.markPlanStale("an event was cancelled")
+        XCTAssertTrue(s.isPlanStale)
+        XCTAssertEqual(s.planStaleReason, "an event was cancelled")
+    }
+
+    /// A day with no plan has nothing to invalidate — marking it would put a
+    /// "this plan is out of date" banner over a day that was never planned.
+    func testAnUnplannedDayIsNeverStale() {
+        let s = state(withPlan: false)
+        s.markPlanStale("an event was added")
+        XCTAssertFalse(s.isPlanStale)
+        XCTAssertNil(s.planStaleSince, "nothing to invalidate, nothing recorded")
+    }
+
+    /// The user needs to know what STARTED the drift, not the last thing to
+    /// touch it — three edits in a row shouldn't rewrite the explanation.
+    func testTheFirstReasonWins() {
+        let s = state(withPlan: true)
+        s.markPlanStale("an event was cancelled")
+        let first = s.planStaleSince
+        s.markPlanStale("the gym moved")
+        XCTAssertEqual(s.planStaleReason, "an event was cancelled")
+        XCTAssertEqual(s.planStaleSince, first, "the clock doesn't restart either")
+    }
+
+    func testRebuildingTheDayClearsIt() {
+        let s = state(withPlan: true)
+        s.markPlanStale("the gym moved")
+        // What PlanCoordinator.commit does after storing a fresh plan.
+        s.storePlan(GeneratedPlan(blocks: [], dropped: [], shrunk: [],
+                                  summary: "rebuilt", boundaryTime: nil), isOffline: false)
+        s.planStaleSince = nil
+        s.planStaleReason = nil
+        XCTAssertFalse(s.isPlanStale)
+    }
+}

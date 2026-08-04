@@ -70,6 +70,19 @@ final class DailyPlanState {
     /// stored Set: nil and "[]" have to stay distinguishable.
     var activitySelectionJSON: String? = nil
 
+    /// When something the plan was BUILT FROM changed after it was built.
+    ///
+    /// Five tools move a planner input — add/delete/edit an event, set the gym,
+    /// choose the day's activities — and only the last of them rebuilt the day.
+    /// The rest left a plan on screen that disagreed with the events listed
+    /// directly above it, and (worse) left its notifications armed: a deleted
+    /// appointment still pushed "time to leave". Asking each tool to remember
+    /// to re-plan is a request; recording the fact here is a rule, and it costs
+    /// one assignment per mutation.
+    var planStaleSince: Date? = nil
+    /// What changed, in the user's words — "Dentist was cancelled".
+    var planStaleReason: String? = nil
+
     init(date: Date, hasGymToday: Bool, gymMinute: Int?, planConfirmed: Bool = false) {
         self.date = date
         self.hasGymToday = hasGymToday
@@ -130,6 +143,21 @@ final class DailyPlanState {
                 activitySelectionJSON = (try? JSONEncoder().encode(names))
                     .flatMap { String(data: $0, encoding: .utf8) }
             }
+        }
+    }
+
+    /// True when this day HAS a plan and that plan predates a change to its
+    /// inputs. A day with no plan isn't stale — it's simply unplanned.
+    var isPlanStale: Bool { generatedPlanJSON != nil && planStaleSince != nil }
+
+    /// Record that an input moved under the committed plan. No-op when there is
+    /// no plan to invalidate, and the FIRST reason wins — the user needs to
+    /// know what started the drift, not the most recent thing to touch it.
+    func markPlanStale(_ reason: String, at now: Date = Date()) {
+        guard generatedPlanJSON != nil else { return }
+        if planStaleSince == nil {
+            planStaleSince = now
+            planStaleReason = reason
         }
     }
 

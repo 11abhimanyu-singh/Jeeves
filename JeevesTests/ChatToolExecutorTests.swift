@@ -21,6 +21,19 @@ final class ChatToolExecutorTests: XCTestCase {
     private var container: ModelContainer!
     private var executor: ChatToolExecutor!
 
+    /// A day with a plan already committed to it — the precondition for
+    /// anything that can make a plan STALE. Without one there is no plan to
+    /// invalidate, and the staleness marker correctly stays silent.
+    @discardableResult
+    private func committedPlan(on day: Date, in context: ModelContext) -> DailyPlanState {
+        let state = DailyPlanState.fetchOrCreate(for: day, in: context)
+        state.storePlan(GeneratedPlan(
+            blocks: [GeneratedBlock(title: "Chores", startTime: "08:00", endTime: "08:40",
+                                    note: nil, isAnchor: false, kind: "activity")],
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil), isOffline: false)
+        return state
+    }
+
     override func setUp() {
         super.setUp()
         let schema = Schema([
@@ -840,10 +853,25 @@ final class ChatToolExecutorTests: XCTestCase {
                       "flight saved without zones must surface the gap: \(result.text)")
     }
 
+    /// A plan has to EXIST for it to go stale. The hint used to fire on a day
+    /// that had never been planned, pointing the model at replan_today — which
+    /// answers "there's no plan for today yet, so there's nothing to re-plan".
+    private func seedTodaysPlan() {
+        let state = DailyPlanState.forDay(Date().startOfDay, in: container.mainContext)
+        state.storePlan(GeneratedPlan(blocks: [], dropped: [], shrunk: [],
+                                      summary: "seed", boundaryTime: nil), isOffline: false)
+        try? container.mainContext.save()
+    }
+
     func testEditingTodaysEventSuggestsReplanOffer() async {
         let context = container.mainContext
         context.insert(DailyEvent(date: Date().startOfDay, title: "Standup",
                                   startMinute: 600, endMinute: 660))
+        // There must BE a plan for the edit to invalidate. The offer is made
+        // because a committed plan just went out of date — on a day that was
+        // never planned there is nothing to re-plan, and the tool now says so
+        // by staying quiet.
+        committedPlan(on: Date().startOfDay, in: context)
         try? context.save()
 
         let result = await executor.run(.init(
@@ -927,6 +955,7 @@ final class ChatToolExecutorTests: XCTestCase {
         let context = container.mainContext
         context.insert(DailyEvent(date: Date().startOfDay, title: "Dinner with Priya",
                                   startMinute: 19 * 60, endMinute: 21 * 60))
+        committedPlan(on: Date().startOfDay, in: context)
         try? context.save()
 
         let result = await executor.run(.init(

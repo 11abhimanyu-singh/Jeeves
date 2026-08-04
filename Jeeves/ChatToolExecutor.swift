@@ -76,8 +76,8 @@ final class ChatToolExecutor {
         // parity test pins that list against the schemas the model is shown,
         // so a tool added to one side and not the other fails the suite
         // instead of failing at runtime.
-        case "add_event":      return toolAddEvent(call.input)
-        case "set_gym":        return toolSetGym(call.input)
+        case "add_event":      return await toolAddEvent(call.input)
+        case "set_gym":        return await toolSetGym(call.input)
         case "fetch_calendar": return await toolFetchCalendar(call.input)
         case "plan_day":       return await toolPlanDay(call.input)
         case "replan_today":   return await toolReplanToday(call.input)
@@ -86,8 +86,8 @@ final class ChatToolExecutor {
         case "fetch_app_data": return toolFetchAppData(call.input)
         case "add_todo":       return toolAddTodo(call.input)
         case "add_reminder":   return toolAddReminder(call.input)
-        case "edit_event":     return toolEditEvent(call.input)
-        case "delete_event":   return toolDeleteEvent(call.input)
+        case "edit_event":     return await toolEditEvent(call.input)
+        case "delete_event":   return await toolDeleteEvent(call.input)
         case "commute_estimate": return await toolCommuteEstimate(call.input)
         case "log_walk":       return toolLogWalk(call.input)
         case "mark_block_done": return toolMarkBlockDone(call.input)
@@ -266,7 +266,7 @@ final class ChatToolExecutor {
     }
 
     @MainActor
-    private func toolEditEvent(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+    private func toolEditEvent(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
         let title = input["title"] as? String ?? ""
         let matches = eventsMatching(title, dateRaw: input["date"] as? String)
         guard !matches.isEmpty else {
@@ -292,8 +292,12 @@ final class ChatToolExecutor {
         let shiftDays = input["shift_by_days"] as? Int
         var timesChanged = false
         var daysMoved: [String] = []
+        // Every day this edit touched — the day an event LEFT counts as much as
+        // the one it landed on, and the old gate saw neither.
+        var touchedDays: [Date] = []
         var clampedNote = ""
         for e in matches {
+            touchedDays.append(e.date)
             let oldStart = e.startMinute, oldEnd = e.endMinute
             if let days = shiftDays, days != 0 {
                 let oldDay = e.date
@@ -304,6 +308,7 @@ final class ChatToolExecutor {
                         e.spanEndDate = movedSpan.startOfDay
                     }
                     daysMoved.append("\(Self.dayString(oldDay)) → \(Self.dayString(e.date))")
+                    touchedDays.append(oldDay)
                 }
             }
             if let venue = input["new_venue"] as? String, !venue.isEmpty {
@@ -393,10 +398,16 @@ final class ChatToolExecutor {
         // Gate on whether times ACTUALLY moved, not on which parameter was
         // used: the relative params are the preferred path and were silently
         // skipping this hint, in exactly the two scenarios that test for it.
-        let touchesToday = matches.contains { Calendar.current.isDate($0.date, inSameDayAs: today) }
-        let replanNote = (timesChanged && touchesToday)
-            ? " This changes today — OFFER to replan the remainder (replan_today, with resume_at and any missed_blocks)."
-            : ""
+        // The old gate was `timesChanged && touchesToday`, so moving an event to
+        // ANOTHER DAY (which writes only e.date) and changing a venue (which
+        // re-routes the commute) both slipped past it silently. Any edge that
+        // moved matters, and so does the day the event left.
+        touchedDays.append(contentsOf: matches.map(\.date))
+        await markPlansStale(on: touchedDays, reason: "an event was edited")
+        let staleDays = Set(touchedDays.map { $0.startOfDay })
+            .filter { planState(on: $0).isPlanStale }
+            .sorted()
+        let replanNote = staleDays.map(staleNote).joined()
         // A day move is the headline when it happened — the receipt has to say
         // which day it left and which it landed on, not just the new times.
         let movedNote = daysMoved.isEmpty ? "" : " Moved \(Set(daysMoved).joined(separator: "; "))."
@@ -404,7 +415,7 @@ final class ChatToolExecutor {
     }
 
     @MainActor
-    private func toolDeleteEvent(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+    private func toolDeleteEvent(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
         let title = (input["title"] as? String ?? "").trimmingCharacters(in: .whitespaces)
         let dateRaw = input["date"] as? String
         let endRaw = input["end_date"] as? String
@@ -446,6 +457,7 @@ final class ChatToolExecutor {
         // the receipt must say so, or the reply claims closure while travel
         // mode quietly survives ("Both are gone from your calendar" while
         // 18–22 Sep stayed in travel mode).
+        var deletedDates: [Date] = []
         let deletedDays: [ClosedRange<Date>] = matches.map {
             $0.date.startOfDay...($0.spanEndDate ?? $0.date).startOfDay
         }
@@ -455,6 +467,7 @@ final class ChatToolExecutor {
             if !e.externalID.isEmpty {
                 modelContext.insert(CalendarTombstone(externalID: e.externalID))
             }
+            deletedDates.append(e.date)
             modelContext.delete(e)
         }
         modelContext.saveOrLog()
@@ -464,7 +477,11 @@ final class ChatToolExecutor {
                 trip.startDate <= range.upperBound && range.lowerBound <= trip.endDate
             }
         }
-        var text = "Deleted \(matches.count) event(s): \(summary)."
+        // The cancelled appointment's "time to leave" push was still armed, and
+        // CommuteRefresh would re-price its orphaned leg and re-arm it.
+        await markPlansStale(on: deletedDates, reason: "an event was cancelled",
+                             clearNotifications: true)
+        var text = "Deleted \(matches.count) event(s): \(summary).\(deletedDates.map(staleNote).joined())"
         if !surviving.isEmpty {
             let names = surviving
                 .map { "'\($0.title.isEmpty ? "Trip" : $0.title)' (\(TravelGuard.dayRange($0)))" }
@@ -1853,7 +1870,7 @@ final class ChatToolExecutor {
     }
 
     @MainActor
-    private func toolAddEvent(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+    private func toolAddEvent(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
         let date = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
         let title = (input["title"] as? String ?? "").trimmingCharacters(in: .whitespaces)
         guard !title.isEmpty, let startStr = input["start_time"] as? String,
@@ -1887,7 +1904,8 @@ final class ChatToolExecutor {
         let assumed = givenEnd == nil
             ? " (no end time given — I assumed it ends \(hhmm(end)); change it with edit_event's extend_by_minutes)"
             : ""
-        return .init(text: "Added \"\(title)\" \(hhmm(start))–\(hhmm(end)) on \(dayLabel(date))\(venueSuffix).\(assumed)")
+        await markPlansStale(on: [date], reason: "an event was added")
+        return .init(text: "Added \"\(title)\" \(hhmm(start))–\(hhmm(end)) on \(dayLabel(date))\(venueSuffix).\(assumed)\(staleNote(date))")
     }
 
     /// If an event's venue was pasted as a Google Maps link, identify the place
@@ -2000,6 +2018,44 @@ final class ChatToolExecutor {
         }
     }
 
+    /// The sentence a receipt appends when it just invalidated a plan. Written
+    /// for the MODEL to relay, so it can't claim the day is settled when it
+    /// isn't — and phrased as an offer, because rebuilding a whole day is a
+    /// bigger action than the one the user asked for.
+    @MainActor
+    private func staleNote(_ date: Date) -> String {
+        guard planState(on: date).isPlanStale else { return "" }
+        let isToday = Calendar.current.isDateInToday(date)
+        return " \(dayLabel(date).capitalized)'s plan was built before this and no longer matches it — say so, and OFFER to replan (\(isToday ? "replan_today" : "plan_day")). Do NOT replan without the user agreeing."
+    }
+
+    /// Record that a tool moved something the committed plan was built from.
+    ///
+    /// Deliberately NOT a re-plan: the user asked to move an appointment, not
+    /// to have their whole day rebuilt around it. The Day Planner surfaces the
+    /// staleness and offers the re-plan, so the decision stays theirs — but the
+    /// app can no longer show a plan it knows is wrong without saying so.
+    ///
+    /// Deleting also clears that day's pending notifications immediately. A
+    /// cancelled appointment used to keep its "time to leave" push armed until
+    /// something happened to re-plan, and CommuteRefresh would re-price the
+    /// orphaned leg and re-arm it. No notification beats a wrong one.
+    @MainActor
+    private func markPlansStale(on dates: [Date], reason: String,
+                                clearNotifications: Bool = false) async {
+        var touched: [Date] = []
+        for day in Set(dates.map { $0.startOfDay }) {
+            let state = planState(on: day)
+            guard state.generatedPlanJSON != nil else { continue }
+            state.markPlanStale(reason)
+            touched.append(day)
+        }
+        guard !touched.isEmpty else { return }
+        modelContext.saveOrLog("plan.markStale")
+        guard clearNotifications, scheduleNudges else { return }
+        for day in touched { await NotificationService.clear(for: day) }
+    }
+
     /// Store the choice AND rebuild the day, in one tool call.
     ///
     /// The first build asked the model to follow up with replan_today. It
@@ -2025,7 +2081,7 @@ final class ChatToolExecutor {
     }
 
     @MainActor
-    private func toolSetGym(_ input: [String: Any]) -> JeevesChatService.ToolResult {
+    private func toolSetGym(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
         let date = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
         let gymToday = input["gym_today"] as? Bool ?? false
         let state = planState(on: date)
@@ -2034,11 +2090,14 @@ final class ChatToolExecutor {
             if let gt = (input["gym_time"] as? String).flatMap(GeneratedBlock.minutes(from:)) { state.gymMinute = gt }
             modelContext.saveOrLog()
             let at = state.gymMinute.map { " at \(hhmm($0))" } ?? " (no time set — ask when weightlifting starts)"
-            return .init(text: "Gym set for \(dayLabel(date))\(at).")
+            await markPlansStale(on: [date], reason: "the gym moved")
+            return .init(text: "Gym set for \(dayLabel(date))\(at).\(staleNote(date))")
         } else {
             state.gymMinute = nil
             modelContext.saveOrLog()
-            return .init(text: "Cleared the gym for \(dayLabel(date)).")
+            await markPlansStale(on: [date], reason: "the gym was cleared",
+                                 clearNotifications: true)
+            return .init(text: "Cleared the gym for \(dayLabel(date)).\(staleNote(date))")
         }
     }
 

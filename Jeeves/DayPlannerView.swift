@@ -134,6 +134,7 @@ struct DayPlannerView: View {
                 if let s = travelSuggestion { travelSuggestionBanner(s) }
                 eventsSection
                 gymCard
+                stalePlanBanner
                 planBar
                 planCard
             }
@@ -355,6 +356,41 @@ struct DayPlannerView: View {
 
     /// The committed plan for the selected day, if one has been generated.
     private var savedPlan: GeneratedPlan? { selectedPlanState?.plan }
+
+    /// Shown when the day's inputs moved after its plan was built.
+    ///
+    /// The app knew the plan was wrong and showed it anyway — an appointment
+    /// deleted in chat stayed on the timeline, and its "time to leave" push
+    /// stayed armed. Knowing and not saying is the part this fixes; the rebuild
+    /// stays the user's call.
+    @ViewBuilder
+    private var stalePlanBanner: some View {
+        if let state = selectedPlanState, state.isPlanStale {
+            Button(action: planMyDay) {
+                HStack(alignment: .top, spacing: 9) {
+                    Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
+                        .font(.ui(13, weight: .semibold))
+                        .foregroundStyle(Color.accentDeep)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("This plan is out of date")
+                            .font(.ui(13.5, weight: .semibold))
+                            .foregroundStyle(Color.textPrimary)
+                        Text("\(state.planStaleReason.map { $0.prefix(1).capitalized + $0.dropFirst() } ?? "Something changed") after it was built. Tap to rebuild the day.")
+                            .font(.ui(12)).foregroundStyle(Color.textSoft)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 4)
+                }
+                .padding(.horizontal, 13).padding(.vertical, 11)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
+                .overlay(RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.accentDeep.opacity(0.35), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .disabled(isPlanning)
+        }
+    }
 
     /// The activity picker, over the day currently on screen.
     private var pickerSheet: some View {
@@ -913,6 +949,10 @@ struct DayPlannerView: View {
     }
 
     private func saveEvent(_ draft: EventDraft) {
+        // Both days when an edit moves an event: the one it left is as stale as
+        // the one it lands on.
+        var touched: [Date] = [draft.date]
+        if let existing = draft.existingEvent { touched.append(existing.date) }
         if let event = draft.existingEvent {
             event.title = draft.title
             event.date = draft.date.startOfDay
@@ -929,7 +969,25 @@ struct DayPlannerView: View {
             ))
         }
         modelContext.saveOrLog()
+        markStale(touched, reason: draft.existingEvent == nil ? "an event was added" : "an event was edited")
         selectedDate = draft.date.startOfDay   // follow the event to its day
+    }
+
+    /// The in-app twin of the chat executor's marker: this screen can move the
+    /// same planner inputs, and used to leave the plan below it just as wrong.
+    private func markStale(_ dates: [Date], reason: String,
+                           clearNotifications: Bool = false) {
+        var touched: [Date] = []
+        for day in Set(dates.map { $0.startOfDay }) {
+            let state = DailyPlanState.fetchOrCreate(for: day, in: modelContext)
+            guard state.generatedPlanJSON != nil else { continue }
+            state.markPlanStale(reason)
+            touched.append(day)
+        }
+        guard !touched.isEmpty else { return }
+        modelContext.saveOrLog("plan.markStale")
+        guard clearNotifications else { return }
+        Task { for day in touched { await NotificationService.clear(for: day) } }
     }
 
     private func delete(event: DailyEvent) {
@@ -938,8 +996,12 @@ struct DayPlannerView: View {
         if !event.externalID.isEmpty {
             modelContext.insert(CalendarTombstone(externalID: event.externalID))
         }
+        let day = event.date
         modelContext.delete(event)
         modelContext.saveOrLog()
+        // No notification beats a wrong one: the leave-by push for a deleted
+        // appointment stays armed otherwise.
+        markStale([day], reason: "an event was cancelled", clearNotifications: true)
     }
 
     private func prettyDate(_ date: Date) -> String {

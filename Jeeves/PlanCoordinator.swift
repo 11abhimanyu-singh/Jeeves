@@ -164,6 +164,9 @@ enum PlanCoordinator {
         let state = DailyPlanState.fetchOrCreate(for: day, in: context,
                                                  hasGymToday: hasGymToday, gymMinute: gymMinute)
         state.storePlan(result.plan, isOffline: result.isOffline)
+        // A freshly built plan is by definition current again.
+        state.planStaleSince = nil
+        state.planStaleReason = nil
         context.saveOrLog("plan.commit")
         // Reminders for the key blocks…
         await NotificationService.reschedule(plan: result.plan, on: day)
