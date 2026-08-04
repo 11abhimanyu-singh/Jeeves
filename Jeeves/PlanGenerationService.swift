@@ -59,7 +59,7 @@ enum PlanGenerationError: LocalizedError {
 
 enum PlanGenerationService {
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
-    private static let model = "claude-opus-4-8"
+    private static let model = "claude-opus-5"
 
     static func generate(_ req: PlanRequest) async throws -> GeneratedPlan {
         guard let apiKey = KeychainService.loadAPIKey(), !apiKey.isEmpty else {
