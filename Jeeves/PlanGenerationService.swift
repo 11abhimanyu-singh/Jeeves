@@ -59,7 +59,7 @@ enum PlanGenerationError: LocalizedError {
 
 enum PlanGenerationService {
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
-    private static let model = "claude-opus-5"
+    private static let model = "claude-fable-5"
 
     static func generate(_ req: PlanRequest) async throws -> GeneratedPlan {
         guard let apiKey = KeychainService.loadAPIKey(), !apiKey.isEmpty else {
@@ -68,12 +68,15 @@ enum PlanGenerationService {
 
         let body: [String: Any] = [
             "model": model,
-            // Opus 4.8 with adaptive thinking. max_tokens is a generous ceiling,
+            // Fable 5 with adaptive thinking. max_tokens is a generous ceiling,
             // NOT a tight cap: thinking and the JSON plan share this budget, and
             // a tight cap (e.g. 6-8k) let thinking consume it on complex days,
             // starving the plan (empty response → fallback). 16k leaves ample
-            // room for both so the plan never truncates. (Opus 4.8 rejects
-            // budget_tokens with a 400; adaptive thinking is the supported mode.)
+            // room for both so the plan never truncates.
+            //
+            // Fable thinks ALWAYS. "adaptive" is the one explicit setting it
+            // accepts — `disabled`, or any budget_tokens, comes back a 400. So
+            // this line is not decoration: changing it breaks every plan.
             "max_tokens": 16000,
             "thinking": ["type": "adaptive"],
             // The rules moved out of the user message and into a cached system

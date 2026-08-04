@@ -11,7 +11,7 @@ import Foundation
 
 enum ClaudeTextService {
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
-    private static let model = "claude-sonnet-5"
+    private static let model = "claude-opus-5"
 
     static func bookSummary(title: String, author: String) async throws -> String {
         guard let apiKey = KeychainService.loadAPIKey(), !apiKey.isEmpty else {

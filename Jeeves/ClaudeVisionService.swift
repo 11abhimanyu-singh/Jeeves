@@ -38,7 +38,7 @@ enum ClaudeVisionError: LocalizedError {
 
 enum ClaudeVisionService {
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
-    private static let model = "claude-sonnet-5"
+    private static let model = "claude-opus-5"
 
     static func detectBooks(in image: UIImage) async throws -> [DetectedBook] {
         guard let apiKey = KeychainService.loadAPIKey(), !apiKey.isEmpty else {

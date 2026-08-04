@@ -26,7 +26,7 @@ struct ExtractedAnchors: Decodable {
 
 enum AnchorExtractionService {
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
-    private static let model = "claude-sonnet-5"
+    private static let model = "claude-opus-5"
 
     /// Extracts only anchors *newly mentioned* in `message` that aren't already
     /// among `existingTitles`. Returns empty anchors (not an error) if nothing

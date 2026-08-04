@@ -108,7 +108,7 @@ enum StandingPrefs {
 
 enum JeevesChatService {
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
-    private static let model = "claude-sonnet-5"
+    private static let model = "claude-opus-5"
 
     /// The model has no clock of its own; give it the device's current date so
     /// it can answer "what's today" and resolve relative dates correctly.
