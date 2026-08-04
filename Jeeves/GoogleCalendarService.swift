@@ -29,6 +29,12 @@ struct CalendarEvent: Identifiable {
     /// orphaned day.
     var startDay: Date? = nil
     var endDay: Date? = nil
+    /// The pin, when the source carried one. Google's API does not; EventKit's
+    /// structuredLocation does. Set, it spares the app a geocode of the venue
+    /// NAME — the lookup whose failure once had a 265 km drive planned as a
+    /// 30-minute commute.
+    var latitude: Double? = nil
+    var longitude: Double? = nil
 
     /// How many days this event covers (1 for an ordinary event).
     var spanDays: Int {
