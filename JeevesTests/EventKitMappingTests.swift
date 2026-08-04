@@ -69,6 +69,74 @@ final class EventKitMappingTests: XCTestCase {
         XCTAssertEqual(mapped.spanDays, 1)
     }
 
+    // MARK: midnight — the webinar that looked like a trip
+
+    /// A 22:30–00:00 online talk occupies two calendar dates. Taking the span
+    /// from those dates made it "2 days with a location", which is the exact
+    /// shape TravelDetection reads as a trip — the app offered to switch two
+    /// days into travel mode for a webinar.
+    func testAMeetingEndingAtMidnightIsOneDay() throws {
+        let e = event(title: "[Agentic Certification] Evals: Why Agents Fail Silently",
+                      start: day(2026, 8, 4, 22, 30), end: day(2026, 8, 5, 0, 0))
+        let mapped = try XCTUnwrap(EventKitService.calendarEvent(from: e))
+        XCTAssertEqual(mapped.spanDays, 1, "one late meeting, not a two-day trip")
+        XCTAssertEqual(mapped.startDay, day(2026, 8, 4))
+        XCTAssertEqual(mapped.endDay, day(2026, 8, 4))
+    }
+
+    /// …and it ends at 24:00, not 00:00. Midnight as minute 0 put the end
+    /// BEFORE the start — a negative-length block to everything downstream.
+    func testAMidnightEndIsTwentyFourHundredNotZero() throws {
+        let e = event(title: "Late webinar",
+                      start: day(2026, 8, 4, 22, 30), end: day(2026, 8, 5, 0, 0))
+        let mapped = try XCTUnwrap(EventKitService.calendarEvent(from: e))
+        XCTAssertEqual(mapped.startMinute, 22 * 60 + 30)
+        XCTAssertEqual(mapped.endMinute, 24 * 60)
+        XCTAssertGreaterThan(mapped.endMinute, mapped.startMinute,
+                             "an event cannot end before it starts")
+    }
+
+    func testAMeetingRunningIntoTheSmallHoursIsStillOneDay() throws {
+        let e = event(title: "Very late call",
+                      start: day(2026, 8, 4, 23, 0), end: day(2026, 8, 5, 1, 30))
+        let mapped = try XCTUnwrap(EventKitService.calendarEvent(from: e))
+        XCTAssertEqual(mapped.spanDays, 1)
+    }
+
+    /// The genuine article still spans: a conference really does run days.
+    func testSomethingLongerThanADayStillSpans() throws {
+        let e = event(title: "Offsite",
+                      start: day(2026, 8, 4, 9, 0), end: day(2026, 8, 6, 17, 0))
+        let mapped = try XCTUnwrap(EventKitService.calendarEvent(from: e))
+        XCTAssertEqual(mapped.spanDays, 3, "9am Tue to 5pm Thu is three days")
+    }
+
+    // MARK: a joining link is not a place
+
+    /// Invites put the join URL in the location field. Stored as an address it
+    /// becomes somewhere to COMMUTE to — and with a span, somewhere to travel
+    /// to. There is no commute to a webinar.
+    func testAJoinLinkIsNotAnAddress() throws {
+        let e = event(title: "Evals webinar",
+                      start: day(2026, 8, 4, 22, 30), end: day(2026, 8, 5, 0, 0),
+                      location: "https://maven.com/s/joinlive/094cc22cc3")
+        let mapped = try XCTUnwrap(EventKitService.calendarEvent(from: e))
+        XCTAssertEqual(mapped.location, "", "no address means no commute and no trip")
+    }
+
+    func testCommonMeetingHostsAreAllTreatedAsOnline() {
+        for link in ["https://zoom.us/j/123", "https://teams.microsoft.com/l/meetup-join/x",
+                     "https://meet.google.com/abc-defg-hij", "http://maven.com/s/joinlive/1"] {
+            XCTAssertTrue(EventKitService.isOnlineMeetingLink(link), link)
+        }
+    }
+
+    /// A Maps link genuinely names a place, and the app already resolves it.
+    func testAMapsLinkIsStillAPlace() {
+        XCTAssertFalse(EventKitService.isOnlineMeetingLink("https://maps.app.goo.gl/abc123"))
+        XCTAssertFalse(EventKitService.isOnlineMeetingLink("Tasvaa Skin And Hair Clinic"))
+    }
+
     // MARK: identity
 
     /// Two Outlook accounts invited to one meeting hand back two EKEvents with

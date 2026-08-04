@@ -892,6 +892,16 @@ struct DayPlannerView: View {
             let dead = CalendarTombstone.ids(in: modelContext)
             let offerable = found.filter { c in
                 guard c.externalID.isEmpty || !dead.contains(c.externalID) else { return false }
+                // An event we already hold is offered again when it has CHANGED
+                // — otherwise a title-and-start match hides a wrong end time or
+                // a stale address, and re-syncing can never heal a bad row.
+                if let held = events.first(where: { !c.externalID.isEmpty && $0.externalID == c.externalID }) {
+                    return held.endMinute != c.endMinute
+                        || held.startMinute != c.startMinute
+                        || held.isAllDay != c.isAllDay
+                        || held.destinationAddress != c.location
+                        || held.spanEndDate?.startOfDay != (c.spanDays > 1 ? c.endDay : nil)
+                }
                 return !selectedEvents.contains { $0.title == c.title && $0.startMinute == c.startMinute }
             }
             guard !offerable.isEmpty else {

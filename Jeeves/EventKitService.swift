@@ -116,12 +116,33 @@ enum EventKitService {
         let cal = Calendar.current
 
         let startDay = cal.startOfDay(for: start)
-        let endDay = cal.startOfDay(for: end)
+
+        // A MEETING THAT CROSSES MIDNIGHT IS STILL ONE MEETING.
+        //
+        // A 22:30–00:00 webinar occupies two calendar dates, and taking the
+        // span from those dates made it "2 days with a location" — which is
+        // precisely the shape TravelDetection reads as a trip. It offered to
+        // put the day into travel mode for an online talk.
+        //
+        // So a TIMED event spans multiple days only when it genuinely runs
+        // longer than a day; anything shorter belongs to the day it started.
+        // All-day events keep date arithmetic, because that is what a real
+        // multi-day trip looks like.
+        let spansRealDays = end.timeIntervalSince(start) > 24 * 60 * 60
+        let endDay = (event.isAllDay || spansRealDays) ? cal.startOfDay(for: end) : startDay
+
+        // …and its end minute is 24:00, not 00:00. Midnight read as minute 0
+        // put the end BEFORE the start, which is a negative-length block to
+        // everything downstream.
+        let rawEnd = minuteOfDay(end, cal)
+        let endMinute = (!event.isAllDay && endDay == startDay && rawEnd <= minuteOfDay(start, cal))
+            ? 24 * 60
+            : rawEnd
 
         var mapped = CalendarEvent(
             title: (event.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
             startMinute: event.isAllDay ? 0 : minuteOfDay(start, cal),
-            endMinute: event.isAllDay ? 0 : minuteOfDay(end, cal),
+            endMinute: event.isAllDay ? 0 : endMinute,
             location: locationText(event),
             isAllDay: event.isAllDay,
             externalID: event.calendarItemExternalIdentifier.map { "ek:\($0)" } ?? "",
@@ -142,11 +163,30 @@ enum EventKitService {
 
     /// The address if there is one, else the structured location's title —
     /// "Tasvaa Skin And Hair Clinic" is more use than an empty string.
-    private static func locationText(_ event: EKEvent) -> String {
+    ///
+    /// A JOINING LINK IS NOT A PLACE. Calendar invites routinely put
+    /// "https://maven.com/s/joinlive/…" or a Teams URL in the location field.
+    /// Stored as an address it becomes somewhere to commute to, and combined
+    /// with a span it reads as travel — the app offered a trip for a webinar.
+    /// A Maps link is the exception: that one really does name a place, and
+    /// the app already knows how to resolve it.
+    static func locationText(_ event: EKEvent) -> String {
         let raw = (event.location ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !raw.isEmpty { return raw }
-        return (event.structuredLocation?.title ?? "")
+        let fallback = (event.structuredLocation?.title ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        for candidate in [raw, fallback] where !candidate.isEmpty {
+            if isOnlineMeetingLink(candidate) { continue }
+            return candidate
+        }
+        return ""
+    }
+
+    /// A web link that isn't a Maps link — i.e. somewhere you attend, not
+    /// somewhere you travel to.
+    static func isOnlineMeetingLink(_ text: String) -> Bool {
+        let t = text.lowercased()
+        guard t.hasPrefix("http://") || t.hasPrefix("https://") else { return false }
+        return !GoogleMapsService.isMapsLink(text)
     }
 
     private static func minuteOfDay(_ date: Date, _ cal: Calendar) -> Int {
