@@ -882,6 +882,45 @@ final class ChatToolExecutorTests: XCTestCase {
                       "time change on today must carry the replan hint: \(result.text)")
     }
 
+    /// The inverse, and the reason the old gate was wrong: with no plan on the
+    /// day there is nothing to invalidate, and the hint used to point the model
+    /// at replan_today — which answers "there's no plan for today yet".
+    func testAnUnplannedDayCarriesNoReplanHint() async {
+        let context = container.mainContext
+        context.insert(DailyEvent(date: Date().startOfDay, title: "Standup",
+                                  startMinute: 600, endMinute: 660))
+        try? context.save()
+
+        let result = await executor.run(.init(
+            id: "r1", name: "edit_event",
+            input: ["title": "Standup", "new_end": "12:00"]))
+
+        XCTAssertFalse(result.text.contains("OFFER to replan"),
+                       "nothing was planned, so nothing went stale: \(result.text)")
+    }
+
+    /// Moving an event to ANOTHER DAY writes only e.date, so the old
+    /// `timesChanged && touchesToday` gate never fired — and BOTH days are now
+    /// wrong: the one it left still has a block for it, the one it landed on
+    /// has none.
+    func testMovingAnEventToAnotherDayStalesBothDays() async {
+        let context = container.mainContext
+        context.insert(DailyEvent(date: Date().startOfDay, title: "Standup",
+                                  startMinute: 600, endMinute: 660))
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date())!.startOfDay
+        committedPlan(on: Date().startOfDay, in: context)
+        committedPlan(on: tomorrow, in: context)
+        try? context.save()
+
+        _ = await executor.run(.init(id: "r1", name: "edit_event",
+                                     input: ["title": "Standup", "shift_by_days": 1]))
+
+        XCTAssertTrue(DailyPlanState.forDay(Date().startOfDay, in: context).isPlanStale,
+                      "the day it left still has a block for an event that moved")
+        XCTAssertTrue(DailyPlanState.forDay(tomorrow, in: context).isPlanStale,
+                      "the day it landed on has no block for it")
+    }
+
     // MARK: relative time edits (no head-math)
 
     func testExtendByMinutesLengthensFromTheStoredEnd() async {
