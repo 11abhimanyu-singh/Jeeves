@@ -52,4 +52,15 @@ enum RoutableOrigin {
 
     /// What to show where a leave-by would have gone. Never a time.
     static let missingHomeMessage = "Leave-by needs your home address"
+
+    /// The same, naming the label that could not be resolved. "Leave-by needs
+    /// your home address" was shown when the unresolved place was Work, which
+    /// sends the user to correct something that was never wrong.
+    nonisolated static func missingAddressMessage(for label: String) -> String {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return missingHomeMessage }
+        return isPlaceholder(trimmed) && trimmed.lowercased().hasPrefix("home")
+            ? missingHomeMessage
+            : "Leave-by needs an address for \(trimmed)"
+    }
 }

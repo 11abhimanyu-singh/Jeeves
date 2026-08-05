@@ -224,8 +224,12 @@ struct LeaveByCard: View {
                         // When the road has refuted it, say what it said. "I've
                         // assumed you're driving" alone tells you there is a
                         // doubt; it does not tell you the Java Sea is in the way.
+                        // Don't point at a button that isn't on screen: Measure
+                        // only renders once there is a To to measure towards.
                         Text(segment.modeRefutation.isEmpty
-                             ? "I've assumed you're driving. Tap Measure, or set the mode yourself."
+                             ? (segment.toPlace.isEmpty
+                                ? "I've assumed you're driving. Open this journey to set the mode, or add where it goes and I'll check."
+                                : "I've assumed you're driving. Tap Measure, or open this journey to set the mode.")
                              : segment.modeRefutation)
                             .font(.ui(10.5))
                             .fixedSize(horizontal: false, vertical: true)
@@ -283,7 +287,7 @@ struct LeaveByCard: View {
                 // the user to fix something that was never wrong.
                 measureNote = from.isEmpty && startsFromAnAddresslessStay
                     ? "I don't know where this starts — \(precedingStay?.place ?? "the stay before it") has no address yet. Add one and I'll measure the drive."
-                    : RoutableOrigin.missingHomeMessage
+                    : RoutableOrigin.missingAddressMessage(for: from)
                 pricing = false
                 return
             }

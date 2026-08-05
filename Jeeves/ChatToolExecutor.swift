@@ -997,6 +997,12 @@ final class ChatToolExecutor {
         let oldRange = fmtRange(stay)
         stay.arriveDate = wantArrive
         stay.departDate = wantDepart
+        // The user has just stated the dates, so there is nothing left to be
+        // unsure about. endIsUnsettled was a one-way ratchet: once a calendar
+        // block set it, no later statement of fact could clear it, and the
+        // stay went on offering "7 or 8 nights" over a date its owner had
+        // since given in plain words.
+        stay.endIsUnsettled = false
         // A policy change is a real change. Told "checkout is before 11:30,
         // check-in after 2pm", the executor stored the minutes and stopped —
         // resync only ran on a DATE move — so the drive between two hotels

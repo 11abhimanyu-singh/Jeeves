@@ -548,6 +548,46 @@ final class TravelCorrectnessTests: XCTestCase {
                       "both blank — and the move is still real")
     }
 
+    // MARK: - You cannot leave for an airport you never left
+
+    /// TR 8600 departs Changi 1 h 20 m after SQ 511 lands there. The resolver
+    /// already called that a connection, but every leg got a standalone chain
+    /// with a 180-minute cut-off — telling the user to reach an airport they
+    /// were standing in, at a time three hours before they landed.
+    func testAConnectingLegHasNoLeaveBy() {
+        let s = TravelSegment(tripID: UUID(), mode: .flight, label: "TR 8600",
+                              departAt: Date().addingTimeInterval(7200),
+                              isAirsideConnection: true)
+        XCTAssertNil(LeaveBy.plan(for: s), "no commute, no cut-off, nothing to leave for")
+    }
+
+    /// The first leg of the same ticket still gets its chain: you do have to
+    /// get to Bengaluru airport.
+    func testTheFirstLegStillHasALeaveBy() {
+        let s = TravelSegment(tripID: UUID(), mode: .flight, label: "SQ 511",
+                              departAt: Date().addingTimeInterval(7200),
+                              travelMinutes: 95)
+        XCTAssertNotNil(LeaveBy.plan(for: s))
+    }
+
+    // MARK: - Naming the address that is actually missing
+
+    func testTheRefusalNamesTheUnresolvedPlace() {
+        XCTAssertEqual(RoutableOrigin.missingAddressMessage(for: "Work"),
+                       "Leave-by needs an address for Work")
+        XCTAssertEqual(RoutableOrigin.missingAddressMessage(for: "Office"),
+                       "Leave-by needs an address for Office")
+    }
+
+    /// Home keeps its own sentence — it is the one place the generic message
+    /// was ever right about.
+    func testHomeKeepsItsOwnMessage() {
+        XCTAssertEqual(RoutableOrigin.missingAddressMessage(for: "Home"),
+                       RoutableOrigin.missingHomeMessage)
+        XCTAssertEqual(RoutableOrigin.missingAddressMessage(for: ""),
+                       RoutableOrigin.missingHomeMessage)
+    }
+
     // MARK: - A failure of ours is not a fact about the world
 
     /// The QA walk caught this: commuteRoute returns nil for a missing API key,

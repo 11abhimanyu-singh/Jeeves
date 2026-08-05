@@ -149,7 +149,17 @@ struct DayPlannerView: View {
         guard tripCovering(selectedDate) == nil else { return nil }
         guard !dismissedTravelDays.contains(selectedDate.startOfDay) else { return nil }
         let cal = Calendar.current
-        let dayEvents = events.filter { cal.isDate($0.date, inSameDayAs: selectedDate) }
+        // Any event COVERING the day, not only one that starts on it. A
+        // multi-day block is stored as a single row dated its first day, so
+        // the banner existed on 4 Sep and nowhere else — scroll to the 6th of
+        // an unaccepted eight-day trip and the planner offered an ordinary
+        // Saturday with no hint that a trip was sitting in the calendar.
+        let dayEvents = events.filter { e in
+            let start = cal.startOfDay(for: e.date)
+            let end = cal.startOfDay(for: e.spanEndDate ?? e.date)
+            let day = cal.startOfDay(for: selectedDate)
+            return day >= start && day <= end
+        }
         guard !dayEvents.isEmpty else { return nil }
 
         let candidates = dayEvents.map { e -> TravelDetection.Candidate in

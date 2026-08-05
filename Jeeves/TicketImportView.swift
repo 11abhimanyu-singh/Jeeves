@@ -425,7 +425,8 @@ struct TicketImportView: View {
                                         arriveAt: journey.arriveAt,
                                         fromTimeZoneID: journey.fromTimeZoneID,
                                         toTimeZoneID: journey.toTimeZoneID,
-                                        checkInMinutes: journey.checkInMinutes)
+                                        checkInMinutes: journey.checkInMinutes,
+                                        isAirsideConnection: journey.followsAirsideConnection)
             modelContext.insert(segment)
         }
 

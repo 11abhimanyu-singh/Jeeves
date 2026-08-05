@@ -122,6 +122,10 @@ final class TravelSegment {
     /// you're driving" but never "…and there is no road route to Singapore",
     /// which is the half that tells you what to do about it.
     var modeRefutation: String = ""
+    /// Boarded airside off the previous leg. There is no journey to it, so
+    /// there is nothing to leave for — `LeaveBy.plan` returns nil rather than
+    /// inventing a cut-off for an airport you never left.
+    var isAirsideConnection: Bool = false
 
     init(id: UUID = UUID(), tripID: UUID, mode: TravelMode, label: String,
          fromPlace: String = "", toPlace: String = "",
@@ -131,7 +135,8 @@ final class TravelSegment {
          securityMinutes: Int = 30, bufferMinutes: Int = 20,
          stopMinutes: Int = 0, travelMinutes: Int = 0, travelIsEstimated: Bool = true,
          measuredAt: Date? = nil, modeIsAssumed: Bool = false,
-         modeRefutation: String = "") {
+         modeRefutation: String = "",
+         isAirsideConnection: Bool = false) {
         self.id = id
         self.tripID = tripID
         self.modeRaw = mode.rawValue
@@ -152,6 +157,7 @@ final class TravelSegment {
         self.measuredAt = measuredAt
         self.modeIsAssumed = modeIsAssumed
         self.modeRefutation = modeRefutation
+        self.isAirsideConnection = isAirsideConnection
     }
 
     /// Airline guidance for an international departure, and the value a
@@ -631,6 +637,10 @@ enum LeaveBy {
 
     /// The chain for a stored segment, or nil when it lacks the times it needs.
     nonisolated static func plan(for s: TravelSegment) -> Plan? {
+        // Nothing to leave for. You are already airside, the gate is a walk
+        // away, and a chain here would subtract a three-hour cut-off from a
+        // flight you board without passing a check-in desk.
+        guard !s.isAirsideConnection else { return nil }
         switch s.mode {
         case .flight, .train:
             guard s.departAt != .distantPast else { return nil }

@@ -39,6 +39,9 @@ struct PlannedJourney: Equatable, Sendable {
     var toTerminal: String?
     /// International check-in cut-off the ticket itself states.
     var checkInMinutes: Int
+    /// You board this one airside, straight off the previous leg. No commute,
+    /// no cut-off, no leave-by — the gate is a walk away.
+    var followsAirsideConnection: Bool = false
 }
 
 /// What the import would do to the store.
@@ -111,7 +114,21 @@ enum TicketImportPlanner {
         let tripEnd = startOfDay(last.arriveUTC, in: endZone, calendar: calendar)
 
         let stays = plannedStays(from: itinerary, calendar: calendar)
-        let journeys = itinerary.legs.map(plannedJourney)
+        // A leg you board WITHOUT leaving the airport has no door-to-terminal
+        // journey and so no leave-by. TR 8600 departs Changi 1 h 20 m after
+        // SQ 511 lands there — the resolver already calls that a connection,
+        // but the plan threw the classification away and every leg got a
+        // standalone chain with a 180-minute cut-off, telling the user to reach
+        // an airport they were already standing in.
+        let afterConnection: Set<Int> = Set(
+            itinerary.layovers.enumerated()
+                .filter { $0.element.kind == .connection }
+                .map { $0.offset + 1 })          // the leg that follows the gap
+        let journeys = itinerary.legs.enumerated().map { index, leg in
+            var j = plannedJourney(leg)
+            j.followsAirsideConnection = afterConnection.contains(index)
+            return j
+        }
 
         let title = tripTitle(for: stays, itinerary: itinerary)
 
