@@ -32,7 +32,14 @@ final class PlanGenerationLog {
     var triggerRaw: String = PlanGenTrigger.planner.rawValue
     var outcomeRaw: String = PlanGenOutcome.pending.rawValue
     var retryCount: Int = 0
-    var errorClass: String? = nil
+    var errorClass: String?
+    /// Which RULES the first plan broke, when a repair round-trip was made.
+    ///
+    /// Up to 45% of chat generations were doing two full ~53s calls because the
+    /// first plan failed validation — the single largest slice of latency, and
+    /// latency is upstream of every failure mode. Nothing recorded WHICH rule,
+    /// so the repair rate was visible but not fixable.
+    var violationClass: String? = nil
 
     var trigger: PlanGenTrigger { PlanGenTrigger(rawValue: triggerRaw) ?? .planner }
     var outcome: PlanGenOutcome {
@@ -62,14 +69,48 @@ enum PlanDiagnostics {
     }
 
     /// Resolve the pending record once generation returns.
-    static func finish(_ log: PlanGenerationLog, isOffline: Bool, retryCount: Int, commuteMs: Int, claudeMs: Int, errorClass: String?, startedAt: Date, context: ModelContext) {
+    static func finish(_ log: PlanGenerationLog, isOffline: Bool, retryCount: Int, commuteMs: Int, claudeMs: Int, errorClass: String?, startedAt: Date, context: ModelContext,
+                       violations: [String] = []) {
         log.durationMs = Int(Date().timeIntervalSince(startedAt) * 1000)
         log.commuteMs = commuteMs
         log.claudeMs = claudeMs
         log.outcome = outcome(isOffline: isOffline, retryCount: retryCount)
         log.retryCount = retryCount
         log.errorClass = errorClass
+        log.violationClass = violations.isEmpty ? nil : Self.violationKinds(violations)
         context.saveOrLog()
+    }
+
+    /// Violation MESSAGES carry specifics ("'Lunch' starts 14:45, past the
+    /// 14:30 deadline"); what's wanted for a tally is the KIND. Reduce each to
+    /// a stable slug so a week of logs answers "which rule does the model break
+    /// most" instead of producing 40 unique strings.
+    static func violationKinds(_ messages: [String]) -> String {
+        var kinds: [String] = []
+        for m in messages {
+            let t = m.lowercased()
+            let kind: String
+            // Matched against the messages the validator ACTUALLY emits (see
+            // PlanValidation and PlanRules.prepBreatherViolations) — the first
+            // draft of this guessed at wordings and classified the breather
+            // rule, whose message never says "breather", as "other".
+            if t.contains("overlap") { kind = "overlap" }
+            else if t.contains("lunch") { kind = "lunch-window" }
+            else if t.contains("between them") || t.contains("interview-prep blocks need") {
+                kind = "prep-breather"
+            }
+            else if t.contains("must-do dropped") || t.contains("dropped") { kind = "dropped-must-do" }
+            else if t.contains("weightlifting") || t.contains("gym routine") || t.contains("gym day") {
+                kind = "gym-shape"
+            }
+            else if t.contains("measures") || t.contains("commute") { kind = "commute-length" }
+            else if t.contains("event block") { kind = "event-count" }
+            else if t.contains("work was dropped") || t.contains("nothing") { kind = "wasted-afternoon" }
+            else if t.contains("boundary") || t.contains("20:30") { kind = "past-boundary" }
+            else { kind = "other" }
+            if !kinds.contains(kind) { kinds.append(kind) }
+        }
+        return kinds.sorted().joined(separator: ",")
     }
 
     /// A generation still `pending` well after it started never returned — mark
