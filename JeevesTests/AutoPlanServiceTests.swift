@@ -49,6 +49,51 @@ final class AutoPlanServiceTests: XCTestCase {
 
     // MARK: Next early-morning wake
 
+    // MARK: one pass, one day — the burst the device log was full of
+
+    /// Foregrounding used to start a sweep of up to FOUR sequential ~64s
+    /// generations. You open the app, glance, and leave; the rest of the sweep
+    /// dies with the suspension. The log shows the shape: three and four
+    /// failures seconds apart, over and over.
+    func testAForegroundPassTakesOneDayNotTheWholeWindow() {
+        let outstanding = [day(0), day(1), day(2), day(3)]
+        XCTAssertEqual(AutoPlanService.batch(outstanding: outstanding, maxPerPass: 1), [day(0)],
+                       "a glance at the app is not four minutes of network work")
+    }
+
+    /// The overnight task has a real time budget, so it takes the window.
+    func testTheOvernightPassTakesTheWholeWindow() {
+        let outstanding = [day(0), day(1), day(2), day(3)]
+        XCTAssertEqual(AutoPlanService.batch(outstanding: outstanding,
+                                             maxPerPass: AutoPlanService.windowDays).count, 4)
+    }
+
+    func testACapCannotBeZeroOrNegative() {
+        let outstanding = [day(0), day(1)]
+        XCTAssertEqual(AutoPlanService.batch(outstanding: outstanding, maxPerPass: 0).count, 1,
+                       "a pass that plans nothing would never fill the window")
+        XCTAssertEqual(AutoPlanService.batch(outstanding: outstanding, maxPerPass: -3).count, 1)
+    }
+
+    func testNothingOutstandingIsNothingToDo() {
+        XCTAssertTrue(AutoPlanService.batch(outstanding: [], maxPerPass: 4).isEmpty)
+    }
+
+    // MARK: the backoff boundary
+
+    func testABackoffHoldsUntilItExpires() {
+        let now = today
+        let inTen = now.addingTimeInterval(600)
+        XCTAssertTrue(AutoPlanService.isBackedOff(now: now, until: inTen))
+        XCTAssertFalse(AutoPlanService.isBackedOff(now: inTen, until: inTen),
+                       "at the boundary the backoff is over")
+        XCTAssertFalse(AutoPlanService.isBackedOff(now: now.addingTimeInterval(1200), until: inTen))
+    }
+
+    func testNoBackoffRecordedMeansGoAhead() {
+        XCTAssertFalse(AutoPlanService.isBackedOff(now: today, until: nil))
+    }
+
     func testEarlyMorningLaterTodayWhenBeforeTarget() {
         let twoAM = Calendar.current.date(bySettingHour: 2, minute: 0, second: 0, of: today)!
         let next = AutoPlanService.nextEarlyMorning(after: twoAM)

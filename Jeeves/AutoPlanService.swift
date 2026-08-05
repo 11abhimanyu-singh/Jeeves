@@ -59,13 +59,19 @@ enum AutoPlanService {
     /// 4 a.m. notification. Returns how many days it filled.
     @MainActor
     @discardableResult
-    static func ensureUpcomingPlans(context: ModelContext, referenceNow: Date = Date()) async -> Int {
+    /// - Parameter maxPerPass: how many days one pass may plan. A foreground
+    ///   glance gets ONE — four sequential ~64s calls is minutes of work behind
+    ///   a screen the user is about to leave, and leaving kills the rest.
+    ///   The overnight task, which has a real time budget, takes the window.
+    static func ensureUpcomingPlans(context: ModelContext, referenceNow: Date = Date(),
+                                    maxPerPass: Int = 1) async -> Int {
         let plans = (try? context.fetch(FetchDescriptor<DailyPlanState>())) ?? []
         let plannedDays = Set(plans.filter { $0.plan != nil }.map { $0.date.startOfDay })
         // A trip owns its days: the overnight loop must never refill a travel
         // day the user deliberately left plan-free.
-        let needed = daysNeedingPlans(from: referenceNow, days: windowDays, plannedDays: plannedDays)
+        let outstanding = daysNeedingPlans(from: referenceNow, days: windowDays, plannedDays: plannedDays)
             .filter { !TravelGuard.isTravelDay($0, context: context) }
+        let needed = batch(outstanding: outstanding, maxPerPass: maxPerPass)
         guard !needed.isEmpty else {
             // Nothing to do → clear any prior back-off; the window is healthy.
             UserDefaults.standard.removeObject(forKey: cooldownKey)
@@ -73,9 +79,23 @@ enum AutoPlanService {
         }
         // Back off after a recent failed pass so a persistent outage doesn't burn
         // minutes of doomed network work on every foregrounding.
-        if let until = UserDefaults.standard.object(forKey: cooldownKey) as? Date, referenceNow < until {
+        if isBackedOff(now: referenceNow,
+                       until: UserDefaults.standard.object(forKey: cooldownKey) as? Date) {
             return 0
         }
+
+        // ARM THE BACKOFF BEFORE THE WORK, not after.
+        //
+        // The cooldown exists precisely so a persistent outage doesn't re-run
+        // doomed generations on every foregrounding — but it was written at the
+        // END of the pass, and a pass killed mid-flight (the app suspended
+        // while a ~64s call was in the air) never reaches its own end. So it
+        // was never written, and the next foregrounding started the same sweep
+        // again. The device log shows the result: bursts of three and four
+        // failures seconds apart, over and over.
+        //
+        // Assume this pass will fail; clear it below if it doesn't.
+        UserDefaults.standard.set(referenceNow.addingTimeInterval(failureCooldown), forKey: cooldownKey)
 
         let allEvents = (try? context.fetch(FetchDescriptor<DailyEvent>())) ?? []
         let locations = (try? context.fetch(FetchDescriptor<SavedLocation>())) ?? []
@@ -114,7 +134,11 @@ enum AutoPlanService {
             // An offline (deterministic) plan is a poor thing to silently pin
             // for a FUTURE day — leave the gap so the foreground path (or the
             // user) can build a real one once the network is back.
-            guard !result.isOffline else { continue }
+            // STOP, don't carry on down the list. The planner being unreachable
+            // is a property of the network, not of this particular day — the
+            // remaining days would fail identically, which is exactly the burst
+            // of 1-4 second failures the log is full of.
+            guard !result.isOffline else { break }
 
             // The shared commit — this path used to store the plan and schedule
             // its reminders, but neither the timing nudges nor the traffic
@@ -123,11 +147,11 @@ enum AutoPlanService {
                                          hasGymToday: state.hasGymToday, gymMinute: state.gymMinute)
             filled += 1
         }
-        // If any gap survived (a day fell back to offline / the planner was
-        // unreachable), arm the cooldown; a fully-filled window clears it.
-        if filled < needed.count {
-            UserDefaults.standard.set(referenceNow.addingTimeInterval(failureCooldown), forKey: cooldownKey)
-        } else {
+        // Cleared only when this pass did everything it set out to do. Against
+        // `needed` (the capped batch), not the whole window — otherwise a
+        // healthy pass that planned its one day would leave itself backed off
+        // for half an hour and the window would fill at a day per 30 minutes.
+        if filled == needed.count {
             UserDefaults.standard.removeObject(forKey: cooldownKey)
         }
         return filled
@@ -151,7 +175,7 @@ enum AutoPlanService {
                 if !already { processing.setTaskCompleted(success: success) }
             }
             let work = Task { @MainActor in
-                await ensureUpcomingPlans(context: container.mainContext)
+                await ensureUpcomingPlans(context: container.mainContext, maxPerPass: windowDays)
                 scheduleNext(context: container.mainContext)   // re-arm for the next morning
                 complete(true)
             }
@@ -167,6 +191,21 @@ enum AutoPlanService {
         request.requiresExternalPower = false
         request.earliestBeginDate = nextEarlyMorning(after: now)
         try? BGTaskScheduler.shared.submit(request)
+    }
+
+    /// The days ONE pass may attempt. Pure, so the cap is testable without a
+    /// network: a foreground glance takes one day, the overnight task the whole
+    /// window.
+    static func batch(outstanding: [Date], maxPerPass: Int) -> [Date] {
+        Array(outstanding.prefix(max(1, maxPerPass)))
+    }
+
+    /// Whether a recent failure is still holding this pass back. Pure so the
+    /// boundary is testable — the bug was never this decision, it was that the
+    /// backoff got written too late to be read.
+    static func isBackedOff(now: Date, until: Date?) -> Bool {
+        guard let until else { return false }
+        return now < until
     }
 
     /// The next ~4:30 a.m. strictly after `now`. Pure so the scheduling window
