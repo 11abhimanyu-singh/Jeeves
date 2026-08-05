@@ -796,20 +796,11 @@ struct DayPlannerView: View {
                 }
                 .buttonStyle(.plain)
                 .frame(minWidth: 44, minHeight: 44)
-                .accessibilityLabel("Add from this phone's calendars")
+                .accessibilityLabel("Add from my calendars")
                 .contextMenu {
                     Button("Choose calendars…") { showDeviceCalendars = true }
                 }
 
-                if KeychainService.isGoogleCalendarConnected {
-                    Button { importFromCalendar() } label: {
-                        Image(systemName: "calendar.badge.plus")
-                            .font(.ui(16))
-                            .foregroundStyle(Color.accentDeep)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isImportingCalendar)
-                }
                 Button { addEvent() } label: {
                     Label("Add", systemImage: "plus")
                         .font(.ui(13, weight: .semibold))
@@ -843,42 +834,11 @@ struct DayPlannerView: View {
 
     // MARK: Google Calendar import (reviewed)
 
-    private func importFromCalendar() {
-        isImportingCalendar = true
-        calendarError = nil
-        let day = selectedDate
-        Task {
-            defer { isImportingCalendar = false }
-            do {
-                var evs = try await GoogleCalendarService.events(on: day)
-                // A deleted synced event stays deleted: tombstoned IDs are
-                // not even offered for re-import (they'd be pre-checked and
-                // quietly resurrected on confirm).
-                let dead = CalendarTombstone.ids(in: modelContext)
-                let before = evs.count
-                evs.removeAll { !$0.externalID.isEmpty && dead.contains($0.externalID) }
-                if evs.isEmpty {
-                    // "No events" would be a lie when everything on the day
-                    // was previously deleted here — say what actually happened.
-                    calendarError = before > 0
-                        ? "Only previously deleted events on this day — they stay deleted."
-                        : "No calendar events on \(day == today ? "today" : "this day")."
-                } else {
-                    calendarReview = CalendarReview(date: day, events: evs)
-                }
-            } catch {
-                calendarError = error.localizedDescription
-            }
-        }
-    }
-
-    /// Adds the user-selected calendar events to the planner, skipping any
-    /// that already exist on that day.
     /// Offer the selected day's events from every calendar on the phone.
     ///
-    /// Same review-then-confirm path as the Google import: nothing is written
-    /// until the user ticks it, deleted events stay deleted (tombstones), and
-    /// what's already on the day isn't offered twice.
+    /// Review then confirm: nothing is written until the user ticks it,
+    /// deleted events stay deleted (tombstones), and what's already on the day
+    /// is only re-offered when it has actually changed.
     private func importFromDeviceCalendars() {
         Task {
             guard await EventKitService.requestAccess() else {
@@ -912,6 +872,8 @@ struct DayPlannerView: View {
         }
     }
 
+    /// Adds the user-selected calendar events to the planner, skipping any
+    /// that already exist on that day.
     private func addFromCalendar(_ chosen: [CalendarEvent]) {
         for c in chosen {
             // Google's event id makes re-syncing idempotent: the SAME calendar

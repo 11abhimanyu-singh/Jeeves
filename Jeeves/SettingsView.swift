@@ -35,11 +35,9 @@ struct SettingsView: View {
     @State private var openAIInput = ""
     @State private var hasOpenAI = KeychainService.hasOpenAIAPIKey
 
-    @State private var clientIDInput = ""
-    @State private var hasClientID = KeychainService.hasGoogleClientID
-    @State private var isCalendarConnected = KeychainService.isGoogleCalendarConnected
-    @State private var isConnecting = false
-    @State private var calendarError: String?
+    /// Which of the phone's calendars Jeeves reads. There is no account to
+    /// connect any more — iOS owns the accounts, this owns the choice.
+    @State private var showDeviceCalendars = false
 
     var body: some View {
         Form {
@@ -117,6 +115,7 @@ struct SettingsView: View {
         .jeevesFormChrome()
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showDeviceCalendars) { DeviceCalendarsSheet() }
         .onAppear { seedLocationsIfNeeded(); Baseline.seed(into: modelContext); Baseline.regroup(in: modelContext) }
     }
 
@@ -277,52 +276,13 @@ struct SettingsView: View {
 
     private var calendarSection: some View {
         Section {
-            TextField("iOS OAuth client ID", text: $clientIDInput)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-            Button("Save client ID") {
-                KeychainService.saveGoogleClientID(clientIDInput)
-                hasClientID = true
-                clientIDInput = ""
-            }
-            .disabled(clientIDInput.trimmingCharacters(in: .whitespaces).isEmpty)
-
-            if hasClientID {
-                if isConnecting {
-                    HStack { ProgressView(); Text("Opening Google…").font(.ui(13)).foregroundStyle(.secondary) }
-                } else if isCalendarConnected {
-                    Label("Connected", systemImage: "checkmark.circle.fill").foregroundStyle(Color.sageDeep)
-                    Button("Disconnect", role: .destructive) {
-                        GoogleOAuthService.shared.disconnect()
-                        isCalendarConnected = false
-                    }
-                } else {
-                    Button("Connect Google Calendar") { connect() }
-                }
-            }
-            if let calendarError {
-                Text(calendarError).font(.ui(12)).foregroundStyle(Color.accentDeep)
-            }
+            Label("Read from this phone's calendars", systemImage: "calendar")
+                .foregroundStyle(Color.textPrimary)
+            Button("Choose calendars…") { showDeviceCalendars = true }
         } header: {
-            Text("Google Calendar")
+            Text("Calendars")
         } footer: {
-            Text(hasClientID
-                 ? "Lets Jeeves import today's events automatically. Read-only."
-                 : "Optional — import events from Google Calendar. In Google Cloud Console: enable the Google Calendar API, add the Calendar read-only scope on the OAuth consent screen (and yourself as a test user), then create an OAuth client ID of type iOS with bundle ID abhimanyusingh.me.Jeeves. Paste that client ID here.")
-        }
-    }
-
-    private func connect() {
-        isConnecting = true
-        calendarError = nil
-        Task {
-            do {
-                try await GoogleOAuthService.shared.connect()
-                isCalendarConnected = true
-            } catch {
-                calendarError = error.localizedDescription
-            }
-            isConnecting = false
+            Text("Jeeves reads whichever calendars you tick — Outlook, Google, iCloud, any account added to this phone. Add accounts in iOS Settings → Apps → Calendar → Accounts. Read-only, and no separate sign-in: the OAuth connection this used to need is gone.")
         }
     }
 
