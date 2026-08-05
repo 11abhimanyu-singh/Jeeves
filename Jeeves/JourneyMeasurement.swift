@@ -43,9 +43,13 @@ enum JourneyMeasurement {
                                    from: String, to: String) -> Decision {
         switch verdict {
         case .drive(let m):
-            return Decision(minutes: m, settlesMode: true, note: nil, mayNudge: true)
+            // Asks TransferMode rather than restating its rule: two places
+            // deciding what settles a mode is how they drift apart.
+            return Decision(minutes: m,
+                            settlesMode: TransferMode.settlesTheAssumption(verdict),
+                            note: nil, mayNudge: true)
 
-        case .tooFarToDrive(let m):
+        case .tooFarToDrive(let m, _):
             // Keep the reading, keep the doubt, and do NOT nudge: an unqualified
             // "leave at 05:55" for a journey we don't believe is a drive is
             // worse than silence.

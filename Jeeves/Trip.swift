@@ -167,6 +167,7 @@ final class TravelSegment {
     /// only one of those should let a leave-by notification fire unquestioned.
     nonisolated enum Freshness: Sendable, Equatable {
         case never                     // nobody has measured this
+        case undated                   // measured, but nothing recorded when
         case predicted(daysAhead: Int) // measured for a departure still in the future
         case live(ageMinutes: Int)     // measured close to the journey itself
     }
@@ -204,7 +205,12 @@ final class TravelSegment {
 
     /// `now` and the journey instant are passed in so this stays pure and testable.
     nonisolated func freshness(now: Date = Date()) -> Freshness {
-        guard !travelIsEstimated, let taken = measuredAt else { return .never }
+        guard !travelIsEstimated else { return .never }
+        // A row that says "measured" with no timestamp comes from a device that
+        // predates `measuredAt` — this app mirrors through CloudKit, so an old
+        // build on another phone keeps writing them. Rendering those as
+        // "measured against live traffic" claims a freshness nobody recorded.
+        guard let taken = measuredAt else { return .undated }
         let ageMinutes = max(0, Int(now.timeIntervalSince(taken) / 60))
         guard let anchor = journeyInstant else { return .live(ageMinutes: ageMinutes) }
         let untilDeparture = anchor.timeIntervalSince(taken)
@@ -407,22 +413,11 @@ enum Itinerary {
         var endIsUnsettled: Bool = false
     }
 
-    /// Nights slept in a span. `end` is the last night, so both ends count.
-    nonisolated static func nights(_ span: Span, calendar: Calendar = .current) -> Int {
-        let days = calendar.dateComponents([.day],
-                                           from: calendar.startOfDay(for: span.start),
-                                           to: calendar.startOfDay(for: span.end)).day ?? 0
-        return max(0, days) + 1
-    }
-
-    /// What to show. A settled span has one answer; an unsettled one has two,
-    /// and saying "3 or 4" is the honest rendering — never the mean, never the
-    /// lower one because it looks tidier.
-    nonisolated static func nightsRange(_ span: Span,
-                                        calendar: Calendar = .current) -> ClosedRange<Int> {
-        let n = nights(span, calendar: calendar)
-        return span.endIsUnsettled ? (max(0, n - 1))...n : n...n
-    }
+    // Nights are counted on TripStay, not here. These two once existed on Span
+    // as well, counting the OTHER way (end as last-night, +1) — two functions
+    // of the same name disagreeing by one, which is precisely the confusion
+    // this branch set out to remove. A Span is a transient input to the
+    // resolver; only the stored stay has a nights count worth asking for.
 
     /// Calendars overlap, because people add a new leg without trimming the old
     /// one: "Bali 3–12 Sep" and "Travel to Singapore 11–14 Sep" both claim the

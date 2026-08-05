@@ -506,16 +506,26 @@ final class ChatToolExecutor {
 
     @MainActor
     private func toolCommuteEstimate(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
-        let destination = input["destination"] as? String ?? ""
-        guard !destination.isEmpty, let arriveMinute = minutesFrom(input["arrive_by"] as? String) else {
+        let destinationRaw = input["destination"] as? String ?? ""
+        guard !destinationRaw.isEmpty, let arriveMinute = minutesFrom(input["arrive_by"] as? String) else {
             return .init(text: "Need a destination and an arrive_by time (HH:MM).")
         }
-        // Named origins resolve through the user's saved locations.
+        // BOTH ends resolve through the user's saved locations, and both are
+        // then checked. Only the origin was guarded, so "when should I leave
+        // for work" POSTed the literal word "Work" to Google as a destination
+        // and rendered whatever came back as a measured commute — the same
+        // defect this whole branch exists to remove, on the other side of the
+        // same call.
+        func resolve(_ raw: String) -> String {
+            locations.first { $0.kind.rawValue.lowercased() == raw.lowercased() }
+                .map(\.address).flatMap { $0.isEmpty ? nil : $0 } ?? raw
+        }
         let originRaw = (input["origin"] as? String ?? "Home")
-        let resolvedOrigin = locations.first { $0.kind.rawValue.lowercased() == originRaw.lowercased() }
-            .map(\.address).flatMap { $0.isEmpty ? nil : $0 } ?? originRaw
-        guard let origin = RoutableOrigin.address(resolvedOrigin) else {
+        guard let origin = RoutableOrigin.address(resolve(originRaw)) else {
             return .init(text: "I don't have an address for \(originRaw), so I can't measure that. Add one in Settings and ask me again.")
+        }
+        guard let destination = RoutableOrigin.address(resolve(destinationRaw)) else {
+            return .init(text: "I don't have an address for \(destinationRaw), so I can't measure that. Add one in Settings and ask me again.")
         }
         let day = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: Date())
         let arrival = Calendar.current.date(bySettingHour: arriveMinute / 60, minute: arriveMinute % 60,
@@ -1630,7 +1640,20 @@ final class ChatToolExecutor {
                     "trip": trips.first { $0.id == s.tripID }?.title ?? "(no trip — orphaned)",
                     // Never a confident zero: an unmeasured leg says so.
                     "travelMinutes": s.travelMinutes > 0 ? "\(s.travelMinutes)" : "not measured",
+                    // How old the number is, and whether anyone chose the mode.
+                    // Chat was reading a sixteen-day-old forecast as fact and
+                    // calling an assumed drive a drive.
+                    "measurement": {
+                        switch s.freshness() {
+                        case .never: return "never measured"
+                        case .undated: return "measured, but no record of when (older device)"
+                        case .predicted(let d): return "forecast, made \(d) day\(d == 1 ? "" : "s") before the journey"
+                        case .live(let age): return age < 60 ? "measured just now" : "measured \(LeaveBy.hours(age)) ago"
+                        }
+                    }(),
+                    "mode_is_assumed": s.modeIsAssumed,
                 ]
+                if !s.modeRefutation.isEmpty { row["mode_doubt"] = s.modeRefutation }
                 if let plan = LeaveBy.plan(for: s) {
                     row["leaveBy"] = TravelClock.hhmm(plan.leaveAt, in: s.fromTimeZone)
                 }
@@ -1642,9 +1665,15 @@ final class ChatToolExecutor {
                 .filter { inWindow($0.arriveDate, $0.departDate) }
             let trips = (try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []
             return json(all.sorted { $0.arriveDate < $1.arriveDate }.map { s in
+                // The nights count and its doubt travel with the row. Without
+                // them chat computed its own figure from the two dates and
+                // stated it flatly — so the card said "7 or 8 nights" and the
+                // assistant said "7", from the same record, in the same app.
                 ["place": s.place, "address": s.address,
                  "arrive": df.string(from: s.arriveDate),
                  "depart": df.string(from: s.departDate),
+                 "nights": s.nightsText(),
+                 "end_is_unsettled": s.endIsUnsettled,
                  "checkin": StayWindow.clock(s.checkinMinute),
                  "checkout": StayWindow.clock(s.checkoutMinute),
                  "trip": trips.first { $0.id == s.tripID }?.title ?? "(no trip — orphaned)"]

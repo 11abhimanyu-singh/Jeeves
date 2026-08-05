@@ -278,8 +278,11 @@ struct LeaveByCard: View {
         let target = LeaveBy.plan(for: segment)?.leaveAt ?? Date()
         Task {
             guard let origin = await resolvedOrigin(from) else {
-                measureNote = from.isEmpty && startsFromAnEarlierStay
-                    ? "I don't know where this starts — the stay before it has no address yet. Add one and I'll measure the drive."
+                // Name the address that is actually missing. Saying "the stay
+                // before it has no address" when the missing one is home sends
+                // the user to fix something that was never wrong.
+                measureNote = from.isEmpty && startsFromAnAddresslessStay
+                    ? "I don't know where this starts — \(precedingStay?.place ?? "the stay before it") has no address yet. Add one and I'll measure the drive."
                     : RoutableOrigin.missingHomeMessage
                 pricing = false
                 return
@@ -323,11 +326,13 @@ struct LeaveByCard: View {
     private func resolvedOrigin(_ raw: String) async -> String? {
         let saved = (try? modelContext.fetch(FetchDescriptor<SavedLocation>())) ?? []
         if raw.isEmpty {
-            // Home is the right default for the journey that LEAVES home. It is
-            // the wrong one for a hotel-to-hotel transfer whose first hotel has
-            // no address yet: that measured Bengaluru → Bandipur and stored it
-            // as the Kabini → Bandipur drive, as a measured fact.
-            if startsFromAnEarlierStay { return nil }
+            // Home is the right default for the journey that LEAVES home. For a
+            // transfer out of an earlier stay, that stay's address is the
+            // origin — and when it HAS one we can now use it instead of
+            // refusing, which is what the first version did to everybody.
+            if let previous = precedingStay {
+                return RoutableOrigin.address(previous.address)
+            }
             return RoutableOrigin.address(saved.first { $0.kind == .home }?.address)
         }
         if let match = saved.first(where: { $0.kind.rawValue.lowercased() == raw.lowercased() }) {
@@ -336,16 +341,28 @@ struct LeaveByCard: View {
         return RoutableOrigin.address(raw)
     }
 
-    /// Does a stay end on or before this journey's day? If so, an empty From
-    /// means "that stay", not "home" — and since the stay has no address, the
-    /// honest answer is that we don't know where this starts.
-    private var startsFromAnEarlierStay: Bool {
-        guard let stays = try? modelContext.fetch(FetchDescriptor<TripStay>()) else { return false }
-        let day = Calendar.current.startOfDay(for: segment.day)
-        return stays.contains {
-            $0.tripID == segment.tripID
-                && Calendar.current.startOfDay(for: $0.arriveDate) < day
-        }
+    /// The stay this journey leaves FROM, when there is one: the latest stay of
+    /// the same trip whose own end has arrived by this journey's day.
+    ///
+    /// The first version tested only `arriveDate < day` and never looked at the
+    /// stay's address, so it refused with "the stay before it has no address
+    /// yet" for a stay that had one — a false reason and a dead end, since
+    /// adding the address the message asked for changed nothing.
+    private var precedingStay: TripStay? {
+        guard let stays = try? modelContext.fetch(FetchDescriptor<TripStay>()) else { return nil }
+        let cal = Calendar.current
+        let day = cal.startOfDay(for: segment.day)
+        return stays
+            .filter { $0.tripID == segment.tripID && cal.startOfDay(for: $0.arriveDate) < day }
+            .max { $0.arriveDate < $1.arriveDate }
+    }
+
+    /// A journey that leaves an earlier stay whose address we still don't have.
+    /// Home is not a stand-in for it: that measured Bengaluru → Bandipur and
+    /// stored it as the Kabini → Bandipur drive, as a measured fact.
+    private var startsFromAnAddresslessStay: Bool {
+        guard let previous = precedingStay else { return false }
+        return RoutableOrigin.address(previous.address) == nil
     }
 
     /// "Measured" was one word for two very different things: a traffic
@@ -355,6 +372,8 @@ struct LeaveByCard: View {
         switch segment.freshness() {
         case .never:
             return "Journey measured against live traffic. Cut-off, security and buffer are your assumptions."
+        case .undated:
+            return "Journey time was measured, but not when — it came from another device before I started recording that. Tap Measure for a fresh reading."
         case .predicted(let days):
             return "Journey time is Google's forecast for that time of day, taken \(days) day\(days == 1 ? "" : "s") ahead — not a road anyone has driven yet. Re-measure nearer the day."
         case .live(let age):
@@ -762,6 +781,7 @@ struct SegmentEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var label = ""
+    @State private var mode: TravelMode = .drive
     @State private var from = ""
     @State private var to = ""
     @State private var when = Date()
@@ -802,7 +822,9 @@ struct SegmentEditorView: View {
     @State private var didSave = false
     @State private var didDelete = false
 
-    private var isFlight: Bool { segment.mode != .drive }
+    /// Reads the PICKER, not the stored value, so the form re-shapes itself the
+    /// moment the mode is changed rather than after a save-and-reopen.
+    private var isFlight: Bool { mode != .drive }
     /// The clock the main time picker is read on: a flight departs on the
     /// origin's clock, but a drive's "must arrive by" lives at the DESTINATION
     /// — "arrive 15:00" means 15:00 where you're going.
@@ -812,6 +834,33 @@ struct SegmentEditorView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
+                    // The card can say "I've assumed you're driving — set the
+                    // mode yourself", and until now no surface anywhere could:
+                    // mode was fixed at creation. A refutation with no way to
+                    // act on it is just a complaint.
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("HOW YOU'RE TRAVELLING")
+                            .font(.ui(10.5, weight: .bold)).kerning(1.1)
+                            .foregroundStyle(Color.textMuted)
+                        Picker("Mode", selection: $mode) {
+                            ForEach(TravelMode.allCases, id: \.self) { m in
+                                Text(m.label).tag(m)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        if segment.modeIsAssumed {
+                            Text(segment.modeRefutation.isEmpty
+                                 ? "Nobody chose this — I assumed it. Setting it here makes it yours."
+                                 : segment.modeRefutation)
+                                .font(.ui(10.5))
+                                .foregroundStyle(Color.accentDeep)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
+
                     field("Name", text: $label, placeholder: isFlight ? "6E 1605" : "Drive to Bhadra")
                     // From/To are the two ends of the JOURNEY — for a flight
                     // that's door to departure airport, and the labels say so,
@@ -948,7 +997,7 @@ struct SegmentEditorView: View {
     private func load() {
         guard !loaded else { return }
         loaded = true
-        label = segment.label; from = segment.fromPlace; to = segment.toPlace
+        label = segment.label; mode = segment.mode; from = segment.fromPlace; to = segment.toPlace
         loadedFrom = from; loadedTo = to
         fromZoneID = segment.fromTimeZoneID; toZoneID = segment.toTimeZoneID
         // Show stored instants as the wall-clock they read on their own zone,
@@ -1006,6 +1055,13 @@ struct SegmentEditorView: View {
         } else {
             segment.arriveBy = departInstant
             segment.arriveAt = nil
+        }
+        // Choosing the mode makes it the user's, not ours — so the assumption
+        // and whatever refuted it both stop applying.
+        if segment.mode != mode {
+            segment.mode = mode
+            segment.modeIsAssumed = false
+            segment.modeRefutation = ""
         }
         segment.checkInMinutes = checkIn
         segment.securityMinutes = security
@@ -1323,6 +1379,10 @@ enum TravelNotifier {
         // computed from it would fire confidently wrong. The pending request
         // is already removed above, so a stale nudge dies here too.
         guard segment.travelMinutes > 0 else { return }
+        // A mode nobody chose and the road would not confirm has no business
+        // waking anyone at 06:00. The card carried this doubt; the
+        // notification — the half that actually gets acted on — did not.
+        guard !segment.modeIsAssumed || segment.modeRefutation.isEmpty else { return }
         let fire = plan.leaveAt.addingTimeInterval(-30 * 60)
         guard fire > Date() else { return }
         // Same authorization path as plan reminders — without it the nudge was
@@ -1340,9 +1400,24 @@ enum TravelNotifier {
             == TimeZone.current.secondsFromGMT(for: plan.leaveAt)
             ? "" : " \(TravelClock.label(segment.fromTimeZone, at: plan.leaveAt))"
         let what = segment.label.isEmpty ? segment.mode.label : segment.label
+        // "Journey time is an estimate" or nothing was the whole vocabulary, so
+        // a traffic forecast pulled a fortnight before the drive arrived in the
+        // same words as a reading taken ten minutes ago. The doubt has to
+        // survive the trip from the card to the lock screen.
+        let confidence: String
+        switch segment.freshness() {
+        case .never:
+            confidence = plan.travelIsEstimated ? ". Journey time is an estimate." : "."
+        case .undated:
+            confidence = ". Journey time was measured, but I don't know when."
+        case .predicted(let days):
+            confidence = ". Journey time is a forecast made \(days) day\(days == 1 ? "" : "s") ahead — check the traffic."
+        case .live:
+            confidence = "."
+        }
         content.body = "\(what) — leave at \(f.string(from: plan.leaveAt))\(zoneNote)"
             + (segment.toPlace.isEmpty ? "" : " for \(segment.toPlace)")
-            + (plan.travelIsEstimated ? ". Journey time is an estimate." : ".")
+            + confidence
         content.sound = .default
 
         let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fire)

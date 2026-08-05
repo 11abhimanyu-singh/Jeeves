@@ -28,8 +28,11 @@ enum TransferMode {
         /// Road-routable and a plausible length. Safe to present as a drive.
         case drive(minutes: Int)
         /// Road-routable, but nobody drives this in one go. Almost always a
-        /// sign the two ends are not connected the way we assumed.
-        case tooFarToDrive(minutes: Int)
+        /// sign the two ends are not connected the way we assumed. Carries the
+        /// distance because "11 h" invites an argument and "11 h and 3,400 km"
+        /// settles it — and because a distance we ask the API for and never
+        /// read is a field mask entry pretending to be a feature.
+        case tooFarToDrive(minutes: Int, kilometres: Double? = nil)
         /// The engine answered, and the answer is that there is no road. Across
         /// water, or an address it could not resolve.
         case notRoutableByRoad
@@ -52,7 +55,7 @@ enum TransferMode {
         guard let route else { return .notRoutableByRoad }
         return route.minutes <= plausibleDriveMinutes
             ? .drive(minutes: route.minutes)
-            : .tooFarToDrive(minutes: route.minutes)
+            : .tooFarToDrive(minutes: route.minutes, kilometres: route.kilometres)
     }
 
     /// The version that knows WHY there was no route. Prefer this everywhere a
@@ -81,8 +84,9 @@ enum TransferMode {
         switch verdict {
         case .drive:
             return nil
-        case .tooFarToDrive(let minutes):
-            return "\(from) to \(to) routes \(LeaveBy.hours(minutes)) by road. I'd assumed you were driving — how are you getting there?"
+        case .tooFarToDrive(let minutes, let km):
+            let distance = km.map { " and \(Int($0.rounded())) km" } ?? ""
+            return "\(from) to \(to) routes \(LeaveBy.hours(minutes))\(distance) by road. I'd assumed you were driving — how are you getting there?"
         case .notRoutableByRoad:
             return "There's no road route from \(from) to \(to). I'd assumed you were driving — how are you getting there?"
         case .couldNotAsk(let why):
@@ -91,7 +95,10 @@ enum TransferMode {
             case .noKey:
                 return "I couldn't check the drive from \(from) to \(to) — there's no Maps key saved. This is still an assumed drive."
             case .unreachable, .refused:
-                return "I couldn't reach Maps to check the drive from \(from) to \(to). I'll try again — this is still an assumed drive."
+                // No "I'll try again": nothing retries, and a promise the app
+                // does not keep is its own small lie. Tapping Measure is the
+                // retry, so say that.
+                return "I couldn't reach Maps to check the drive from \(from) to \(to) — tap Measure to try again. This is still an assumed drive."
             case .blankEndpoint:
                 return "I need an address for both ends before I can check the drive from \(from) to \(to)."
             case .noRouteFound:

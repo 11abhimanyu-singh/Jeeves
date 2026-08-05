@@ -62,11 +62,26 @@ final class TravelCorrectnessTests: XCTestCase {
              span("Bandipur", (2026, 8, 20), (2026, 8, 23))],
             calendar: cal)
 
-        XCTAssertEqual(Itinerary.nights(resolved[0], calendar: cal), 2)
-        XCTAssertEqual(Itinerary.nightsRange(resolved[0], calendar: cal), 2...2)
+        // Counted where they are stored. A Span's end is a last NIGHT and a
+        // stay's is the day you LEAVE, so the conversion is part of the answer
+        // — counting on the Span was a second nights function disagreeing with
+        // the first by one.
+        XCTAssertEqual(stayFrom(resolved[0]).nights(calendar: cal), 2)
+        XCTAssertEqual(stayFrom(resolved[0]).nightsRange(calendar: cal), 2...2)
 
-        XCTAssertEqual(Itinerary.nightsRange(resolved[1], calendar: cal), 3...4,
+        XCTAssertEqual(stayFrom(resolved[1]).nightsRange(calendar: cal), 3...4,
                        "the 23rd is either a last night or the morning you leave")
+    }
+
+    /// Mirrors DayPlannerView.acceptTravel's conversion: a settled end becomes
+    /// the day you leave; an unsettled one is stored as-is with the doubt.
+    private func stayFrom(_ span: Itinerary.Span) -> TripStay {
+        let depart = span.endIsUnsettled
+            ? span.end
+            : (cal.date(byAdding: .day, value: 1, to: span.end) ?? span.end)
+        return TripStay(tripID: UUID(), place: span.place,
+                        arriveDate: span.start, departDate: depart,
+                        endIsUnsettled: span.endIsUnsettled)
     }
 
     /// THE BLIND SPOT. Nothing here can tell which of the two readings is
@@ -77,7 +92,7 @@ final class TravelCorrectnessTests: XCTestCase {
         let resolved = Itinerary.resolveOverlaps([onlyStay], calendar: cal)
 
         XCTAssertTrue(resolved[0].endIsUnsettled)
-        XCTAssertEqual(Itinerary.nightsRange(resolved[0], calendar: cal), 7...8,
+        XCTAssertEqual(stayFrom(resolved[0]).nightsRange(calendar: cal), 7...8,
                        "a lone all-day block is genuinely ambiguous by one night")
     }
 
@@ -91,7 +106,7 @@ final class TravelCorrectnessTests: XCTestCase {
             calendar: cal)
 
         XCTAssertEqual(resolved[0].end, day(2026, 9, 10))
-        XCTAssertEqual(Itinerary.nightsRange(resolved[0], calendar: cal), 7...7,
+        XCTAssertEqual(stayFrom(resolved[0]).nightsRange(calendar: cal), 7...7,
                        "nights of the 4th to the 10th — the ticket's 169 h layover agrees")
     }
 
@@ -278,8 +293,29 @@ final class TravelCorrectnessTests: XCTestCase {
     /// route at all: do not call it a drive.
     func testAnAbsurdlyLongRoadRouteIsRefused() {
         let v = TransferMode.classify(route: route(minutes: 40 * 60, metres: 3_400_000))
-        XCTAssertEqual(v, .tooFarToDrive(minutes: 2400))
+        XCTAssertEqual(v, .tooFarToDrive(minutes: 2400, kilometres: 3400))
         XCTAssertFalse(TransferMode.settlesTheAssumption(v))
+    }
+
+    /// The distance is asked for in the field mask, so it must reach the user
+    /// somewhere. "11 h by road" invites an argument; "11 h and 3,400 km"
+    /// settles it — and a field parsed and never read is a mask entry
+    /// pretending to be a feature.
+    func testTheRefusalQuotesTheDistanceWhenItHasOne() {
+        let v = TransferMode.classify(route: route(minutes: 660, metres: 1_200_000))
+        let note = TransferMode.note(for: v, from: "Bengaluru", to: "Delhi")
+        XCTAssertNotNil(note)
+        XCTAssertTrue(note!.contains("1200 km"), note!)
+        XCTAssertTrue(note!.contains("11 h"), note!)
+    }
+
+    /// A response with no distance still refuses cleanly — the sentence just
+    /// leaves the distance out rather than saying "0 km".
+    func testTheRefusalOmitsAnAbsentDistance() {
+        let v = TransferMode.classify(route: route(minutes: 660, metres: nil))
+        let note = TransferMode.note(for: v, from: "A", to: "B")!
+        XCTAssertFalse(note.contains("km"), note)
+        XCTAssertTrue(note.contains("11 h"), note)
     }
 
     /// The refutation has to reach the user in words. note() existed and was
@@ -392,6 +428,18 @@ final class TravelCorrectnessTests: XCTestCase {
     private func drive(arrivingIn hours: Double) -> TravelSegment {
         TravelSegment(tripID: UUID(), mode: .drive, label: "Kabini → Bandipur",
                       arriveBy: Date().addingTimeInterval(hours * 3600))
+    }
+
+    /// The CloudKit case. Another device on an older build writes minutes and
+    /// clears the estimate flag, but has no `measuredAt` to write — and this
+    /// device then rendered it as "measured against live traffic", claiming a
+    /// freshness nobody recorded.
+    func testAMeasurementWithNoTimestampIsUndatedNotLive() {
+        let s = drive(arrivingIn: 3)
+        s.travelMinutes = 95
+        s.travelIsEstimated = false
+        s.measuredAt = nil                 // exactly what an old build leaves
+        XCTAssertEqual(s.freshness(), .undated)
     }
 
     func testAnUnmeasuredSegmentIsNever() {
