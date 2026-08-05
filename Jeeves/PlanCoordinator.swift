@@ -435,8 +435,7 @@ enum PlanCoordinator {
             routine: i.routine,
             gymSession: i.gymSession,
             referenceNow: i.referenceNow,
-            blankDay: i.blankDay,
-            planDate: i.planDate
+            blankDay: i.blankDay
         )
     }
 
