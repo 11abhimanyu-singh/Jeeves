@@ -65,7 +65,7 @@ enum PlanGenerationService {
     static var modelIdentifier: String { model }
 
     static func generate(_ req: PlanRequest) async throws -> GeneratedPlan {
-        guard let apiKey = KeychainService.loadAPIKey(), !apiKey.isEmpty else {
+        guard let apiKey = KeychainService.resolveAPIKey(), !apiKey.isEmpty else {
             throw PlanGenerationError.missingAPIKey
         }
 

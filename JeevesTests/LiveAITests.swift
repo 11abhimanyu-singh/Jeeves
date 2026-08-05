@@ -29,7 +29,7 @@ final class LiveAITests: XCTestCase {
     /// event, and the day planner changes" behavior — Claude-driven, so live.
     @MainActor
     func testEventCommitsToDayPlanner() async throws {
-        try XCTSkipUnless(KeychainService.hasAPIKey, "no Anthropic key in Keychain")
+        try XCTSkipUnless(KeychainService.hasResolvableAPIKey, "no Anthropic key in Keychain")
         let day = Date().startOfDay
         let event = DailyEvent(date: day, title: "Baithak live",
                                startMinute: 19 * 60, endMinute: 21 * 60,
@@ -59,14 +59,14 @@ final class LiveAITests: XCTestCase {
     // MARK: Claude
 
     func testLiveChatRoundTrip() async throws {
-        try XCTSkipUnless(KeychainService.hasAPIKey, "no Anthropic key in Keychain")
+        try XCTSkipUnless(KeychainService.hasResolvableAPIKey, "no Anthropic key in Keychain")
         let reply = try await JeevesChatService.send(history: [], newMessage: "Reply with exactly the word: pong")
         print("=== chat reply: \(reply) ===")
         XCTAssertFalse(reply.isEmpty)
     }
 
     func testLiveExtractionParsesTimeAndVenue() async throws {
-        try XCTSkipUnless(KeychainService.hasAPIKey, "no Anthropic key in Keychain")
+        try XCTSkipUnless(KeychainService.hasResolvableAPIKey, "no Anthropic key in Keychain")
         let anchors = try await AnchorExtractionService.extract(
             from: "I have to go to MLR Convention Centre at 7 pm, plan my day.",
             existingTitles: []
@@ -78,7 +78,7 @@ final class LiveAITests: XCTestCase {
     }
 
     func testLivePlanGenerationProducesCoherentPlan() async throws {
-        try XCTSkipUnless(KeychainService.hasAPIKey, "no Anthropic key in Keychain")
+        try XCTSkipUnless(KeychainService.hasResolvableAPIKey, "no Anthropic key in Keychain")
         let req = PlanRequest(
             userMessage: "Normal day, gym at 11.",
             hasGymToday: true, gymMinute: 11 * 60,
@@ -106,7 +106,7 @@ final class LiveAITests: XCTestCase {
     /// afternoon empty. A correct plan keeps the morning Must-do and fills the
     /// hours after the event returns home.
     func testMiddayEventUsesTheWholeDay() async throws {
-        try XCTSkipUnless(KeychainService.hasAPIKey, "no Anthropic key in Keychain")
+        try XCTSkipUnless(KeychainService.hasResolvableAPIKey, "no Anthropic key in Keychain")
         let appt = DailyEvent(date: Date().startOfDay, title: "Dr Sree Lakshmi",
                               startMinute: 14 * 60, endMinute: 15 * 60,
                               destinationAddress: "Silent Monkee, Bengaluru",
@@ -170,7 +170,7 @@ final class LiveAITests: XCTestCase {
     /// actually uses the routed minutes rather than the 30-min default.
     @MainActor
     func testLiveGymCommuteBlockMatchesMapsMinutes() async throws {
-        try XCTSkipUnless(KeychainService.hasAPIKey, "no Anthropic key in Keychain")
+        try XCTSkipUnless(KeychainService.hasResolvableAPIKey, "no Anthropic key in Keychain")
         try XCTSkipUnless(KeychainService.hasGoogleMapsAPIKey, "no Google Maps key in Keychain")
 
         let home = SavedLocation(kind: .home, address: "Koramangala, Bengaluru")
@@ -202,7 +202,7 @@ final class LiveAITests: XCTestCase {
     /// Home→venue at its scheduled departure.
     @MainActor
     func testLiveEventCommuteBlockMatchesMapsMinutes() async throws {
-        try XCTSkipUnless(KeychainService.hasAPIKey, "no Anthropic key in Keychain")
+        try XCTSkipUnless(KeychainService.hasResolvableAPIKey, "no Anthropic key in Keychain")
         try XCTSkipUnless(KeychainService.hasGoogleMapsAPIKey, "no Google Maps key in Keychain")
 
         let home = SavedLocation(kind: .home, address: "Koramangala, Bengaluru")

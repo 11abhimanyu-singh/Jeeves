@@ -90,8 +90,8 @@ final class ProviderBenchmark: XCTestCase {
     }
 
     func testAnthropicVersusOpenAIOnRealDays() async throws {
-        try XCTSkipUnless(KeychainService.hasAPIKey, "no Anthropic key")
-        try XCTSkipUnless(KeychainService.hasOpenAIAPIKey, "no OpenAI key")
+        try XCTSkipUnless(KeychainService.hasResolvableAPIKey, "no Anthropic key")
+        try XCTSkipUnless(KeychainService.hasResolvableOpenAIKey, "no OpenAI key")
 
         var runs: [String: [Run]] = [:]
         print("\n===== PROVIDER BENCHMARK =====")

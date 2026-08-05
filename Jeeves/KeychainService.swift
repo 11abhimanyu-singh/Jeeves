@@ -90,6 +90,40 @@ enum KeychainService {
     static func deleteOpenAIAPIKey() { delete(account: openAIAccount) }
     static var hasOpenAIAPIKey: Bool { !(loadOpenAIAPIKey() ?? "").isEmpty }
 
+    // MARK: Resolution — Keychain, then a DEBUG-only environment override
+    //
+    // ONE place, not four. The override existed in JeevesChatService alone, so
+    // the planner and both OpenAI services could only ever be reached by typing
+    // a key into the simulator — which is why every live test has sat skipped.
+    //
+    // #if DEBUG throughout: a release build resolves from the Keychain and
+    // nowhere else, so this cannot become a way for a key to reach a shipped
+    // app from its environment.
+
+    /// The Anthropic key as every caller should resolve it.
+    static func resolveAPIKey() -> String? {
+        if let k = loadAPIKey(), !k.isEmpty { return k }
+        #if DEBUG
+        if let k = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"], !k.isEmpty { return k }
+        #endif
+        return nil
+    }
+
+    /// The OpenAI key, same rule.
+    static func resolveOpenAIAPIKey() -> String? {
+        if let k = loadOpenAIAPIKey(), !k.isEmpty { return k }
+        #if DEBUG
+        if let k = ProcessInfo.processInfo.environment["OPENAI_API_KEY"], !k.isEmpty { return k }
+        #endif
+        return nil
+    }
+
+    /// What a LIVE TEST must gate on. `hasAPIKey` asks the Keychain only, so a
+    /// suite handed keys through the environment would still skip every live
+    /// test and report a confident green having exercised nothing.
+    static var hasResolvableAPIKey: Bool { !(resolveAPIKey() ?? "").isEmpty }
+    static var hasResolvableOpenAIKey: Bool { !(resolveOpenAIAPIKey() ?? "").isEmpty }
+
     // MARK: Google Calendar OAuth (iOS OAuth client ID + tokens)
 
     private static let googleClientIDAccount = "googleOAuthClientID"

@@ -41,7 +41,7 @@ enum OpenAIJudgeService {
     }
 
     static func judge(plan: GeneratedPlan, scenario: String) async throws -> Verdict {
-        guard let key = KeychainService.loadOpenAIAPIKey(), !key.isEmpty else {
+        guard let key = KeychainService.resolveOpenAIAPIKey(), !key.isEmpty else {
             throw OpenAIJudgeError.missingKey
         }
 

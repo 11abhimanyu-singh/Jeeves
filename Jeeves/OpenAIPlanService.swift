@@ -47,7 +47,7 @@ enum OpenAIPlanService {
     /// benchmark can prove both providers saw a byte-identical prompt — the only
     /// way the comparison means anything.
     static func generate(systemRules: String, userPrompt: String) async throws -> GeneratedPlan {
-        guard let key = KeychainService.loadOpenAIAPIKey(), !key.isEmpty else {
+        guard let key = KeychainService.resolveOpenAIAPIKey(), !key.isEmpty else {
             throw OpenAIPlanError.missingKey
         }
 

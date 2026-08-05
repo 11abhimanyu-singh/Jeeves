@@ -1087,13 +1087,7 @@ enum JeevesChatService {
     /// environment, which is how headless trajectory tests run the REAL model
     /// against an in-memory store (the simulator keychain has no key and
     /// never should).
-    private static func resolveAPIKey() -> String? {
-        if let k = KeychainService.loadAPIKey(), !k.isEmpty { return k }
-        #if DEBUG
-        if let k = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"], !k.isEmpty { return k }
-        #endif
-        return nil
-    }
+    private static func resolveAPIKey() -> String? { KeychainService.resolveAPIKey() }
 
     private static func post(body: [String: Any], apiKey: String) async throws -> Response {
         var request = URLRequest(url: endpoint)
