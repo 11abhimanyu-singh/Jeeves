@@ -6,10 +6,31 @@
 //
 
 import SwiftUI
+import UIKit
 import SwiftData
+
+/// The one thing a SwiftUI App cannot express: iOS delivers background-transfer
+/// completions to the APP DELEGATE, and refuses to keep waking an app that never
+/// calls the handler back. Without this, a plan that finished while the app was
+/// terminated is simply never received — which is the entire point of the
+/// background session.
+final class JeevesAppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        guard identifier == BackgroundPlanSession.identifier else {
+            completionHandler(); return
+        }
+        Task { @MainActor in
+            BackgroundPlanSession.shared.systemCompletionHandler = completionHandler
+        }
+    }
+}
 
 @main
 struct JeevesApp: App {
+    @UIApplicationDelegateAdaptor(JeevesAppDelegate.self) private var appDelegate
+
     init() {
         // Show reminders even while the app is open.
         NotificationService.configure()
@@ -18,6 +39,24 @@ struct JeevesApp: App {
         // auto-planner that has the coming days ready before the user wakes.
         CommuteBackgroundRefresh.register(container: sharedModelContainer)
         AutoPlanService.register(container: sharedModelContainer)
+        // Reattach to any plan transfer still in flight from a previous run.
+        // No-op while the background session is switched off.
+        BackgroundPlanSession.activate(container: sharedModelContainer)
+        // A plan can finish while nothing is on screen — after the app was
+        // suspended, or terminated and relaunched to receive it. Commit it to
+        // the day it was for rather than throwing away work already paid for.
+        // Hoisted: inside a struct's init, `self` is mutating and cannot be
+        // captured by an escaping closure.
+        let container = sharedModelContainer
+        BackgroundPlanSession.onOrphanedResult = { data, ticket in
+            guard let plan = PlanGenerationService.plan(fromResponse: data) else { return }
+            Task { @MainActor in
+                await PlanCoordinator.commit(
+                    .init(plan: plan, isOffline: false, error: nil),
+                    on: ticket.day, context: container.mainContext)
+                await NotificationService.notifyPlanReady(isOffline: false)
+            }
+        }
         // The Watch workout inbox needs the store to file finished workouts,
         // and old lift/run logs get wrapped into Workouts once.
         WatchLink.shared.configure(container: sharedModelContainer)

@@ -39,6 +39,10 @@ struct PlanRequest {
     /// would fill the hours with something helpful, which is the opposite of
     /// what was asked.
     var blankDay: Bool = false
+    /// The day being planned. Carried so a result delivered into a relaunched
+    /// process knows which day to commit to — "now" is not the answer when the
+    /// plan was for tomorrow.
+    var planDate: Date = Date()
 }
 
 enum PlanGenerationError: LocalizedError {
@@ -103,6 +107,32 @@ enum PlanGenerationService {
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+        // The background session, when it is switched on, hands the transfer to
+        // iOS so it survives the app being suspended — the ~53s call versus a
+        // ~30s foreground assertion is why a third of planner taps fell back to
+        // the offline scheduler. It ships dark; see BackgroundPlanSession.
+        if await BackgroundPlanSession.isEnabled {
+            var backgroundRequest = request
+            backgroundRequest.httpBody = nil        // not permitted on a background session
+            let body = request.httpBody ?? Data()
+            let data = try await BackgroundPlanSession.shared.send(
+                body: body, to: backgroundRequest,
+                ticket: .init(day: req.planDate.startOfDay, trigger: "plan"))
+            recordCacheUsage(from: data)
+            // The foreground path reads the HTTP status and surfaces the API's
+            // own message — a 401 (bad key) and a 429 (rate limited) need
+            // different responses, and the diagnostics log is where that
+            // difference lives. Without this the background path reported every
+            // one of them as "Jeeves didn't return a plan".
+            if let apiError = apiErrorMessage(in: data) {
+                throw PlanGenerationError.requestFailed(apiError)
+            }
+            guard let plan = plan(fromResponse: data) else {
+                throw PlanGenerationError.emptyResponse
+            }
+            return plan
+        }
+
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw PlanGenerationError.requestFailed("No response from server.")
@@ -160,6 +190,25 @@ enum PlanGenerationService {
     /// `content` array has no text block at all. Mirrors GoogleCalendarService.parse:
     /// returns nil on a body it can't decode or one with no usable text block,
     /// rather than throwing — the network caller maps nil to `.emptyResponse`.
+    /// The API's own error message, when the body carries one. An Anthropic
+    /// error response is `{"type":"error","error":{"message":...}}` — shape,
+    /// not status code, because a background session hands over the body and
+    /// the status separately.
+    static func apiErrorMessage(in data: Data) -> String? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (obj["type"] as? String) == "error",
+              let err = obj["error"] as? [String: Any] else { return nil }
+        let type = (err["type"] as? String).map { "\($0): " } ?? ""
+        return type + ((err["message"] as? String) ?? "the planning service refused the request")
+    }
+
+    /// A whole response body to a plan, or nil. One entry point so the
+    /// background-delivery path and the foreground path decode identically.
+    static func plan(fromResponse data: Data) -> GeneratedPlan? {
+        guard let text = extractText(from: data) else { return nil }
+        return decodePlan(from: text)
+    }
+
     static func extractText(from data: Data) -> String? {
         struct MessageResponse: Decodable {
             struct ContentBlock: Decodable { let type: String; let text: String? }
