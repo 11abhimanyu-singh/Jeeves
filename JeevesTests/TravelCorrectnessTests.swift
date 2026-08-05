@@ -499,4 +499,119 @@ final class TravelCorrectnessTests: XCTestCase {
         XCTAssertTrue(moves[0].to.address.isEmpty,
                       "both blank — and the move is still real")
     }
+
+    // MARK: - A failure of ours is not a fact about the world
+
+    /// The QA walk caught this: commuteRoute returns nil for a missing API key,
+    /// a dead network AND a genuinely unroutable pair, and all three were being
+    /// reported as "there's no road route from Bali to Singapore" — a claim
+    /// about the world derived from a claim about the network.
+    func testAMissingKeyIsNotAStatementAboutRoads() {
+        let v = TransferMode.classify(.failure(.noKey))
+        XCTAssertEqual(v, .couldNotAsk(.noKey))
+        let note = TransferMode.note(for: v, from: "Bali", to: "Singapore")
+        XCTAssertNotNil(note)
+        XCTAssertFalse(note!.contains("no road route"),
+                       "must not assert geography we never checked: \(note!)")
+        XCTAssertTrue(note!.contains("Maps key"))
+        XCTAssertTrue(TransferMode.worthRetrying(v), "a key can be added")
+    }
+
+    func testAnUnreachableNetworkIsRetryableAndSaysSo() {
+        let v = TransferMode.classify(.failure(.unreachable))
+        XCTAssertEqual(v, .couldNotAsk(.unreachable))
+        XCTAssertTrue(TransferMode.worthRetrying(v))
+        XCTAssertFalse(TransferMode.note(for: v, from: "A", to: "B")!.contains("no road route"))
+    }
+
+    /// The one case that IS about the world: the API answered, and the answer
+    /// was that there is no road. That may still be said plainly.
+    func testAGenuineNoRouteStillSaysThereIsNoRoad() {
+        let v = TransferMode.classify(.failure(.noRouteFound))
+        XCTAssertEqual(v, .notRoutableByRoad)
+        XCTAssertTrue(TransferMode.note(for: v, from: "Bali", to: "Singapore")!
+                        .contains("no road route"))
+        XCTAssertFalse(TransferMode.worthRetrying(v), "the sea will still be there")
+    }
+
+    // MARK: - One funnel decides what a road answer justifies
+
+    func testAPlausibleDriveIsStoredSettledAndMayNudge() {
+        let d = JourneyMeasurement.decide(.drive(minutes: 95), from: "Kabini", to: "Bandipur")
+        XCTAssertEqual(d.minutes, 95)
+        XCTAssertTrue(d.settlesMode)
+        XCTAssertNil(d.note)
+        XCTAssertTrue(d.mayNudge)
+    }
+
+    /// Keeps the reading, keeps the doubt — and must NOT nudge. A refuted drive
+    /// still had a chain and the chain still fired, so the doubt reached the
+    /// card and not the notification, which is the half acted on at 06:00.
+    func testATooFarAnswerKeepsItsMinutesButMayNotNudge() {
+        let d = JourneyMeasurement.decide(.tooFarToDrive(minutes: 660), from: "A", to: "B")
+        XCTAssertEqual(d.minutes, 660)
+        XCTAssertFalse(d.settlesMode)
+        XCTAssertNotNil(d.note)
+        XCTAssertFalse(d.mayNudge, "never nudge for a journey we don't believe is a drive")
+    }
+
+    func testAnUnaskableRouteStoresNoMinutesAndMayNotNudge() {
+        for v in [TransferMode.Verdict.notRoutableByRoad, .couldNotAsk(.unreachable)] {
+            let d = JourneyMeasurement.decide(v, from: "A", to: "B")
+            XCTAssertNil(d.minutes, "\(v): no reading means no number")
+            XCTAssertFalse(d.settlesMode)
+            XCTAssertFalse(d.mayNudge)
+            XCTAssertNotNil(d.note)
+        }
+    }
+
+    func testEndpointsReadTheLabelAndFallBackCleanly() {
+        let a = JourneyMeasurement.endpoints(of: "Kabini → Bandipur",
+                                             fallbackFrom: "x", fallbackTo: "y")
+        XCTAssertEqual(a.from, "Kabini")
+        XCTAssertEqual(a.to, "Bandipur")
+
+        let b = JourneyMeasurement.endpoints(of: "Drive", fallbackFrom: "x", fallbackTo: "y")
+        XCTAssertEqual(b.from, "x", "an unsplittable label falls back to the raw places")
+        XCTAssertEqual(b.to, "y")
+    }
+
+    // MARK: - Sibling blocks are legs, contained blocks are events
+
+    /// The blocker fix went too far: matching the banner's own title rejected
+    /// "Singapore 11–14" when accepting "Bali 4–11", building a Bali-only trip
+    /// with no move on the 11th. Containment is the real discriminator — and
+    /// these two spans are adjacent, not nested.
+    func testTwoAdjacentBareBlocksAreBothPlaces() {
+        let bali = span("Bali", (2026, 9, 4), (2026, 9, 11))
+        let singapore = span("Singapore", (2026, 9, 11), (2026, 9, 14))
+        XCTAssertFalse(isContained(singapore, in: bali), "Singapore extends past Bali's end")
+        XCTAssertFalse(isContained(bali, in: singapore))
+    }
+
+    /// "Sprint review 8–9 Sep" sits wholly inside "Bali 4–11" — an event during
+    /// a stay, and admitting it as a stay truncated Bali to the 7th.
+    func testAContainedBlockIsNotAPlace() {
+        let bali = span("Bali", (2026, 9, 4), (2026, 9, 11))
+        let sprint = span("Sprint review", (2026, 9, 8), (2026, 9, 9))
+        XCTAssertTrue(isContained(sprint, in: bali))
+        XCTAssertFalse(isContained(bali, in: sprint), "the wider one is never contained")
+    }
+
+    /// Equal spans must not swallow each other — two blocks over exactly the
+    /// same days are a duplicate to resolve, not a containment.
+    func testIdenticalSpansDoNotContainEachOther() {
+        let a = span("A", (2026, 9, 4), (2026, 9, 11))
+        let b = span("B", (2026, 9, 4), (2026, 9, 11))
+        XCTAssertFalse(isContained(a, in: b))
+        XCTAssertFalse(isContained(b, in: a))
+    }
+
+    /// Mirrors the containment test in DayPlannerView.acceptTravel: contained
+    /// AND strictly narrower.
+    private func isContained(_ inner: Itinerary.Span, in outer: Itinerary.Span) -> Bool {
+        let strictlyWider = outer.end.timeIntervalSince(outer.start)
+            > inner.end.timeIntervalSince(inner.start)
+        return outer.start <= inner.start && inner.end <= outer.end && strictlyWider
+    }
 }

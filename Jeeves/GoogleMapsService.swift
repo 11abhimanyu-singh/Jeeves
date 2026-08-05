@@ -53,10 +53,38 @@ enum GoogleMapsService {
     /// even a drive need to tell "no road route" from "a road route nobody
     /// would take", and minutes alone collapses both to nil.
     static func commuteRoute(from origin: String, to destination: String, departure: Date? = nil) async -> Route? {
+        try? await routeOrFailure(from: origin, to: destination, departure: departure).get()
+    }
+
+    /// Why a route could not be produced. "No road route" and "I could not ask"
+    /// are opposite facts and were both arriving as nil — so a missing API key
+    /// or a dead network was being reported to the user as "there's no road
+    /// route from Bali to Singapore", which is a claim about the world made
+    /// from a claim about the network.
+    nonisolated enum RouteFailure: Error, Sendable, Equatable {
+        case noKey              // nothing was asked
+        case blankEndpoint      // an origin or destination we never sent
+        case unreachable        // network/transport failed
+        case refused(Int)       // the API answered, unhappily
+        case noRouteFound       // the API answered: there is no road
+    }
+
+    /// The honest version. `commuteRoute` keeps the old nil-shape for callers
+    /// that only want minutes; anything that reports a REASON to the user must
+    /// use this.
+    static func routeOrFailure(from origin: String, to destination: String,
+                               departure: Date? = nil) async -> Result<Route, RouteFailure> {
         let o = origin.trimmingCharacters(in: .whitespacesAndNewlines)
         let d = destination.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !o.isEmpty, !d.isEmpty,
-              let apiKey = KeychainService.loadGoogleMapsAPIKey(), !apiKey.isEmpty else { return nil }
+        guard !o.isEmpty, !d.isEmpty else { return .failure(.blankEndpoint) }
+        guard let apiKey = KeychainService.loadGoogleMapsAPIKey(), !apiKey.isEmpty else {
+            return .failure(.noKey)
+        }
+        return await send(o, d, departure, apiKey)
+    }
+
+    private static func send(_ o: String, _ d: String, _ departure: Date?,
+                             _ apiKey: String) async -> Result<Route, RouteFailure> {
 
         // Resolve any Maps short link to coordinates before routing; plain
         // addresses pass straight through for Routes to geocode.
@@ -73,10 +101,12 @@ enum GoogleMapsService {
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
-            return parseRoute(data)
+            guard let http = response as? HTTPURLResponse else { return .failure(.unreachable) }
+            guard (200...299).contains(http.statusCode) else { return .failure(.refused(http.statusCode)) }
+            guard let route = parseRoute(data) else { return .failure(.noRouteFound) }
+            return .success(route)
         } catch {
-            return nil
+            return .failure(.unreachable)
         }
     }
 

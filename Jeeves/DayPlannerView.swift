@@ -235,18 +235,36 @@ struct DayPlannerView: View {
         // multi-day block is a place-window without one, which is why "Bali
         // 4–11 Sep" typed as a bare title produced a trip with no stays at all.
         //
-        // But ONLY the block the banner was about. Admitting every address-less
-        // multi-day event in the range let a "Sprint review 8–9 Sep" become a
-        // stay, and resolveOverlaps then truncated Bali to the 7th and shrank
-        // the trip to 4–9 — so the 10th and 11th were refilled with the
-        // Bengaluru routine and notified for.
-        let overlapping = events.filter { e in
+        // Which address-less blocks are PLACES rather than things happening
+        // during one? Matching the banner's own title was too strict: "Bali
+        // 4–11" and "Singapore 11–14" are two legs of one trip, and admitting
+        // only the first built a Bali-only trip with no move on the 11th and a
+        // "7 or 8 nights" hedge over data that settles it at 7.
+        //
+        // The real discriminator is containment. A "Sprint review 8–9 Sep"
+        // sits wholly INSIDE Bali 4–11 — it is an event during a stay, and
+        // admitting it truncated Bali to the 7th. A block that extends beyond
+        // its neighbour is a separate leg. Nothing about the title is needed.
+        let candidateRows = events.filter { e in
             let end = e.spanEndDate ?? e.date
-            let inRange = end >= s.startDay && e.date <= s.endDay
-            let isPlace = !e.destinationAddress.isEmpty
-                || (e.spanDays > 1 && e.title == s.title)
-            return inRange && isPlace
+            return end >= s.startDay && e.date <= s.endDay
         }
+        let addressed = candidateRows.filter { !$0.destinationAddress.isEmpty }
+        let bareMultiDay = candidateRows.filter { $0.destinationAddress.isEmpty && $0.spanDays > 1 }
+        let placeLike = addressed + bareMultiDay.filter { candidate in
+            let cStart = cal.startOfDay(for: candidate.date)
+            let cEnd = cal.startOfDay(for: candidate.spanEndDate ?? candidate.date)
+            // Contained in some OTHER place-like block? Then it is an event
+            // inside a stay, not a stay of its own.
+            return !(addressed + bareMultiDay).contains { other in
+                guard other.id != candidate.id else { return false }
+                let oStart = cal.startOfDay(for: other.date)
+                let oEnd = cal.startOfDay(for: other.spanEndDate ?? other.date)
+                let strictlyWider = (oEnd.timeIntervalSince(oStart)) > (cEnd.timeIntervalSince(cStart))
+                return oStart <= cStart && cEnd <= oEnd && strictlyWider
+            }
+        }
+        let overlapping = placeLike
         // The SAME calendar event can exist as several rows (synced from
         // different days before re-syncs became idempotent). Group by identity
         // first, or each copy becomes its own stay — which is how a trip once
@@ -342,53 +360,30 @@ struct DayPlannerView: View {
         let toMeasure = createdTransitions
         Task {
             for seg in toMeasure where seg.travelMinutes == 0 && !seg.toPlace.isEmpty {
-                let route = await GoogleMapsService.commuteRoute(
-                    from: seg.fromPlace, to: seg.toPlace,
-                    departure: max(seg.arriveBy ?? Date(), Date()))
-                let verdict = TransferMode.classify(route: route)
-                // The road answer decides whether the assumed drive survives.
-                // Bali → Singapore comes back with no route at all, and the old
-                // code left `.drive` standing with no minutes — a mode nobody
-                // chose, a chain nobody could use, and nothing saying either.
-                switch verdict {
-                case .drive(let m):
-                    seg.record(minutes: m)    // clears modeIsAssumed
-                    EventLog.log(.journeyMeasured, "\(seg.label) — \(m) min at acceptance",
-                                 subject: seg.id, context: modelContext)
-                case .tooFarToDrive(let m):
-                    // KEEP the minutes. Throwing away a real reading to signal
-                    // doubt trades one silent wrong answer for a silent missing
-                    // one. The mode stays assumed — that is what was in question.
-                    seg.record(minutes: m, settlesMode: false)
-                    seg.modeRefutation = TransferMode.note(for: verdict,
-                                                           from: t2From(seg), to: t2To(seg)) ?? ""
-                    EventLog.log(.journeyMeasured,
-                                 "\(seg.label) — \(m) min by road, too far to assume a drive",
-                                 subject: seg.id, context: modelContext)
-                case .notRoutableByRoad:
-                    seg.modeRefutation = TransferMode.note(for: verdict,
-                                                           from: t2From(seg), to: t2To(seg)) ?? ""
-                    EventLog.log(.journeyMeasured,
-                                 "\(seg.label) — no road route; assumed drive not settled",
-                                 subject: seg.id, context: modelContext)
-                    modelContext.saveOrLog("DayPlanner.measureTransition")
-                    continue
-                }
+                // A segment can be deleted from the editor that just opened
+                // while this is in flight; mutating a deleted model is a crash.
+                guard !seg.isDeleted else { continue }
+                let ends = JourneyMeasurement.endpoints(of: seg.label,
+                                                        fallbackFrom: seg.fromPlace,
+                                                        fallbackTo: seg.toPlace)
+                let decision = await JourneyMeasurement.apply(
+                    to: seg, from: seg.fromPlace, to: seg.toPlace,
+                    departure: max(seg.arriveBy ?? Date(), Date()), label: ends)
+
+                EventLog.log(.journeyMeasured,
+                             "\(seg.label) — \(decision.minutes.map { "\($0) min" } ?? "no reading")"
+                             + (decision.settlesMode ? " at acceptance" : "; assumed drive not settled"),
+                             subject: seg.id, context: modelContext)
                 modelContext.saveOrLog("DayPlanner.measureTransition")
+
+                // Only a journey we believe in gets to grow the trip and wake
+                // the user. A refuted drive kept its chain and kept nudging.
+                guard decision.mayNudge else { continue }
                 await TravelGuard.absorb(seg, context: modelContext)
                 await TravelNotifier.schedule(segment: seg)
             }
         }
         editingTrip = trip
-    }
-
-    /// The two ends of a transfer, named for a sentence rather than a route.
-    /// The label is "Kabini → Bandipur"; the places are what a person calls them.
-    private func t2From(_ s: TravelSegment) -> String {
-        s.label.components(separatedBy: " → ").first ?? s.fromPlace
-    }
-    private func t2To(_ s: TravelSegment) -> String {
-        s.label.components(separatedBy: " → ").last ?? s.toPlace
     }
 
     /// Measure the journey to each of the day's venues once, so the distance

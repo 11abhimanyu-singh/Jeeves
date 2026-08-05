@@ -68,9 +68,25 @@ enum TravelGuard {
         if stay.externalID.isEmpty { stay.externalID = externalID }
         var changed = false
         let start = newStart.startOfDay
-        let end = newEnd.startOfDay
         if stay.arriveDate != start { stay.arriveDate = start; changed = true }
+
+        // A calendar event's last day cannot say whether it is a night there or
+        // the morning you leave, so writing it straight into departDate put the
+        // OLD meaning back — silently reverting acceptTravel's conversion and
+        // undoing the migration, on every re-sync of an unchanged event.
+        //
+        // Same rule as acceptTravel: a following stay settles it, nothing else
+        // can. When one exists, the end IS that stay's arrival; when none does,
+        // the raw date stands and the doubt is recorded rather than resolved.
+        let all = (try? context.fetch(FetchDescriptor<TripStay>())) ?? []
+        let follower = all
+            .filter { $0.tripID == stay.tripID && $0.id != stay.id && $0.arriveDate > start }
+            .min { $0.arriveDate < $1.arriveDate }
+        let (end, unsettled): (Date, Bool) = follower.map { ($0.arriveDate.startOfDay, false) }
+            ?? (newEnd.startOfDay, true)
+
         if stay.departDate != end { stay.departDate = end; changed = true }
+        if stay.endIsUnsettled != unsettled { stay.endIsUnsettled = unsettled; changed = true }
         let trips = (try? context.fetch(FetchDescriptor<Trip>())) ?? []
         if let trip = trips.first(where: { $0.id == stay.tripID }) {
             if start < trip.startDate { trip.startDate = start; changed = true }

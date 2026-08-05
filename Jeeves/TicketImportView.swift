@@ -405,6 +405,12 @@ struct TicketImportView: View {
                 existing.arriveDate = planned.arriveDate
                 existing.departDate = planned.departDate
                 existing.timeZoneID = planned.timeZoneID
+                // The ticket SETTLES it. A calendar block that could not say
+                // whether its last day was a night or a departure is answered
+                // by a flight leaving that morning — but the flag was one-way,
+                // so an imported ticket left "7 or 8 nights" standing over a
+                // date it had just proved.
+                existing.endIsUnsettled = false
             } else {
                 modelContext.insert(TripStay(tripID: trip.id, place: planned.place,
                                              arriveDate: planned.arriveDate,

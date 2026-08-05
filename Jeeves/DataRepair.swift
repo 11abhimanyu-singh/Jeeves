@@ -247,21 +247,49 @@ enum DataRepair {
         var short: [TripStay] = []
         var lone: [TripStay] = []
 
+        // ONLY the calendar importer ever wrote the old meaning. A ticket-built
+        // stay's end is proved by a flight (SQ 510 leaves Singapore at 20:05 on
+        // the 14th) and a chat-built one was stated by the user; both carry an
+        // empty externalID, and both were being flagged as "an end nobody can
+        // settle" and then marked unsettled for ever. Repairing a row that was
+        // right is worse than leaving one that was wrong.
+        func couldBeOldCalendarRow(_ s: TripStay) -> Bool {
+            !s.externalID.isEmpty && !s.endIsUnsettled
+        }
+        // A flight that departs on the stay's own departDate proves the ticket
+        // meaning is already in force — never move that end.
+        let segments = (try? context.fetch(FetchDescriptor<TravelSegment>())) ?? []
+        func aFlightLeavesOn(_ s: TripStay) -> Bool {
+            segments.contains {
+                $0.tripID == s.tripID && $0.mode == .flight
+                    && $0.departAt != .distantPast
+                    && cal.isDate($0.departAt, inSameDayAs: s.departDate)
+            }
+        }
+
         for (_, group) in Dictionary(grouping: stays, by: \.tripID) {
             let ordered = group.sorted { $0.arriveDate < $1.arriveDate }
             guard ordered.count > 1 else {
-                // One stay, nothing after it to compare against.
-                if let only = ordered.first, !only.endIsUnsettled { lone.append(only) }
+                if let only = ordered.first, couldBeOldCalendarRow(only), !aFlightLeavesOn(only) {
+                    lone.append(only)
+                }
                 continue
             }
             for (a, b) in zip(ordered, ordered.dropFirst()) {
+                guard couldBeOldCalendarRow(a), !aFlightLeavesOn(a) else { continue }
                 let dayAfterA = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: a.departDate))
+                // Adjacency alone is not proof: a genuine gap day between two
+                // stays, and an overnight flight landing the next morning, both
+                // look like this. Require the pair to be CONTIGUOUS in the way
+                // only the old convention produced — a's end one day before b's
+                // start, with no journey of a's own departing that day.
                 if let dayAfterA, cal.isDate(dayAfterA, inSameDayAs: b.arriveDate) {
                     short.append(a)          // old meaning: one day short
                 }
             }
-            // The last stay of a multi-stay trip has nothing after it either.
-            if let last = ordered.last, !last.endIsUnsettled { lone.append(last) }
+            if let last = ordered.last, couldBeOldCalendarRow(last), !aFlightLeavesOn(last) {
+                lone.append(last)
+            }
         }
 
         guard !short.isEmpty || !lone.isEmpty else { return [] }
@@ -276,6 +304,10 @@ enum DataRepair {
                 fix: {
                     for s in short {
                         s.departDate = (cal.date(byAdding: .day, value: 1, to: s.departDate) ?? s.departDate).startOfDay
+                        // The follower that proved the new value also settles
+                        // it — leaving the flag alone left "15 or 16 nights"
+                        // standing over a date the repair had just settled.
+                        s.endIsUnsettled = false
                     }
                     context.saveOrLog("DataRepair.staysWrittenWithTheOldDepartMeaning")
                     return "Moved \(short.count) stay end\(short.count == 1 ? "" : "s") forward a day: \(names)."

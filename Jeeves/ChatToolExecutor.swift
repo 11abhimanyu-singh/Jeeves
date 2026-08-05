@@ -28,6 +28,17 @@ final class ChatToolExecutor {
         await GoogleMapsService.commuteMinutes(from: from, to: to, departure: departure)
     }
 
+    /// The same seam, in the shape JourneyMeasurement wants. Tests inject
+    /// `commuteMinutes`; routing chat through the funnel must keep honouring
+    /// that rather than reaching past it to the network.
+    private var routeSource: JourneyMeasurement.RouteSource {
+        let measure = commuteMinutes
+        return { from, to, departure in
+            guard let m = await measure(from, to, departure) else { return .failure(.noRouteFound) }
+            return .success(GoogleMapsService.Route(minutes: m, metres: nil))
+        }
+    }
+
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
     }
@@ -806,11 +817,16 @@ final class ChatToolExecutor {
             let target = Calendar.current.date(bySettingHour: stay.checkinMinute / 60,
                                                minute: stay.checkinMinute % 60,
                                                second: 0, of: arrive) ?? arrive
+            // Assumed here exactly as on the calendar path: nobody chose a
+            // drive, and the same default would call Bali → Singapore one.
+            // This path was left unflagged, so claim 4 held on one route in
+            // and not the other.
             let seg = TravelSegment(tripID: trip.id, mode: .drive,
                                     label: "\(prev.place) → \(place)",
                                     fromPlace: prev.address.isEmpty ? prev.place : prev.address,
                                     toPlace: stay.address.isEmpty ? place : stay.address,
-                                    arriveBy: target, checkInMinutes: 0, securityMinutes: 0)
+                                    arriveBy: target, checkInMinutes: 0, securityMinutes: 0,
+                                    modeIsAssumed: true)
             modelContext.insert(seg)
             modelContext.saveOrLog("chat.addStay.transition")
             // Say which of these the user actually told us and which we
@@ -828,8 +844,12 @@ final class ChatToolExecutor {
             let checkin = stay.checkinMinute
             let day = arrive
             Task {
-                if let m = await self.commuteMinutes(seg.fromPlace, seg.toPlace, max(target, Date())) {
-                    seg.record(minutes: m)
+                let ends = JourneyMeasurement.endpoints(of: seg.label,
+                                                        fallbackFrom: prev.place, fallbackTo: place)
+                let decision = await JourneyMeasurement.apply(
+                    to: seg, from: seg.fromPlace, to: seg.toPlace,
+                    departure: max(target, Date()), label: ends, route: self.routeSource)
+                if let m = decision.minutes {
                     // Real travel time turns the two hotel policies into an
                     // actual schedule: leave at checkout, and either land after
                     // check-in or wait — the wait is recorded, never hidden.
@@ -1203,10 +1223,17 @@ final class ChatToolExecutor {
             // The old measurement was for a different day's traffic. Only
             // claim a re-measure when one actually came back.
             var didMeasure = false
-            if !seg.toPlace.isEmpty,
-               let m = await commuteMinutes(seg.fromPlace, seg.toPlace, max(anchor, Date())) {
-                seg.record(minutes: m)
-                didMeasure = true
+            // Through the funnel: this path measured `fromPlace` raw — so a
+            // stay whose address is still the word "Home" was routed and the
+            // answer stored as fact — and it settled an assumed mode that no
+            // road answer had supported.
+            if !seg.toPlace.isEmpty, let origin = RoutableOrigin.address(seg.fromPlace) {
+                let ends = JourneyMeasurement.endpoints(of: seg.label,
+                                                        fallbackFrom: origin, fallbackTo: seg.toPlace)
+                let decision = await JourneyMeasurement.apply(
+                    to: seg, from: origin, to: seg.toPlace,
+                    departure: max(anchor, Date()), label: ends, route: routeSource)
+                didMeasure = decision.minutes != nil
             }
             modelContext.saveOrLog("chat.updateStay.resync")
             EventLog.log(.journeySaved,

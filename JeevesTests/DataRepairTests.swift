@@ -255,15 +255,20 @@ final class DataRepairTests: XCTestCase {
     ///
     /// The stay that FOLLOWS settles it: if a stay ends the day before the next
     /// one begins, it was written the old way and is a day short.
+    ///
+    /// Every fixture here carries an externalID, because ONLY the calendar
+    /// importer ever wrote the old meaning. Ticket- and chat-built stays have
+    /// none, and the first version of this repair moved those too — marking a
+    /// stay whose end a flight PROVES as "an end nobody can settle".
     func testAStayEndingTheDayBeforeTheNextOneIsMovedForward() {
         let trip = Trip(title: "Kabini + Bandipur", startDate: day(1), endDate: day(6))
         context.insert(trip)
         // Old-style: Kabini's end is its last NIGHT (day 2), and Bandipur
         // starts on day 3. The truth is that you are at Kabini until day 3.
         let kabini = TripStay(tripID: trip.id, place: "Kabini",
-                              arriveDate: day(1), departDate: day(2))
+                              arriveDate: day(1), departDate: day(2), externalID: "gcal-kabini")
         let bandipur = TripStay(tripID: trip.id, place: "Bandipur",
-                                arriveDate: day(3), departDate: day(6))
+                                arriveDate: day(3), departDate: day(6), externalID: "gcal-bandipur")
         context.insert(kabini); context.insert(bandipur)
         try? context.save()
 
@@ -298,7 +303,7 @@ final class DataRepairTests: XCTestCase {
         let trip = Trip(title: "Bali", startDate: day(1), endDate: day(8))
         context.insert(trip)
         let bali = TripStay(tripID: trip.id, place: "Bali",
-                            arriveDate: day(1), departDate: day(8))
+                            arriveDate: day(1), departDate: day(8), externalID: "gcal-bali")
         context.insert(bali)
         try? context.save()
 
@@ -309,15 +314,74 @@ final class DataRepairTests: XCTestCase {
         XCTAssertEqual(bali.nightsText(), "7 or 8 nights")
     }
 
+    /// A ticket-built stay must never be touched. SQ 510 leaves Singapore at
+    /// 20:05 on the 14th, so 11–14 is settled BY A FLIGHT — and the unguarded
+    /// repair flagged it as "an end nobody can settle" and marked it unsettled
+    /// for ever, turning a proved fact into a permanent hedge.
+    func testATicketBuiltStayIsNeverRepaired() {
+        let trip = Trip(title: "Bali & Singapore", startDate: day(1), endDate: day(6))
+        context.insert(trip)
+        // No externalID: the ticket importer's signature.
+        let singapore = TripStay(tripID: trip.id, place: "Singapore",
+                                 arriveDate: day(3), departDate: day(6))
+        context.insert(singapore)
+        let flight = TravelSegment(tripID: trip.id, mode: .flight, label: "SQ 510",
+                                   fromPlace: "SIN", toPlace: "BLR",
+                                   departAt: day(6).addingTimeInterval(20 * 3600))
+        context.insert(flight)
+        try? context.save()
+
+        _ = applyAll()
+
+        XCTAssertFalse(singapore.endIsUnsettled, "the flight proves the end")
+        XCTAssertEqual(singapore.departDate, day(6), "not moved")
+        XCTAssertEqual(singapore.nightsText(), "3 nights", "stated, not hedged")
+    }
+
+    /// A chat-built stay is the user's own statement, and carries no
+    /// externalID either. It must survive the repair untouched.
+    func testAChatBuiltStayIsNeverRepaired() {
+        let trip = Trip(title: "Wayanad", startDate: day(1), endDate: day(4))
+        context.insert(trip)
+        let stay = TripStay(tripID: trip.id, place: "Wayanad",
+                            arriveDate: day(1), departDate: day(4))
+        context.insert(stay)
+        try? context.save()
+
+        _ = applyAll()
+
+        XCTAssertFalse(stay.endIsUnsettled, "the user said so")
+        XCTAssertEqual(stay.departDate, day(4))
+    }
+
+    /// A stay the repair moves is also SETTLED by the move — the follower that
+    /// proved the new date answers the question. Leaving the flag alone left
+    /// "2 or 3 nights" standing over a date just settled.
+    func testMovingAStayForwardAlsoSettlesIt() {
+        let trip = Trip(title: "Kabini + Bandipur", startDate: day(1), endDate: day(6))
+        context.insert(trip)
+        let kabini = TripStay(tripID: trip.id, place: "Kabini",
+                              arriveDate: day(1), departDate: day(2), externalID: "gcal-kabini")
+        let bandipur = TripStay(tripID: trip.id, place: "Bandipur",
+                                arriveDate: day(3), departDate: day(6), externalID: "gcal-bandipur")
+        context.insert(kabini); context.insert(bandipur)
+        try? context.save()
+
+        _ = applyAll()
+
+        XCTAssertFalse(kabini.endIsUnsettled, "the follower settled it")
+        XCTAssertEqual(kabini.nightsText(), "2 nights")
+    }
+
     /// The repair must be idempotent: a second pass moves nothing again.
     /// Running it twice used to be how an off-by-one became an off-by-two.
     func testTheDepartMeaningRepairIsIdempotent() {
         let trip = Trip(title: "Kabini + Bandipur", startDate: day(1), endDate: day(6))
         context.insert(trip)
         let kabini = TripStay(tripID: trip.id, place: "Kabini",
-                              arriveDate: day(1), departDate: day(2))
+                              arriveDate: day(1), departDate: day(2), externalID: "gcal-kabini")
         let bandipur = TripStay(tripID: trip.id, place: "Bandipur",
-                                arriveDate: day(3), departDate: day(6))
+                                arriveDate: day(3), departDate: day(6), externalID: "gcal-bandipur")
         context.insert(kabini); context.insert(bandipur)
         try? context.save()
 

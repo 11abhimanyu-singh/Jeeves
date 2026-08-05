@@ -284,21 +284,33 @@ struct LeaveByCard: View {
                 pricing = false
                 return
             }
-            if let minutes = await GoogleMapsService.commuteMinutes(from: origin, to: to,
-                                                                   departure: max(target, Date())) {
-                if segment.mode != .drive && minutes > 360 {
-                    // Days of road time in a flight's door-to-terminal slot
-                    // means To isn't an airport — refuse, don't schedule.
-                    measureNote = "That routes \(LeaveBy.hours(minutes)) by road — the To field should be the departure airport, not a city or home."
-                } else {
-                    segment.record(minutes: minutes)
-                    modelContext.saveOrLog("LeaveByCard.measure")
-                    // A newly real journey time can move the leave-by day
-                    // outside the trip — grow the window so the card doesn't
-                    // relocate itself into invisibility.
-                    await TravelGuard.absorb(segment, context: modelContext)
-                    await TravelNotifier.schedule(segment: segment)
-                }
+            // A flight's door-to-terminal slot is checked first and separately:
+            // days of road time there means To isn't an airport at all, which
+            // is a different mistake from a transfer that isn't a drive.
+            if segment.mode != .drive,
+               let minutes = await GoogleMapsService.commuteMinutes(from: origin, to: to,
+                                                                    departure: max(target, Date())),
+               minutes > 360 {
+                measureNote = "That routes \(LeaveBy.hours(minutes)) by road — the To field should be the departure airport, not a city or home."
+                pricing = false
+                return
+            }
+            // Everything else goes through the one funnel, so tapping Measure
+            // can no longer settle a mode the road refuses to support, nor
+            // leave a stale refutation standing, nor forget the timestamp.
+            let ends = JourneyMeasurement.endpoints(of: segment.label,
+                                                    fallbackFrom: origin, fallbackTo: to)
+            let decision = await JourneyMeasurement.apply(
+                to: segment, from: origin, to: to,
+                departure: max(target, Date()), label: ends)
+            measureNote = decision.note
+            modelContext.saveOrLog("LeaveByCard.measure")
+            if decision.mayNudge {
+                // A newly real journey time can move the leave-by day outside
+                // the trip — grow the window so the card doesn't relocate
+                // itself into invisibility.
+                await TravelGuard.absorb(segment, context: modelContext)
+                await TravelNotifier.schedule(segment: segment)
             }
             pricing = false
         }
@@ -999,8 +1011,20 @@ struct SegmentEditorView: View {
         segment.securityMinutes = security
         segment.bufferMinutes = buffer
         segment.stopMinutes = stops
-        segment.travelMinutes = travel
-        segment.travelIsEstimated = !travelMeasured
+        // The sixth direct write, and the one that made freshness lie: saving a
+        // measured value here never stamped `measuredAt`, so a reading taken
+        // by this editor rendered as "measured against live traffic" for ever
+        // with no age behind it. A hand-typed number is still not measured.
+        if travelMeasured, travel != segment.travelMinutes || segment.measuredAt == nil {
+            segment.record(minutes: travel, settlesMode: false)
+        } else {
+            segment.travelMinutes = travel
+            segment.travelIsEstimated = !travelMeasured
+            if !travelMeasured { segment.measuredAt = nil }   // typed, not measured
+        }
+        // The user has just told us what this journey is; a refutation of the
+        // mode we guessed no longer describes anything.
+        if !segment.modeIsAssumed { segment.modeRefutation = "" }
         modelContext.saveOrLog("SegmentEditor.save")
         EventLog.log(.journeySaved,
                      "\(label.isEmpty ? segment.mode.label : label) — \(travel) min journey"

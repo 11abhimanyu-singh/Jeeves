@@ -30,10 +30,14 @@ enum TransferMode {
         /// Road-routable, but nobody drives this in one go. Almost always a
         /// sign the two ends are not connected the way we assumed.
         case tooFarToDrive(minutes: Int)
-        /// The engine returned nothing. Across water, or an address it could
-        /// not resolve — indistinguishable from here, which is the point:
-        /// both mean "do not call this a drive".
+        /// The engine answered, and the answer is that there is no road. Across
+        /// water, or an address it could not resolve.
         case notRoutableByRoad
+        /// We never got an answer — no key, no network, nothing sent. Says
+        /// nothing whatever about the world, and must never be reported as if
+        /// it did: "there's no road route from Bali to Singapore" was being
+        /// printed when the real cause was a missing API key.
+        case couldNotAsk(GoogleMapsService.RouteFailure)
     }
 
     /// The longest road transfer presented as a drive without asking.
@@ -49,6 +53,19 @@ enum TransferMode {
         return route.minutes <= plausibleDriveMinutes
             ? .drive(minutes: route.minutes)
             : .tooFarToDrive(minutes: route.minutes)
+    }
+
+    /// The version that knows WHY there was no route. Prefer this everywhere a
+    /// reason is shown to the user.
+    nonisolated static func classify(_ result: Result<GoogleMapsService.Route, GoogleMapsService.RouteFailure>) -> Verdict {
+        switch result {
+        case .success(let route):
+            return classify(route: route)
+        case .failure(.noRouteFound):
+            return .notRoutableByRoad
+        case .failure(let other):
+            return .couldNotAsk(other)
+        }
     }
 
     /// May this verdict settle an assumed mode? Only a plausible drive does.
@@ -68,6 +85,27 @@ enum TransferMode {
             return "\(from) to \(to) routes \(LeaveBy.hours(minutes)) by road. I'd assumed you were driving — how are you getting there?"
         case .notRoutableByRoad:
             return "There's no road route from \(from) to \(to). I'd assumed you were driving — how are you getting there?"
+        case .couldNotAsk(let why):
+            // Says what WE failed at, never what the world is like.
+            switch why {
+            case .noKey:
+                return "I couldn't check the drive from \(from) to \(to) — there's no Maps key saved. This is still an assumed drive."
+            case .unreachable, .refused:
+                return "I couldn't reach Maps to check the drive from \(from) to \(to). I'll try again — this is still an assumed drive."
+            case .blankEndpoint:
+                return "I need an address for both ends before I can check the drive from \(from) to \(to)."
+            case .noRouteFound:
+                return "There's no road route from \(from) to \(to). I'd assumed you were driving — how are you getting there?"
+            }
         }
+    }
+
+    /// Should we try again later? A refusal about the world is final; a failure
+    /// of ours is not, and the two were being treated the same.
+    nonisolated static func worthRetrying(_ verdict: Verdict) -> Bool {
+        if case .couldNotAsk(let why) = verdict {
+            return why != .blankEndpoint
+        }
+        return false
     }
 }
