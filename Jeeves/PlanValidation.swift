@@ -70,33 +70,44 @@ enum PlanValidation {
             }
         }
 
-        // 2b. Gym sub-block durations are pinned — the workout must never be
-        //     compressed to fit the day: Weightlifting is exactly 70 min and
-        //     starts at the user's entered time; Mobility 20 and Cardio 35 are
-        //     flagged as quality drift. Matching prefers kind "gym" so an event
-        //     or errand with "lift"/"weight" in its title can't satisfy (or
-        //     falsely trip) the check. Skipped for an unrealistically late gym
-        //     (after 21:00) where the full routine can't precede 23:00 sleep —
-        //     enforcing 70 min there would make the rule set unsatisfiable.
-        func isWeightlifting(_ t: (block: GeneratedBlock, start: Int, end: Int)) -> Bool {
-            t.block.title.localizedCaseInsensitiveContains("weight") || t.block.title.localizedCaseInsensitiveContains("lift")
-        }
+        // 2b. The gym block is ONE block, and its length is the configured
+        //     session — the workout must never be compressed to fit the day.
+        //
+        //     THIS RULE USED TO CONTRADICT THE PROMPT. It demanded a
+        //     "weightlifting" block of exactly 70 minutes plus Mobility 20 and
+        //     Cardio 35, all from the era when the gym was three separate
+        //     blocks. The prompt has since said "ONE block titled exactly
+        //     \"Gym\" ... do NOT split it into mobility/weightlifting/cardio",
+        //     and nothing updated this. So every gym day was told to produce one
+        //     block and then failed for producing one block, which forced a
+        //     repair round-trip that could not succeed either — a second full
+        //     generation, on every gym day, for a rule that was unsatisfiable.
+        //
+        //     A benchmark caught it: Claude and GPT, given the identical
+        //     prompt, failed the identical rule on every gym scenario. Two
+        //     models from different labs agreeing that precisely is never a
+        //     model problem.
+        //
+        //     The length comes from the user's configured session rather than a
+        //     frozen 70, because the parts are switchable and independently
+        //     timed now. Still skipped for an unrealistically late gym (after
+        //     21:00), where the full routine cannot precede 23:00 sleep.
         if request.hasGymToday, let gymMinute = request.gymMinute, gymMinute <= 21 * 60 {
-            let gymKind = timed.filter { $0.block.kind.lowercased() == "gym" }
-            let lifting = gymKind.first(where: isWeightlifting)
-                ?? timed.first { isWeightlifting($0) && !["event", "commute", "free", "sleep"].contains($0.block.kind.lowercased()) }
-            if let lifting {
-                let duration = lifting.end - lifting.start
-                if duration < 70 {
-                    out.append(Violation(severity: .severe, message: "Weightlifting is \(duration) min — it is a fixed 70-min block and must never be compressed"))
-                }
-            } else {
-                out.append(Violation(severity: .severe, message: "Gym day but no weightlifting block in the plan"))
-            }
-            for (title, expected) in [("Mobility", 20), ("Cardio", 35)] {
-                if let b = gymKind.first(where: { $0.block.title.localizedCaseInsensitiveContains(title) }) ?? timed.first(where: { $0.block.title.localizedCaseInsensitiveContains(title) && $0.block.kind.lowercased() != "event" }),
-                   b.end - b.start != expected {
-                    out.append(Violation(severity: .quality, message: "\(title) is \(b.end - b.start) min — expected \(expected)"))
+            let workout = request.gymSession.map(\.minutes).reduce(0, +)
+            let gymBlocks = timed.filter { $0.block.kind.lowercased() == "gym" }
+            if gymBlocks.isEmpty {
+                out.append(Violation(severity: .severe, message: "Gym day but no gym block in the plan"))
+            } else if workout > 0 {
+                // Sum, not the first block: a model that splits the session
+                // anyway is caught by 2c, and summing keeps this rule about
+                // LENGTH rather than double-reporting the split.
+                let total = gymBlocks.map { $0.end - $0.start }.reduce(0, +)
+                if total < workout {
+                    out.append(Violation(severity: .severe,
+                        message: "Gym is \(total) min — the session is \(workout) min and must never be compressed"))
+                } else if total > workout {
+                    out.append(Violation(severity: .quality,
+                        message: "Gym is \(total) min — the session is \(workout) min"))
                 }
             }
         }

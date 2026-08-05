@@ -154,50 +154,85 @@ final class PlanValidationTests: XCTestCase {
         XCTAssertTrue(PlanValidation.severe(plan, request: request(events: [event(14 * 60, 15 * 60)])).isEmpty)
     }
 
-    // MARK: Gym durations are pinned (never compressed to fit the day)
+    // MARK: The gym is ONE block, as long as the configured session
 
-    private func gymRequest(gym: Int = 19 * 60) -> PlanRequest {
+    private func gymRequest(gym: Int = 19 * 60,
+                            session: [(name: String, minutes: Int)] = Baseline.gymParts) -> PlanRequest {
         PlanRequest(userMessage: "", hasGymToday: true, gymMinute: gym, events: [],
-                    locations: [], defaultCommuteMinutes: 30, commuteEstimates: [:], prepNeglectNote: nil)
+                    locations: [], defaultCommuteMinutes: 30, commuteEstimates: [:],
+                    prepNeglectNote: nil, gymSession: session)
     }
 
-    func testCompressedWeightliftingIsSevere() {
+    /// THE TEST THAT WAS MISSING. A plan obeying the prompt exactly — "ONE block
+    /// titled exactly Gym ... do NOT split it" — used to be rejected, because
+    /// the validator still demanded a separate 70-minute "weightlifting" block.
+    /// Every gym day therefore failed and bought a second full generation for a
+    /// rule no compliant plan could satisfy. Two different labs' models both
+    /// tripped it on identical input, which is what gave the game away.
+    func testTheOneBlockGymThePromptAsksForIsValid() {
         let plan = GeneratedPlan(
-            blocks: [b("Interview prep — Reading", "08:00", "09:30", anchor: true),
+            blocks: [b("Chores", "08:00", "08:40"),
                      b("Lunch", "13:00", "13:30", kind: "lunch"),
-                     b("Weightlifting", "19:00", "19:45", anchor: true, kind: "gym")],
-            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
-        XCTAssertTrue(PlanValidation.severe(plan, request: gymRequest())
-            .contains { $0.message.contains("70-min") }, "45-min weightlifting must be flagged")
-    }
-
-    func testGymDayWithoutWeightliftingIsSevere() {
-        let plan = GeneratedPlan(
-            blocks: [b("Interview prep — Reading", "08:00", "09:30", anchor: true),
-                     b("Lunch", "13:00", "13:30", kind: "lunch")],
-            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
-        XCTAssertTrue(PlanValidation.severe(plan, request: gymRequest())
-            .contains { $0.message.contains("no weightlifting") })
-    }
-
-    /// A 19:00 gym legitimately runs past 20:30 — the boundary applies to WORK.
-    /// The full uncompressed routine (incl. the at-home shower at 21:15) must
-    /// produce zero severe violations.
-    func testLateGymRunningPastBoundaryIsFine() {
-        let plan = GeneratedPlan(
-            blocks: [b("Interview prep — Reading", "08:00", "09:30", anchor: true),
-                     b("Lunch", "13:00", "13:30", kind: "lunch"),
-                     b("Commute to gym", "18:10", "18:40", kind: "commute"),
-                     b("Mobility", "18:40", "19:00", kind: "gym"),
-                     b("Weightlifting", "19:00", "20:10", anchor: true, kind: "gym"),
-                     b("Cardio", "20:10", "20:45", kind: "gym"),
-                     b("Commute home", "20:45", "21:15", kind: "commute"),
-                     b("Evening shower", "21:15", "21:35", kind: "activity"),
-                     b("Free time", "21:35", "23:00", kind: "free"),
+                     b("Commute to gym", "18:10", "18:50", kind: "commute"),
+                     b("Gym", "18:50", "20:55", anchor: true, kind: "gym"),   // 125 = 20+70+35
+                     b("Commute home", "20:55", "21:25", kind: "commute"),
+                     b("Shower", "21:25", "21:45"),
+                     b("Free time", "21:45", "23:00", kind: "free"),
                      b("Sleep", "23:00", "07:00", anchor: true, kind: "sleep")],
             dropped: [], shrunk: [], summary: "", boundaryTime: nil)
         XCTAssertTrue(PlanValidation.severe(plan, request: gymRequest()).isEmpty,
-                      "uncompressed late-gym routine must not trip the 20:30 work boundary")
+                      "the shape the prompt demands must pass: \(PlanValidation.severe(plan, request: gymRequest()).map(\.message))")
+    }
+
+    func testACompressedGymIsSevere() {
+        let plan = GeneratedPlan(
+            blocks: [b("Chores", "08:00", "08:40"),
+                     b("Lunch", "13:00", "13:30", kind: "lunch"),
+                     b("Gym", "19:00", "19:45", anchor: true, kind: "gym")],   // 45 of 125
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        XCTAssertTrue(PlanValidation.severe(plan, request: gymRequest())
+            .contains { $0.message.contains("must never be compressed") },
+            "a 45-min gym against a 125-min session must be flagged")
+    }
+
+    func testGymDayWithNoGymBlockIsSevere() {
+        let plan = GeneratedPlan(
+            blocks: [b("Chores", "08:00", "08:40"),
+                     b("Lunch", "13:00", "13:30", kind: "lunch")],
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        XCTAssertTrue(PlanValidation.severe(plan, request: gymRequest())
+            .contains { $0.message.contains("no gym block") })
+    }
+
+    /// The length follows the user's CONFIGURED session, not a frozen 70. Turn
+    /// cardio off in the routine and a shorter gym is correct, not compressed.
+    func testTheLengthFollowsTheConfiguredSession() {
+        let shortSession = [(name: "Mobility", minutes: 20), (name: "Weightlifting", minutes: 70)]
+        let plan = GeneratedPlan(
+            blocks: [b("Chores", "08:00", "08:40"),
+                     b("Lunch", "13:00", "13:30", kind: "lunch"),
+                     b("Gym", "19:00", "20:30", anchor: true, kind: "gym")],   // 90 = 20+70
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        XCTAssertTrue(PlanValidation.severe(plan, request: gymRequest(session: shortSession)).isEmpty,
+                      "90 min is the whole session when cardio is switched off")
+        // …and the same plan IS compressed against the full 125-min session.
+        XCTAssertFalse(PlanValidation.severe(plan, request: gymRequest()).isEmpty)
+    }
+
+    /// A 19:00 gym legitimately runs past 20:30 — the boundary applies to WORK.
+    func testLateGymRunningPastBoundaryIsFine() {
+        let plan = GeneratedPlan(
+            blocks: [b("Chores", "08:00", "08:40"),
+                     b("Lunch", "13:00", "13:30", kind: "lunch"),
+                     b("Commute to gym", "18:10", "18:50", kind: "commute"),
+                     b("Gym", "18:50", "20:55", anchor: true, kind: "gym"),
+                     b("Commute home", "20:55", "21:25", kind: "commute"),
+                     b("Evening shower", "21:25", "21:45", kind: "activity"),
+                     b("Free time", "21:45", "23:00", kind: "free"),
+                     b("Sleep", "23:00", "07:00", anchor: true, kind: "sleep")],
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        XCTAssertTrue(PlanValidation.severe(plan, request: gymRequest()).isEmpty,
+                      "an uncompressed late gym must not trip the 20:30 work boundary")
     }
 
     /// The shower exemption is for a ≤30-min hygiene block — a long "shower"-
@@ -222,9 +257,9 @@ final class PlanValidationTests: XCTestCase {
                      b("Weightlifting seminar", "15:00", "15:45", anchor: true, kind: "event")],
             dropped: [], shrunk: [], summary: "", boundaryTime: nil)
         let severe = PlanValidation.severe(plan, request: gymRequest())
-        XCTAssertTrue(severe.contains { $0.message.contains("no weightlifting") },
+        XCTAssertTrue(severe.contains { $0.message.contains("no gym block") },
                       "a 45-min seminar EVENT must not stand in for the workout")
-        XCTAssertFalse(severe.contains { $0.message.contains("70-min") },
+        XCTAssertFalse(severe.contains { $0.message.contains("compressed") },
                        "…nor be flagged as a compressed workout")
     }
 

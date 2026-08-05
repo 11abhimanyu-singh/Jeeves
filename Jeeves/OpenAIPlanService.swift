@@ -53,6 +53,14 @@ enum OpenAIPlanService {
 
         let body: [String: Any] = [
             "model": model,
+            // A REASONING model spends budget before it writes anything. Probing
+            // this endpoint with a 1-token ceiling came back 400: "Could not
+            // finish the message because max_tokens or model output limit was
+            // reached." Left unset, a default ceiling could be consumed by
+            // reasoning and return an empty plan — and the benchmark would have
+            // measured a truncation and called it a worse provider. Matched to
+            // the Anthropic path's 16000 so both have the same room.
+            "max_completion_tokens": 16000,
             // The contract is strict JSON, and this is the provider's own way of
             // holding the model to it. Note the response still goes through
             // decodePlan: json_object guarantees valid JSON, not the right SHAPE.
