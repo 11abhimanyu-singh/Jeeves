@@ -46,6 +46,9 @@ enum AdherenceHistory {
     static func planningNote(context: ModelContext, for date: Date) -> String? {
         let days = recentOutcomes(context: context, endingBefore: date)
         guard !days.isEmpty else { return nil }
+        // Not cadence-filtered, and deliberately so: this is a tier lookup over
+        // many past days, not a plan for one. Narrowing it to a single day's
+        // due list would mis-weight every other day in the history.
         let routine = Baseline.routine(from: (try? context.fetch(FetchDescriptor<RoutineActivity>())) ?? [])
         return AdherenceEngine.adherenceNote(AdherenceEngine.history(days), routine: routine)
     }

@@ -41,6 +41,13 @@ final class RoutineActivity {
     /// can be judged by its own evidence instead of every prep block sharing
     /// one verdict. Empty for everything else.
     var prepCategoryRaw: String = ""
+    /// Which weekdays this runs on, e.g. "2,4,6". EMPTY MEANS EVERY DAY, so
+    /// every row that already exists keeps its old behaviour and there is no
+    /// backfill to run. See Cadence.
+    var weekdaysRaw: String = ""
+    /// When this was last actually completed, so the cadence can say how many
+    /// due days have been missed rather than only whether today is one.
+    var lastCompletedOn: Date? = nil
 
     var tier: PriorityTier {
         get { PriorityTier(rawValue: tierRaw) ?? .flexible }
@@ -55,6 +62,11 @@ final class RoutineActivity {
     var prepCategory: PrepCategory? {
         get { prepCategoryRaw.isEmpty ? nil : PrepCategory(rawValue: prepCategoryRaw) }
         set { prepCategoryRaw = newValue?.rawValue ?? "" }
+    }
+
+    var cadence: Cadence {
+        get { Cadence(raw: weekdaysRaw) }
+        set { weekdaysRaw = newValue.raw }
     }
 
     /// What the planner sees. A child carries its group in the name so the
@@ -179,17 +191,36 @@ extension Baseline {
     /// — once, at the point the routine becomes a value — is what keeps the
     /// online prompt and the offline fallback from disagreeing about which
     /// activities the day contains.
+    /// `on` narrows it again to the activities whose cadence falls on that day.
+    ///
+    /// Precedence, decided deliberately: an EXPLICIT per-day pick beats the
+    /// cadence. The weekday chips set the default shape of a day; opening the
+    /// picker and ticking something is the user overriding that shape for today,
+    /// and silently dropping what they ticked would be the same dishonesty as
+    /// the invented filler this work removes. Note this is the OPPOSITE of how
+    /// `enabled` behaves — a switched-off row stays off however hard you tick it
+    /// — because "I don't do this at all" and "not usually today" are different
+    /// claims. See testATickedActivityPlansEvenWhenItsCadenceExcludesTheDay.
     static func routine(from activities: [RoutineActivity],
-                        selection: ActivitySelection = .routine) -> [BaselineActivity] {
+                        selection: ActivitySelection = .routine,
+                        on date: Date? = nil) -> [BaselineActivity] {
         let enabled = activities
-            .filter { $0.enabled && $0.group != .gym && selection.includes($0.plannerName) }
+            .filter { $0.enabled && $0.group != .gym }
             .sorted { $0.sortOrder < $1.sortOrder }
-        // An empty result falls back to the hardcoded defaults ONLY when the
-        // store simply hasn't been seeded. A day the user deliberately emptied
-        // must stay empty — falling back there would refill the day they had
-        // just asked to clear, which is the bug this whole path exists to fix.
-        if enabled.isEmpty, !selection.isExplicit { return self.activities }
-        return enabled.map(\.asBaseline)
+        // The fallback fires only when the ROUTINE ITSELF is empty — nothing
+        // stored, or every row switched off. It must never fire because a day
+        // came out empty: a day the user deliberately cleared, and a day the
+        // cadence simply left light, are both correct answers, and refilling
+        // either with the eight hardcoded defaults would undo the whole point.
+        if enabled.isEmpty { return self.activities }
+
+        return enabled
+            .filter {
+                guard selection.includes($0.plannerName) else { return false }
+                guard let date, !selection.isExplicit else { return true }
+                return $0.cadence.isDue(on: date)
+            }
+            .map(\.asBaseline)
     }
 
     /// The gym session as configured: enabled parts, in order, with their own

@@ -125,7 +125,7 @@ enum AutoPlanService {
                 events: dayEvents,
                 locations: locations,
                 prepSessions: prepSessions,
-                routine: Baseline.routine(from: routineActivities, selection: selection),
+                routine: Baseline.routine(from: routineActivities, selection: selection, on: day),
                 gymSession: gymSession,
                 adherenceNote: AdherenceHistory.planningNote(context: context, for: day),
                 planDate: day,

@@ -644,6 +644,12 @@ struct DayPlannerView: View {
     @ViewBuilder
     private func adherenceCard(plan: GeneratedPlan, outcomes: [BlockOutcome]) -> some View {
         let assessed = AdherenceEngine.assessableCount(outcomes)
+        // Deliberately NOT cadence-filtered. This list is a tier lookup table —
+        // AdherenceEngine.tier(for:routine:) matches a block's title to find its
+        // weight — and a tier belongs to the activity, not to the day. Narrowing
+        // it to what was due would drop the entry for anything planned by an
+        // explicit tick, which would then score as the default 2 instead of its
+        // real weight.
         let routine = Baseline.routine(from: routineActivities)
         let reviewable = selectedDate.startOfDay <= today
         if reviewable, let score = AdherenceEngine.weightedScore(plan: plan, outcomes: outcomes, routine: routine), assessed > 0 {
@@ -719,7 +725,7 @@ struct DayPlannerView: View {
                     events: dayEvents,
                     locations: locations,
                     prepSessions: prepSessions,
-                    routine: Baseline.routine(from: routineActivities, selection: selection),
+                    routine: Baseline.routine(from: routineActivities, selection: selection, on: date),
                     gymSession: Baseline.gymSession(from: routineActivities),
                     adherenceNote: AdherenceHistory.planningNote(context: modelContext, for: date),
                     planDate: date,
