@@ -98,6 +98,24 @@ final class ViolationClassTests: XCTestCase {
                        "a tally must not depend on violation order")
     }
 
+    /// Every gym message PlanValidation emits, VERBATIM. The classifier keys on
+    /// wording, so rewording a rule can silently retire its bucket: when the
+    /// length rule became "Gym is N min…" the tally kept reporting gym-shape from
+    /// the other two rules while its most common member counted as "other".
+    /// If a gym message is reworded again, this fails instead of going quiet.
+    func testEveryGymMessageClassifiesAsGymShape() {
+        let emitted = [
+            "Gym day but no gym block in the plan",
+            "Gym is 60 min — the session is 90 min and must never be compressed",
+            "Gym is 120 min — the session is 90 min",
+            "Gym routine is split: \"Cardio\" starts at 07:40 but \"Weightlifting\" ends at 07:10 — mobility, weightlifting, cardio must run back-to-back",
+        ]
+        for message in emitted {
+            XCTAssertEqual(PlanDiagnostics.violationKinds([message]), "gym-shape",
+                           "this is a gym violation and must be tallied as one: \(message)")
+        }
+    }
+
     /// An unrecognised message still counts as something — a rule that stops
     /// being matched would otherwise vanish from the tally silently.
     func testAnUnknownMessageIsStillCounted() {

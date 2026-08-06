@@ -100,7 +100,13 @@ enum PlanDiagnostics {
                 kind = "prep-breather"
             }
             else if t.contains("must-do dropped") || t.contains("dropped") { kind = "dropped-must-do" }
-            else if t.contains("weightlifting") || t.contains("gym routine") || t.contains("gym day") {
+            // Every gym rule opens with "Gym", so lead with that rather than with
+            // the vocabulary of any one message. The earlier list spelled out
+            // "weightlifting"/"gym routine"/"gym day", and when the length rule was
+            // reworded from "Weightlifting is N min…" to "Gym is N min…" the most
+            // common gym violation quietly started counting as "other" — the bucket
+            // stayed alive on its two other members, so nothing looked broken.
+            else if t.hasPrefix("gym") || t.contains("weightlifting") {
                 kind = "gym-shape"
             }
             else if t.contains("measures") || t.contains("commute") { kind = "commute-length" }
