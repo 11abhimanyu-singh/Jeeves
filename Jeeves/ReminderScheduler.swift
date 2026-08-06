@@ -17,6 +17,12 @@ enum ReminderScheduler {
     /// Namespaces every request this scheduler owns.
     private static let idPrefix = "reminder-"
 
+    /// How many future dates an `everyNDays` reminder holds at once. iOS keeps
+    /// only 64 pending notifications for the whole app, and the day plan needs
+    /// most of them — a fortnightly reminder covering four months would starve
+    /// the nudges. Topped up on every reschedule, which runs at launch.
+    static let windowSize = 6
+
     /// Cancels every Jeeves reminder notification, then re-adds one (or, for
     /// weekdays, five) per active reminder. Call after any mutation so the
     /// pending notifications always match the store.
@@ -32,14 +38,22 @@ enum ReminderScheduler {
         }
     }
 
-    /// Removes just this reminder's pending notification(s) — the once/daily/
-    /// weekly identifier plus every weekdays variant, so it clears regardless of
-    /// which recurrence it last used.
+    /// Removes every pending notification belonging to this reminder, whatever
+    /// recurrence it last used.
+    ///
+    /// This used to enumerate the ids it expected — the bare base plus `-2`
+    /// through `-6` for the weekdays fan-out — which meant any recurrence that
+    /// emitted a different suffix leaked its requests silently. `everyNDays`
+    /// emits a rolling window of them. Matching on the reminder's own prefix
+    /// cannot fall behind the set of shapes that produce it.
     static func cancel(_ reminder: Reminder) {
         let base = "\(idPrefix)\(reminder.id.uuidString)"
-        var ids = [base]
-        ids.append(contentsOf: (2...6).map { "\(base)-\($0)" })
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
+        let center = UNUserNotificationCenter.current()
+        center.getPendingNotificationRequests { pending in
+            let ids = pending.map(\.identifier).filter { $0 == base || $0.hasPrefix("\(base)-") }
+            guard !ids.isEmpty else { return }
+            center.removePendingNotificationRequests(withIdentifiers: ids)
+        }
     }
 
     // MARK: - Request building
@@ -86,6 +100,24 @@ enum ReminderScheduler {
                 m.weekday = weekday; m.hour = parts.hour; m.minute = parts.minute
                 return request("\(base)-\(weekday)", matching: m, repeats: true)
             }
+
+        case .everyNDays:
+            // No DateComponents describes "every third day" — a period that
+            // isn't a week aligns to no calendar field — so this is a rolling
+            // window of concrete one-off dates, topped up on every reschedule
+            // (launch, edit, add). The window is deliberately small: iOS keeps
+            // only 64 pending notifications per app, and one greedy reminder
+            // must not crowd out the day plan's.
+            let cal = Calendar.current
+            return reminder.recurrence
+                .occurrences(anchor: reminder.fireAt, intervalDays: reminder.intervalDays,
+                             count: windowSize, cal: cal)
+                .enumerated()
+                .map { i, date in
+                    var m = cal.dateComponents([.year, .month, .day], from: date)
+                    m.hour = parts.hour; m.minute = parts.minute
+                    return request("\(base)-n\(i)", matching: m, repeats: false)
+                }
         }
     }
 }

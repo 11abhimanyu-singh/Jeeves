@@ -28,6 +28,21 @@ struct RemindersListView: View {
     @State private var draftDate = Date()
     /// Set when the user picks a time the four chips don't offer.
     @State private var showTimePicker = false
+    /// Days between fires for an "Every…" reminder.
+    @State private var draftInterval = 2
+
+    /// The next three real dates an "Every…" draft would land on — the same
+    /// arithmetic the scheduler runs, so the preview cannot promise a day the
+    /// notification won't arrive on.
+    private var nextThree: String {
+        let dates = ReminderRecurrence.everyNDays.occurrences(
+            anchor: RemindersListView.fireDate(day: draftDate, hour: draftHour,
+                                               minute: draftMinute, recurrence: .everyNDays),
+            intervalDays: draftInterval, count: 3)
+        guard !dates.isEmpty else { return "" }
+        return dates.map { $0.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)) }
+            .joined(separator: " · ")
+    }
     @State private var editing: Reminder?
     @State private var undoable: UndoableDelete?
 
@@ -141,9 +156,11 @@ struct RemindersListView: View {
     /// the tightest and riskiest adjacency in the app. Restoring keeps the
     /// original id so the rescheduled notification matches the old one.
     private func delete(_ r: Reminder) {
+        // intervalDays travels with it, or undoing an "Every 3 days" reminder
+        // quietly restores it as every 2.
         let restored = Reminder(id: r.id, title: r.title, fireAt: r.fireAt,
                                 recurrence: r.recurrence, enabled: r.enabled,
-                                completedAt: r.completedAt)
+                                completedAt: r.completedAt, intervalDays: r.intervalDays)
         let title = r.title
         modelContext.delete(r)
         modelContext.saveOrLog()
@@ -186,6 +203,19 @@ struct RemindersListView: View {
                     Text("REPEAT").font(.ui(10, weight: .bold)).kerning(1).foregroundStyle(Color.textMuted).padding(.top, 14)
                     chipRow(ReminderRecurrence.allCases.map(\.label)) { i in draftRecurrence == ReminderRecurrence.allCases[i] } pick: { i in
                         draftRecurrence = ReminderRecurrence.allCases[i]
+                    }
+
+                    // "Every…" is meaningless without its number, and a number
+                    // is meaningless without seeing where it lands — a stepper
+                    // reading "3" tells you nothing about whether that suits
+                    // you, so the next three real dates sit under it.
+                    if draftRecurrence.needsInterval {
+                        Stepper("Every \(draftInterval) day\(draftInterval == 1 ? "" : "s")",
+                                value: $draftInterval, in: 1...90)
+                            .font(.ui(14)).padding(.top, 10)
+                        Text(nextThree)
+                            .font(.ui(12.5)).foregroundStyle(Color.textSoft)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
 
                     // A one-off needs to say WHICH DAY; a weekly needs to say
@@ -247,6 +277,13 @@ struct RemindersListView: View {
         case .daily:    return true
         case .weekdays: return (2...6).contains(cal.component(.weekday, from: Date()))
         case .weekly:   return cal.component(.weekday, from: r.fireAt) == cal.component(.weekday, from: Date())
+        case .everyNDays:
+            // Same arithmetic the scheduler uses, so the list and the
+            // notifications cannot disagree about which days it lands on.
+            return r.recurrence
+                .occurrences(anchor: r.fireAt, intervalDays: r.intervalDays, count: 1, cal: cal)
+                .first
+                .map { cal.isDateInToday($0) } ?? false
         }
     }
 
@@ -259,7 +296,7 @@ struct RemindersListView: View {
 
     private func openAdd() {
         draftTitle = ""; draftHour = 9; draftMinute = 0; draftRecurrence = .once
-        draftDate = Date(); showTimePicker = false; showAdd = true
+        draftDate = Date(); showTimePicker = false; draftInterval = 2; showAdd = true
     }
 
     /// Reads and writes the draft time through the same hour/minute the chips
@@ -300,7 +337,8 @@ struct RemindersListView: View {
         let title = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let fire = Self.fireDate(day: draftDate, hour: draftHour, minute: draftMinute,
                                  recurrence: draftRecurrence)
-        modelContext.insert(Reminder(title: title.isEmpty ? "Reminder" : title, fireAt: fire, recurrence: draftRecurrence))
+        modelContext.insert(Reminder(title: title.isEmpty ? "Reminder" : title, fireAt: fire,
+                                     recurrence: draftRecurrence, intervalDays: draftInterval))
         modelContext.saveOrLog()
         showAdd = false
         rescheduleAll()

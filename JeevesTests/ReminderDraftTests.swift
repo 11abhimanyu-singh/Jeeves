@@ -82,6 +82,57 @@ final class ReminderDraftTests: XCTestCase {
                           "the whole point is that it is NOT the day it was created on")
     }
 
+    // MARK: every N days
+    //
+    // The odd one out. Every other recurrence is a DateComponents match the OS
+    // repeats forever, but no components describe "every third day" — a period
+    // that isn't a week aligns to no calendar field. So this one is a rolling
+    // window of concrete dates, and the arithmetic below is the only thing
+    // standing between the user and a reminder that drifts.
+
+    func testItWalksForwardFromTheAnchorInSteps() {
+        let anchor = at(2026, 8, 3, 9, 0)   // Monday
+        let dates = ReminderRecurrence.everyNDays.occurrences(
+            anchor: anchor, intervalDays: 3, count: 4, now: at(2026, 8, 3, 8, 0), cal: cal)
+        XCTAssertEqual(dates.map { parts($0).d }, [3, 6, 9, 12])
+        XCTAssertTrue(dates.allSatisfy { parts($0).h == 9 }, "the time of day never drifts")
+    }
+
+    /// The rhythm stays pinned to the day the user chose. Rescheduling happens
+    /// on every launch, and if the walk restarted from "now" each time, an
+    /// every-3-days reminder would silently re-phase to whichever day the app
+    /// happened to be opened on.
+    func testReschedulingLaterDoesNotRePhaseTheRhythm() {
+        let anchor = at(2026, 8, 3, 9, 0)                 // Mon 3rd, every 3 days
+        let asOfTuesday = ReminderRecurrence.everyNDays.occurrences(
+            anchor: anchor, intervalDays: 3, count: 3, now: at(2026, 8, 4, 12, 0), cal: cal)
+        XCTAssertEqual(asOfTuesday.map { parts($0).d }, [6, 9, 12],
+                       "opening the app on Tuesday must not move the rhythm to Tuesdays")
+    }
+
+    func testAFortnightIsExpressibleWhichIsThePointOfTheWholeFeature() {
+        let dates = ReminderRecurrence.everyNDays.occurrences(
+            anchor: at(2026, 8, 1, 10, 0), intervalDays: 14, count: 3,
+            now: at(2026, 8, 1, 9, 0), cal: cal)
+        XCTAssertEqual(dates.map { parts($0).d }, [1, 15, 29],
+                       "once a fortnight cannot be said in weekdays — that is why this exists")
+    }
+
+    func testAnIntervalOfZeroIsTreatedAsDailyRatherThanLoopingForever() {
+        let dates = ReminderRecurrence.everyNDays.occurrences(
+            anchor: at(2026, 8, 3, 9, 0), intervalDays: 0, count: 3,
+            now: at(2026, 8, 3, 8, 0), cal: cal)
+        XCTAssertEqual(dates.map { parts($0).d }, [3, 4, 5], "a zero step would never advance")
+    }
+
+    func testTheOtherRecurrencesGetNoOccurrenceList() {
+        for r in [ReminderRecurrence.once, .daily, .weekdays, .weekly] {
+            XCTAssertTrue(r.occurrences(anchor: at(2026, 8, 3), intervalDays: 3, count: 3, cal: cal).isEmpty,
+                          "\(r.label) is a components match the OS repeats — it needs no window")
+        }
+        XCTAssertFalse(ReminderRecurrence.everyNDays.needsInterval == false)
+    }
+
     // MARK: the repeats that don't take a day
 
     func testDailyAndWeekdaysCarryOnlyTheTimeOfDay() {

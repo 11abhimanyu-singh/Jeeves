@@ -1822,11 +1822,16 @@ final class ChatToolExecutor {
                 : "'\(title)' is already set for \(dtf.string(from: fire)) — nothing to add.")
         }
 
-        let reminder = Reminder(title: title, fireAt: fire, recurrence: recurrence)
+        // A rhythm a week cannot express needs its number, or "every 3 days"
+        // silently becomes the default 2.
+        let interval = max(1, input["interval_days"] as? Int ?? 2)
+        let reminder = Reminder(title: title, fireAt: fire, recurrence: recurrence,
+                                intervalDays: interval)
         modelContext.insert(reminder)
         modelContext.saveOrLog()
         ReminderScheduler.reschedule((all + [reminder]).filter(\.isActive))
-        return .init(text: "Reminder set: '\(title)' at \(dtf.string(from: fire)) (\(recurrence.rawValue)).")
+        let how = recurrence == .everyNDays ? "every \(interval) day\(interval == 1 ? "" : "s")" : recurrence.rawValue
+        return .init(text: "Reminder set: '\(title)' at \(dtf.string(from: fire)) (\(how)).")
     }
 
     private static func dayString(_ d: Date) -> String {
