@@ -252,20 +252,9 @@ struct RemindersListView: View {
         }
     }
 
-    private func chipRow(_ labels: [String], selected: @escaping (Int) -> Bool, pick: @escaping (Int) -> Void) -> some View {
-        HStack(spacing: 7) {
-            ForEach(Array(labels.enumerated()), id: \.offset) { i, label in
-                let on = selected(i)
-                Button { pick(i) } label: {
-                    Text(label).font(.ui(12.5, weight: .semibold))
-                        .foregroundStyle(on ? Color.accentDeep : Color.textSoft)
-                        .padding(.horizontal, 12).padding(.vertical, 9)
-                        .background(Capsule().fill(on ? Color.accent.opacity(0.15) : Color.surface))
-                        .overlay(Capsule().stroke(on ? Color.accent : Color.textPrimary.opacity(0.08), lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-            }
-        }
+    private func chipRow(_ labels: [String], selected: @escaping (Int) -> Bool,
+                         pick: @escaping (Int) -> Void) -> some View {
+        ChipScrollRow(labels: labels, selected: selected, pick: pick)
     }
 
     // MARK: Helpers + mutations
@@ -406,19 +395,13 @@ struct ReminderEditSheet: View {
 
                     Text("REPEAT").font(.ui(10, weight: .bold)).kerning(1)
                         .foregroundStyle(Color.textMuted).padding(.top, 14)
-                    HStack(spacing: 7) {
-                        ForEach(ReminderRecurrence.allCases, id: \.self) { rec in
-                            let on = recurrence == rec
-                            Button { recurrence = rec } label: {
-                                Text(rec.label).font(.ui(12.5, weight: .semibold))
-                                    .foregroundStyle(on ? Color.accentDeep : Color.textSoft)
-                                    .padding(.horizontal, 12).padding(.vertical, 9)
-                                    .background(Capsule().fill(on ? Color.accent.opacity(0.15) : Color.surface))
-                                    .overlay(Capsule().stroke(on ? Color.accent : Color.textPrimary.opacity(0.08), lineWidth: 1))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
+                    // The same component the add sheet uses. This row was a
+                    // hand-copied duplicate of it, which is why the fifth
+                    // recurrence broke both screens and fixing one would have
+                    // left the other reading "Weekda / ys".
+                    ChipScrollRow(labels: ReminderRecurrence.allCases.map(\.label),
+                                  selected: { ReminderRecurrence.allCases[$0] == recurrence },
+                                  pick: { recurrence = ReminderRecurrence.allCases[$0] })
                 }
                 .padding(20)
             }
@@ -457,5 +440,47 @@ struct ReminderEditSheet: View {
         modelContext.saveOrLog("ReminderEditSheet.save")
         onSaved()
         dismiss()
+    }
+}
+
+
+/// Chips that never break a word.
+///
+/// This started as a plain HStack sized for four, hand-copied into the edit
+/// sheet. A fifth repeat option ("Every…") and a fifth time option ("Other…")
+/// each pushed it past the width, and SwiftUI's answer to a too-narrow button
+/// is to wrap its label — so both sheets read "Weekda / ys", "Weekl / y",
+/// "Every / …".
+///
+/// It scrolls horizontally now, and it is ONE component rather than two
+/// copies. A row that can always take one more chip is the only version that
+/// survives the next option being added, a larger Dynamic Type setting, or a
+/// longer word in another language. `lineLimit(1)` with `fixedSize()` is the
+/// guarantee that nothing wraps; the scroll is what keeps it reachable.
+struct ChipScrollRow: View {
+    let labels: [String]
+    let selected: (Int) -> Bool
+    let pick: (Int) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 7) {
+                ForEach(Array(labels.enumerated()), id: \.offset) { i, label in
+                    let on = selected(i)
+                    Button { pick(i) } label: {
+                        Text(label).font(.ui(12.5, weight: .semibold))
+                            .lineLimit(1).fixedSize()
+                            .foregroundStyle(on ? Color.accentDeep : Color.textSoft)
+                            .padding(.horizontal, 12).padding(.vertical, 9)
+                            .background(Capsule().fill(on ? Color.accent.opacity(0.15) : Color.surface))
+                            .overlay(Capsule().stroke(on ? Color.accent : Color.textPrimary.opacity(0.08), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(on ? [.isSelected] : [])
+                }
+            }
+            .padding(.vertical, 1)   // room for the capsule stroke
+        }
+        .scrollBounceBehavior(.basedOnSize)
     }
 }
