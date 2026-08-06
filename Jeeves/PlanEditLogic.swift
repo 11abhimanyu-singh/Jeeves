@@ -14,9 +14,11 @@ import Foundation
 extension GeneratedBlock {
     var durationMinutes: Int { max(0, (endMinute ?? 0) - (startMinute ?? 0)) }
 
-    private static func hhmm(_ m: Int) -> String {
-        String(format: "%02d:%02d", (m / 60) % 24, m % 60)
-    }
+    // `hhmm` used to live here as a private copy. It is now on GeneratedBlock
+    // beside `minutes(from:)`, its inverse — the editor already wrapped past
+    // midnight while the offline packer's own formatter did not, which is how
+    // "Sleep 23:00 → 31:00" reached the store on every offline plan ever made.
+    // One formatter, one behaviour.
 
     /// A copy placed at `startMinute` for `durationMinutes`.
     func placed(at startMinute: Int, durationMinutes: Int) -> GeneratedBlock {

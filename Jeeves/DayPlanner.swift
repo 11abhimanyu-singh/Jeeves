@@ -52,6 +52,13 @@ enum DayPlanner {
     // 1-minute "Discretionary time" block makes no sense, so we drop it and
     // leave the gap. Better to under-fill than to cram.
     static let minDiscretionaryMinutes = 20
+    /// The floor on a TRIMMED activity. An activity is scheduled at the length
+    /// the routine gave it, or trimmed no further than this, or dropped — never
+    /// whittled to whatever was left over. Fifteen minutes of Strategy at 09:38
+    /// existed because fifteen minutes existed, and it is not a thing anybody
+    /// can do. An activity whose configured duration is already under this runs
+    /// whole; the floor bounds shrinking, it does not forbid short activities.
+    static let minActivityMinutes = 30
     // commute + mobility + weights + cardio + commute + shower — the full span
     // from leaving for the gym to being ready afterward.
     static let commuteToGymMinutes = 30
@@ -90,13 +97,21 @@ enum DayPlanner {
     /// and the four grouped children that replaced it.
     private static func routineQueue(_ routine: [BaselineActivity],
                                      prepSessions: [PrepSession]) -> [QueueItem] {
+        // The practice rows the ROUTINE actually contains today. This used to
+        // ignore the argument entirely and emit all four categories at a
+        // hardcoded [45, 35, 25, 15], which meant the caller's list — now
+        // narrowed by weekday cadence — was silently overridden offline, and
+        // one category always drew a 15-minute fragment nobody can practise in.
+        let practice = routine.filter {
+            PlanRules.isPrepBlock(title: $0.name) && !$0.name.localizedCaseInsensitiveContains("reading")
+        }
         var out: [QueueItem] = []
         var practiceSeated = false
         for a in routine {
             let isReading = a.name.localizedCaseInsensitiveContains("reading")
             if PlanRules.isPrepBlock(title: a.name), !isReading {
                 if !practiceSeated {
-                    out.append(contentsOf: practiceQueue(from: prepSessions))
+                    out.append(contentsOf: practiceQueue(practice, sessions: prepSessions))
                     practiceSeated = true
                 }
                 continue
@@ -177,10 +192,12 @@ enum DayPlanner {
             overflow.insert(overflow.remove(at: lunchIndex), at: 0)
         }
 
-        if leaveTime > preGymCursor {
-            blocks.append(PlanBlock(title: "Slack", startMinute: preGymCursor, durationMinutes: leaveTime - preGymCursor, note: nil, isAnchor: false))
-            preGymCursor = leaveTime
-        }
+        // The wait before leaving for the gym is a gap, not a block. It used to
+        // be scheduled as "Slack" with no size guard at all, so a one-minute
+        // wait became a one-minute item on the timeline with a name that means
+        // nothing. Time you are not doing anything should look like time you
+        // are not doing anything.
+        if leaveTime > preGymCursor { preGymCursor = leaveTime }
 
         // Gym block — the pivot. Floor the departure at where the morning blocks
         // actually ended: for an unrealistically early gym (leaveTime before the
@@ -213,12 +230,14 @@ enum DayPlanner {
             var placeAt = gymCursor
             if item.title == "Lunch", placeAt < lunchEarliestMinute { placeAt = lunchEarliestMinute }
             let isPrep = PlanRules.isPrepBlock(title: item.title)
+            // The breather between two prep blocks is a GAP, not a block. The
+            // rule measures the distance between consecutive prep blocks and
+            // ignores whatever sits between them, so an empty ten minutes
+            // satisfies it exactly as a block titled "Breather" did — without
+            // adding a ten-minute item to a day that already had three of them.
             if lastWasPrep, isPrep, placeAt == gymCursor {
                 let breather = PlanRules.prepBreatherMinutes
                 guard placeAt + breather + item.minutes <= dayEndMinute else { continue }
-                blocks.append(PlanBlock(title: "Breather", startMinute: placeAt,
-                                        durationMinutes: breather,
-                                        note: "switching subject", isAnchor: false))
                 placeAt += breather
             }
             // Don't pack past the 20:30 boundary — drop what won't fit.
@@ -257,19 +276,54 @@ enum DayPlanner {
         blocks.append(PlanBlock(title: "Sleep", startMinute: sleepMinute, durationMinutes: 8 * 60, note: "11 PM – 7 AM", isAnchor: true))
     }
 
-    /// Splits the 120-min practice block across the 4 categories, weighting
-    /// toward whichever has the fewest logged sessions this week.
-    private static func practiceQueue(from sessions: [PrepSession]) -> [QueueItem] {
-        let categories: [PrepCategory] = [.productSense, .execution, .strategy, .behavioral]
+    /// Orders the practice rows the routine gave us, most-neglected first, and
+    /// keeps each one's OWN configured duration.
+    ///
+    /// It used to invent the list — all four categories, always, at a fixed
+    /// [45, 35, 25, 15] — which had two costs. The routine could not say "not
+    /// today" about a category, so the weekday cadence was defeated the moment
+    /// the plan fell back offline. And the tail of that allocation was a
+    /// 15-minute block: 39 activity blocks under half an hour across the stored
+    /// plans, scheduled because minutes were left over rather than because
+    /// fifteen minutes is a thing you can practise in.
+    private static func practiceQueue(_ practice: [BaselineActivity],
+                                      sessions: [PrepSession]) -> [QueueItem] {
         let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? .distantPast
         let recent = sessions.filter { $0.date >= weekAgo && $0.category != .reading }
         let counts = Dictionary(grouping: recent, by: { $0.category }).mapValues { $0.count }
 
-        let sorted = categories.sorted { (counts[$0] ?? 0) < (counts[$1] ?? 0) }
-        let minuteAllocation = [45, 35, 25, 15] // most-neglected gets the most time
-        return zip(sorted, minuteAllocation).map { cat, mins in
-            (title: "Interview prep — \(cat.rawValue)", minutes: mins, note: "\(counts[cat] ?? 0) sessions logged this week", category: cat, tier: .important)
+        func category(of name: String) -> PrepCategory? {
+            Baseline.practiceCategories.first { name.localizedCaseInsensitiveContains($0.rawValue) }
         }
+
+        // The legacy shape: ONE undifferentiated "Interview prep — practice"
+        // row, from a store that predates the split into four children. Fan it
+        // out by neglect, but into EQUAL slices no smaller than the floor —
+        // enough of them to fill the row and no more. The old allocation was
+        // [45, 35, 25, 15], which always ended in a quarter-hour of whichever
+        // category needed the practice least.
+        if practice.count == 1, let row = practice.first, category(of: row.name) == nil {
+            let slices = max(1, min(Baseline.practiceCategories.count, row.durationMinutes / minActivityMinutes))
+            let each = row.durationMinutes / slices
+            return Baseline.practiceCategories
+                .sorted { (counts[$0] ?? 0) < (counts[$1] ?? 0) }
+                .prefix(slices)
+                .map { cat in
+                    (title: "Interview prep — \(cat.rawValue)", minutes: each,
+                     note: "\(counts[cat] ?? 0) sessions logged this week", category: cat, tier: row.tier)
+                }
+        }
+
+        return practice
+            .map { (activity: $0, category: category(of: $0.name)) }
+            .sorted { (counts[$0.category ?? .reading] ?? 0) < (counts[$1.category ?? .reading] ?? 0) }
+            .map { pair in
+                (title: pair.activity.name,
+                 minutes: pair.activity.durationMinutes,
+                 note: pair.category.map { "\(counts[$0] ?? 0) sessions logged this week" } ?? pair.activity.note,
+                 category: pair.category,
+                 tier: pair.activity.tier)
+            }
     }
 
     /// Packs `queue` items forward from `cursor` in order, respecting an optional pool
@@ -321,7 +375,11 @@ enum DayPlanner {
                 // gym on time" rule, generalised to whatever the user put
                 // there. Important and Must-do items move instead of shrinking.
                 let room = pool - filled - breather
-                if item.tier == .flexible, room >= minDiscretionaryMinutes {
+                // Trim no further than minActivityMinutes. Below that the block
+                // stops being the activity and becomes the leftovers, so it is
+                // dropped instead — the day is honestly shorter rather than
+                // dishonestly full.
+                if item.tier == .flexible, room >= minActivityMinutes {
                     blocks.append(PlanBlock(title: item.title, startMinute: cursor,
                                             durationMinutes: room,
                                             note: "trimmed to leave on time", isAnchor: false,
@@ -333,18 +391,17 @@ enum DayPlanner {
                     overflow.append(item)
                 }
             } else {
+                // The breather is a gap, not a block — see the overflow loop.
                 if breather > 0 {
-                    blocks.append(PlanBlock(title: "Breather", startMinute: cursor,
-                                            durationMinutes: breather,
-                                            note: "switching subject", isAnchor: false))
                     cursor += breather
                     filled += breather
                 }
                 // Lunch is never eaten before 12:30. On rest days (unbounded pool)
-                // hold with a short breather so lunch lands in its window; on gym
-                // days the pre-gym packing already seats it around the gym.
+                // wait for its window; on gym days the pre-gym packing already
+                // seats it around the gym. The wait used to be scheduled as
+                // "Free time" — sixteen minutes of it on 5 August, a number
+                // arrived at by subtraction rather than by anyone deciding it.
                 if item.title == "Lunch", pool == nil, cursor < lunchEarliestMinute {
-                    blocks.append(PlanBlock(title: "Free time", startMinute: cursor, durationMinutes: lunchEarliestMinute - cursor, note: "brief breather before lunch", isAnchor: false))
                     cursor = lunchEarliestMinute
                 }
                 blocks.append(PlanBlock(title: item.title, startMinute: cursor, durationMinutes: item.minutes, note: item.note, isAnchor: false, prepCategory: item.category))

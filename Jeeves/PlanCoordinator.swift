@@ -477,8 +477,8 @@ enum PlanCoordinator {
         var generated = blocks.map { b in
             GeneratedBlock(
                 title: b.title,
-                startTime: String(format: "%02d:%02d", b.startMinute / 60, b.startMinute % 60),
-                endTime: String(format: "%02d:%02d", b.endMinute / 60, b.endMinute % 60),
+                startTime: GeneratedBlock.hhmm(b.startMinute),
+                endTime: GeneratedBlock.hhmm(b.endMinute),
                 note: b.note,
                 isAnchor: b.isAnchor,
                 kind: b.isAnchor ? "anchor" : "activity"
@@ -487,8 +487,8 @@ enum PlanCoordinator {
         for e in timed {
             generated.append(GeneratedBlock(
                 title: e.title,
-                startTime: String(format: "%02d:%02d", e.startMinute / 60, e.startMinute % 60),
-                endTime: String(format: "%02d:%02d", e.endMinute / 60, e.endMinute % 60),
+                startTime: GeneratedBlock.hhmm(e.startMinute),
+                endTime: GeneratedBlock.hhmm(e.endMinute),
                 note: e.destinationAddress.isEmpty ? nil
                     : "At \(e.destinationAddress). Offline plan — commute NOT included, leave early.",
                 isAnchor: true,

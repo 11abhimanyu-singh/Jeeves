@@ -67,6 +67,16 @@ struct GeneratedBlock: Codable, Equatable {
         guard parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]) else { return nil }
         return h * 60 + m
     }
+
+    /// The inverse, and it WRAPS. A block that runs into tomorrow still ends at
+    /// an hour of the clock: Sleep starting 23:00 and running eight hours ends
+    /// at 07:00, not at "31:00" — which is not a time, and which nothing
+    /// downstream can read as one. The offline packer emitted exactly that on
+    /// every plan it ever produced, because it formatted 1860 minutes without
+    /// dividing back into a day.
+    static func hhmm(_ minutes: Int) -> String {
+        String(format: "%02d:%02d", (minutes / 60) % 24, minutes % 60)
+    }
 }
 
 /// What Jeeves changed to make the day fit, surfaced to the user verbatim

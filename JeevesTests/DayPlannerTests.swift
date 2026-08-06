@@ -217,11 +217,91 @@ final class DayPlannerTests: XCTestCase {
         }
     }
 
+    // MARK: what the offline packer may never emit
+    //
+    // The fallback ran on 4 of the 31 stored plan-days and produced, on 5 Aug
+    // alone, three 10-minute Breathers, a 15-minute Slack, a 16-minute Free
+    // time and Sleep 23:00 → 31:00. None of those are decisions; they are
+    // arithmetic left over from trying to make an impossible day close.
+
+    private func everyOfflineDay() -> [(label: String, blocks: [PlanBlock])] {
+        [("rest day", DayPlanner.generate(gymMinute: nil, prepSessions: [], leisureLogs: [])),
+         ("gym day", DayPlanner.generate(gymMinute: 11 * 60, prepSessions: [], leisureLogs: [])),
+         ("late gym", DayPlanner.generate(gymMinute: 17 * 60, prepSessions: [], leisureLogs: []))]
+    }
+
+    func testTheOfflinePackerInventsNoFillerBlocks() {
+        for (label, blocks) in everyOfflineDay() {
+            for banned in ["Breather", "Slack", "Free time"] {
+                XCTAssertFalse(blocks.contains { $0.title == banned },
+                               "\(label) scheduled a '\(banned)' — leftover time is a gap, not an activity")
+            }
+        }
+    }
+
+    /// The floor bounds TRIMMING; it does not forbid short activities. A
+    /// routine activity runs at the length the routine gave it, or trimmed no
+    /// further than the floor, or not at all. Shower is a fixed 20 minutes and
+    /// Discretionary time is honest empty time — neither is a remainder, and
+    /// neither is in scope.
+    func testARoutineActivityRunsAtItsOwnLengthOrNoShorterThanTheFloor() {
+        var checked = 0
+        for (label, blocks) in everyOfflineDay() {
+            for b in blocks {
+                guard let configured = Baseline.activities.first(where: { $0.name == b.title })?.durationMinutes
+                else { continue }
+                checked += 1
+                XCTAssertTrue(
+                    b.durationMinutes == configured || b.durationMinutes >= DayPlanner.minActivityMinutes,
+                    "\(label): '\(b.title)' was cut from \(configured) to \(b.durationMinutes) min — below the floor it is leftovers, not the activity")
+            }
+        }
+        XCTAssertGreaterThan(checked, 0, "a test that checked nothing has not passed")
+    }
+
+    /// The breather survives as a GAP. PlanRules measures the distance between
+    /// consecutive prep blocks and ignores what sits between them, so removing
+    /// the block must not start failing the rule it was built to satisfy.
+    func testRemovingTheBreatherBlockDidNotBreakTheBreatherRule() {
+        for (label, blocks) in everyOfflineDay() {
+            let generated = blocks.map {
+                GeneratedBlock(title: $0.title,
+                               startTime: GeneratedBlock.hhmm($0.startMinute),
+                               endTime: GeneratedBlock.hhmm($0.endMinute),
+                               note: nil, isAnchor: $0.isAnchor,
+                               kind: $0.isAnchor ? "anchor" : "activity")
+            }
+            XCTAssertEqual(PlanRules.prepBreatherViolations(generated), [],
+                           "\(label) put two prep blocks closer than the breather allows")
+        }
+    }
+
+    /// Sleep is 23:00 plus eight hours. That is 07:00 tomorrow, not "31:00" —
+    /// a string that is not a time, which every offline plan in the store
+    /// carried because the packer formatted 1860 minutes without wrapping.
+    func testAnEightHourSleepFromElevenEndsAtSevenNotThirtyOne() {
+        XCTAssertEqual(GeneratedBlock.hhmm(23 * 60 + 8 * 60), "07:00")
+        XCTAssertEqual(GeneratedBlock.hhmm(24 * 60), "00:00")
+        XCTAssertEqual(GeneratedBlock.hhmm(20 * 60 + 30), "20:30", "times inside the day are untouched")
+
+        for (label, blocks) in everyOfflineDay() {
+            for b in blocks {
+                let end = GeneratedBlock.minutes(from: GeneratedBlock.hhmm(b.endMinute)) ?? -1
+                XCTAssertTrue((0...(24 * 60)).contains(end),
+                              "\(label): '\(b.title)' ends at \(GeneratedBlock.hhmm(b.endMinute)), which is not an hour of any clock")
+            }
+        }
+    }
+
     // MARK: Practice-split weighting
 
-    /// The category with the most sessions logged this week must get the
-    /// smallest slice of the 120-minute practice block.
-    func testPracticeSplitGivesLeastTimeToMostPracticedCategory() throws {
+    /// Neglect now decides ORDER, not duration. The old split was
+    /// [45, 35, 25, 15], so the category you needed least always drew a
+    /// quarter-hour — one of the 39 sub-half-hour blocks across the stored
+    /// plans, scheduled because minutes were left rather than because fifteen
+    /// minutes is a thing anyone can practise in. Slices are now equal and
+    /// never below the floor; the most-practised category simply goes last.
+    func testPracticeSplitPutsTheMostPractisedCategoryLastRatherThanStarvingIt() throws {
         let container = try ModelContainer(
             for: PrepSession.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
@@ -232,11 +312,17 @@ final class DayPlannerTests: XCTestCase {
         sessions.forEach { container.mainContext.insert($0) }
 
         let blocks = DayPlanner.generate(gymMinute: nil, prepSessions: sessions, leisureLogs: [])
-        let productSense = block("Interview prep — Product Sense", in: blocks)
-        XCTAssertNotNil(productSense)
-        XCTAssertEqual(productSense!.durationMinutes, 15, "Most-practiced category should get the smallest (15-min) slice")
+        let practiceBlocks = blocks
+            .filter { $0.title.hasPrefix("Interview prep — ") && $0.title != "Interview prep — Reading" }
+            .sorted { $0.startMinute < $1.startMinute }
 
-        let practiceBlocks = blocks.filter { $0.title.hasPrefix("Interview prep — ") && $0.title != "Interview prep — Reading" }
-        XCTAssertEqual(practiceBlocks.map(\.durationMinutes).reduce(0, +), 120, "Practice slices must total 120 minutes")
+        XCTAssertEqual(practiceBlocks.last?.title, "Interview prep — Product Sense",
+                       "three sessions logged this week, so it is the one that can wait")
+        for b in practiceBlocks {
+            XCTAssertGreaterThanOrEqual(b.durationMinutes, DayPlanner.minActivityMinutes,
+                                        "'\(b.title)' is \(b.durationMinutes) min — below the floor it is leftovers, not practice")
+        }
+        XCTAssertEqual(practiceBlocks.map(\.durationMinutes).reduce(0, +), 120,
+                       "the row's own 120 minutes are all still spent, just in equal parts")
     }
 }
