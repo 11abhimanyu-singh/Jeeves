@@ -396,12 +396,23 @@ enum DayPlanner {
                     cursor += breather
                     filled += breather
                 }
-                // Lunch is never eaten before 12:30. On rest days (unbounded pool)
-                // wait for its window; on gym days the pre-gym packing already
-                // seats it around the gym. The wait used to be scheduled as
-                // "Free time" — sixteen minutes of it on 5 August, a number
-                // arrived at by subtraction rather than by anyone deciding it.
+                // Lunch is never eaten before 12:30. On rest days (unbounded
+                // pool) wait for its window; on gym days the pre-gym packing
+                // already seats it around the gym.
+                //
+                // The wait is named "Free time". Unscheduled time is fine to
+                // label, and labelling it here is what keeps the offline packer
+                // agreeing with the prompt, which does the same thing. What it
+                // may not be is a one-minute block — below the discretionary
+                // floor the label costs more than it tells you, so the gap
+                // simply stays bare.
                 if item.title == "Lunch", pool == nil, cursor < lunchEarliestMinute {
+                    let wait = lunchEarliestMinute - cursor
+                    if wait >= minDiscretionaryMinutes {
+                        blocks.append(PlanBlock(title: "Free time", startMinute: cursor,
+                                                durationMinutes: wait,
+                                                note: "before lunch opens", isAnchor: false))
+                    }
                     cursor = lunchEarliestMinute
                 }
                 blocks.append(PlanBlock(title: item.title, startMinute: cursor, durationMinutes: item.minutes, note: item.note, isAnchor: false, prepCategory: item.category))

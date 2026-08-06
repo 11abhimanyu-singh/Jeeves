@@ -230,11 +230,26 @@ final class DayPlannerTests: XCTestCase {
          ("late gym", DayPlanner.generate(gymMinute: 17 * 60, prepSessions: [], leisureLogs: []))]
     }
 
-    func testTheOfflinePackerInventsNoFillerBlocks() {
+    /// "Breather" and "Slack" are pretend ACTIVITIES — they sit on the timeline
+    /// as though they were work, and "Slack" does not even name anything.
+    /// "Free time" is different: it is an honest label for time that isn't
+    /// scheduled, the prompt uses it too, and it is allowed. What it may never
+    /// be is tiny — see the next test.
+    func testThePackerSchedulesNoPretendActivities() {
         for (label, blocks) in everyOfflineDay() {
-            for banned in ["Breather", "Slack", "Free time"] {
+            for banned in ["Breather", "Slack"] {
                 XCTAssertFalse(blocks.contains { $0.title == banned },
-                               "\(label) scheduled a '\(banned)' — leftover time is a gap, not an activity")
+                               "\(label) scheduled a '\(banned)' — that is leftover time wearing an activity's clothes")
+            }
+        }
+    }
+
+    func testFreeTimeIsAllowedButNeverAScrapOfIt() {
+        for (label, blocks) in everyOfflineDay() {
+            for b in blocks where b.title == "Free time" {
+                XCTAssertGreaterThanOrEqual(
+                    b.durationMinutes, DayPlanner.minDiscretionaryMinutes,
+                    "\(label): a \(b.durationMinutes)-minute 'Free time' costs more to read than it tells you")
             }
         }
     }
