@@ -32,19 +32,31 @@ struct JourneysView: View {
     /// Journeys grouped under their trip, newest trip last, legs in day order.
     /// A journey whose trip is gone gets its own group — those are orphans and
     /// worth seeing rather than hiding.
-    private var groups: [(title: String, subtitle: String, legs: [TravelSegment])] {
+    /// Keyed by trip ID, never by title.
+    ///
+    /// The ForEach below used to use the TITLE as its identity, and titles are
+    /// not unique: the planner's own travel button creates every trip as
+    /// literally `Trip(title: "Trip", …)` and offers no field to rename it, so
+    /// a second one collided immediately. SwiftUI collapses duplicate ids to a
+    /// single identity, so the second trip's legs were never instantiated —
+    /// invisible, and therefore unselectable and undeletable, on the one screen
+    /// whose whole purpose is seeing and removing journeys.
+    private var groups: [(id: String, title: String, subtitle: String, legs: [TravelSegment])] {
         let byTrip = Dictionary(grouping: segments, by: \.tripID)
-        var out: [(String, String, [TravelSegment])] = []
+        var out: [(String, String, String, [TravelSegment])] = []
         for (tripID, legs) in byTrip {
             let sorted = legs.sorted { $0.day < $1.day }
             if let trip = trips.first(where: { $0.id == tripID }) {
-                out.append((trip.title.isEmpty ? "Trip" : trip.title,
+                out.append((trip.id.uuidString, trip.title.isEmpty ? "Trip" : trip.title,
                             TravelGuard.dayRange(trip), sorted))
             } else {
-                out.append(("Orphaned", "their trip no longer exists", sorted))
+                // Orphans genuinely share a heading, so they need a key of their
+                // own rather than the shared word "Orphaned".
+                out.append(("orphan-\(tripID.uuidString)",
+                            "Orphaned", "their trip no longer exists", sorted))
             }
         }
-        return out.sorted { ($0.2.first?.day ?? .distantPast) < ($1.2.first?.day ?? .distantPast) }
+        return out.sorted { ($0.3.first?.day ?? .distantPast) < ($1.3.first?.day ?? .distantPast) }
     }
 
     var body: some View {
@@ -103,7 +115,7 @@ struct JourneysView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(RoundedRectangle(cornerRadius: 14).fill(Color.sageLight))
                 }
-                ForEach(groups, id: \.title) { group in
+                ForEach(groups, id: \.id) { group in
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 6) {
                             Text(group.title.uppercased())

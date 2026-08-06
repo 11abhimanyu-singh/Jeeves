@@ -12,7 +12,21 @@
 import Foundation
 
 extension GeneratedBlock {
-    var durationMinutes: Int { max(0, (endMinute ?? 0) - (startMinute ?? 0)) }
+    /// Length in minutes, counting a block that runs past midnight.
+    ///
+    /// This was `max(0, end - start)`, which silently returned ZERO for the one
+    /// block every single plan carries: Sleep is 23:00 → 07:00, so 420 − 1380
+    /// is −960 and the clamp made it 0. The editor showed "0 min · 11 PM – 7 AM"
+    /// for an eight-hour anchor.
+    ///
+    /// It became reachable this morning. Before that Sleep ended at the
+    /// nonsense "31:00", which subtracts to a correct 480 by accident — fixing
+    /// the stored time to a real one is what exposed the arithmetic that could
+    /// never handle it. Worth remembering: the wrong value was propping this up.
+    var durationMinutes: Int {
+        let s = startMinute ?? 0, e = endMinute ?? 0
+        return e >= s ? e - s : (e + 24 * 60) - s
+    }
 
     // `hhmm` used to live here as a private copy. It is now on GeneratedBlock
     // beside `minutes(from:)`, its inverse — the editor already wrapped past
@@ -55,15 +69,20 @@ enum PlanEditLogic {
         // Anchor the cascade to the day's earliest start, not the first block's
         // — after a reorder the first block's own time is meaningless.
         guard let origin = blocks.compactMap(\.startMinute).min() else { return blocks }
-        // Fixed anchor intervals — movable blocks must flow around, never over, these.
+        // Fixed anchor intervals — movable blocks must flow around, never over,
+        // these. Built from start + DURATION rather than the stored end, so a
+        // block running past midnight keeps a forward-going interval: Sleep is
+        // (1380, 420) as stored, and every clash test below asks `end > cursor`,
+        // which 420 can never satisfy. The night was unprotected — a movable
+        // block dragged under Sleep was placed straight on top of it.
         let anchors: [(start: Int, end: Int)] = blocks.compactMap { b in
-            guard b.isAnchor, let s = b.startMinute, let e = b.endMinute else { return nil }
-            return (s, e)
+            guard b.isAnchor, let s = b.startMinute else { return nil }
+            return (s, s + b.durationMinutes)
         }
         var cursor = origin
         return blocks.map { block in
-            if block.isAnchor, let end = block.endMinute {
-                cursor = max(cursor, end)
+            if block.isAnchor, let start = block.startMinute {
+                cursor = max(cursor, start + block.durationMinutes)
                 return block                       // pinned — unchanged
             }
             let duration = block.durationMinutes

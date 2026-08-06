@@ -15,6 +15,39 @@ final class PlanEditLogicTests: XCTestCase {
         GeneratedBlock(title: title, startTime: start, endTime: end, note: nil, isAnchor: anchor, kind: kind)
     }
 
+    // MARK: blocks that run past midnight
+    //
+    // Sleep is 23:00 → 07:00 on EVERY plan. `durationMinutes` was
+    // `max(0, end - start)`, so 420 − 1380 clamped to zero and the editor
+    // showed "0 min" for an eight-hour anchor. It only became reachable when
+    // the stored end time was fixed this morning: before that Sleep ended at
+    // the nonsense "31:00", which subtracts to a correct 480 by accident. The
+    // wrong value was propping up arithmetic that could never handle the right
+    // one.
+
+    func testABlockRunningPastMidnightHasItsRealLength() {
+        XCTAssertEqual(b("Sleep", "23:00", "07:00", anchor: true).durationMinutes, 480)
+        XCTAssertEqual(b("Sleep", "23:30", "07:30", anchor: true).durationMinutes, 480,
+                       "a late gym pushes bedtime back; the night is still eight hours")
+        XCTAssertEqual(b("Reading", "09:00", "10:30").durationMinutes, 90,
+                       "ordinary blocks are untouched")
+    }
+
+    /// The clash test asks `anchorEnd > cursor`. Sleep's stored end is 420, so
+    /// it could never fire and the night was unprotected — a movable block
+    /// dropped below Sleep was placed straight on top of the anchor.
+    func testAMovableBlockCannotBeRetimedOnTopOfSleep() {
+        let out = PlanEditLogic.retime([
+            b("Sleep", "23:00", "07:00", anchor: true, kind: "sleep"),
+            b("Reading", "23:00", "23:45"),
+        ])
+        let sleep = out.first { $0.title == "Sleep" }!
+        let reading = out.first { $0.title == "Reading" }!
+        XCTAssertEqual(sleep.startTime, "23:00", "an anchor never moves")
+        XCTAssertNotEqual(reading.startTime, "23:00",
+                          "a movable block must flow around the night, not over it")
+    }
+
     func testMovableBlocksFlowContiguously() {
         // Two movable blocks; the second should butt against the first.
         let out = PlanEditLogic.retime([

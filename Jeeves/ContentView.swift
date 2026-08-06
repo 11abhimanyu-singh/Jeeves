@@ -873,7 +873,13 @@ struct ContentView: View {
             VStack(spacing: 3) {
                 Image(systemName: icon).font(.ui(17))
                     .foregroundStyle(selected ? Color.accentDeep : Color.textMuted)
+                // Five labels share the width, so each has roughly 75pt. `.ui`
+                // is UIFontMetrics-backed and scales with Dynamic Type, and
+                // with no lineLimit the longest — "Progress" — breaks mid-word
+                // at accessibility sizes. On every screen, since this is the
+                // tab bar. Shrink rather than wrap.
                 Text(label).font(.ui(10.5, weight: selected ? .bold : .medium))
+                    .lineLimit(1).minimumScaleFactor(0.75)
                     .foregroundStyle(selected ? Color.textPrimary : Color.textMuted)
             }
             .frame(maxWidth: .infinity, minHeight: 44)
