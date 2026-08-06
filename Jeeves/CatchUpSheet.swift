@@ -103,33 +103,49 @@ struct CatchUpSheet: View {
         return parts.joined(separator: ", ") + ". Worth a minute before the window closes tonight."
     }
 
+    @ViewBuilder
     private func row(_ item: CatchUp.Pending) -> some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.title).font(.ui(14)).foregroundStyle(Color.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("\(Self.dayName(item.day)) · \(item.plannedMinutes) min · \(item.reason.label)")
-                    .font(.ui(11)).foregroundStyle(Color.textMuted)
-            }
-            Spacer(minLength: 6)
-            // Work already answered "no" is not asked again. The question for
-            // it is what happens NEXT — a skipped block used to write one JSON
-            // entry and disappear, which is how "Collect spectacles" was
-            // scheduled and skipped on two consecutive days with nothing ever
-            // offering to carry it forward.
-            if item.reason.wantsRescue {
-                HStack(spacing: 5) {
-                    choice("Task", isOn: rescues[item.blockKey] == .todo) {
+        let caption = Text("\(Self.dayName(item.day)) · \(item.plannedMinutes) min · \(item.reason.label)")
+            .font(.ui(11)).foregroundStyle(Color.textMuted)
+
+        // Work already answered "no" is not asked again. The question for it is
+        // what happens NEXT — a skipped block used to write one JSON entry and
+        // disappear, which is how "Collect spectacles" was scheduled and
+        // skipped on two consecutive days with nothing offering to carry it on.
+        //
+        // Three actions do not fit beside a title. Squeezed into the same row
+        // they wrapped mid-word — "Tas / k", "Remi / nd" — so the rescue row
+        // puts its buttons on their own line, full width, and the two-answer
+        // row keeps the compact side-by-side shape that always fitted.
+        if item.reason.wantsRescue {
+            VStack(alignment: .leading, spacing: 9) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title).font(.ui(14)).foregroundStyle(Color.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    caption
+                }
+                HStack(spacing: 7) {
+                    choice("Task", isOn: rescues[item.blockKey] == .todo, wide: true) {
                         rescues[item.blockKey] = rescues[item.blockKey] == .todo ? nil : .todo
                     }
-                    choice("Remind", isOn: rescues[item.blockKey] == .reminder) {
+                    choice("Remind", isOn: rescues[item.blockKey] == .reminder, wide: true) {
                         rescues[item.blockKey] = rescues[item.blockKey] == .reminder ? nil : .reminder
                     }
-                    choice("Drop", isOn: rescues[item.blockKey] == .drop) {
+                    choice("Drop", isOn: rescues[item.blockKey] == .drop, wide: true) {
                         rescues[item.blockKey] = rescues[item.blockKey] == .drop ? nil : .drop
                     }
                 }
-            } else {
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 11)
+        } else {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title).font(.ui(14)).foregroundStyle(Color.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    caption
+                }
+                Spacer(minLength: 6)
                 HStack(spacing: 5) {
                     choice("Didn't", isOn: answers[item.blockKey] == false) {
                         answers[item.blockKey] = false
@@ -139,16 +155,23 @@ struct CatchUpSheet: View {
                     }
                 }
             }
+            .padding(.vertical, 11)
         }
-        .padding(.vertical, 11)
     }
 
-    private func choice(_ label: String, isOn: Bool, _ action: @escaping () -> Void) -> some View {
+    /// `wide` spreads three buttons evenly across the sheet. `lineLimit(1)` and
+    /// the scale factor are the belt and braces: a label must shrink before it
+    /// is ever allowed to break in the middle of a word.
+    private func choice(_ label: String, isOn: Bool, wide: Bool = false,
+                        _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
                 .font(.ui(12.5, weight: isOn ? .semibold : .regular))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .foregroundStyle(isOn ? .white : Color.textPrimary)
-                .padding(.horizontal, 12).frame(minHeight: 34)
+                .padding(.horizontal, wide ? 8 : 12)
+                .frame(maxWidth: wide ? .infinity : nil, minHeight: 38)
                 .background(Capsule().fill(isOn ? Color.accent : Color.surface))
         }
         .buttonStyle(.plain)
