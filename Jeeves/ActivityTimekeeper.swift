@@ -173,6 +173,51 @@ enum ActivityTimekeeper {
                        userInfo: ["blockKey": blockKey])
     }
 
+    // MARK: the day's account
+
+    /// How long after the productive window closes to ask how it went. Late
+    /// enough that the last block has finished, early enough to be answered
+    /// before the backfill window shuts at the end of tomorrow.
+    static let reviewAfterBoundary = 15
+
+    /// What the end-of-day nudge says.
+    ///
+    /// Pure, and it counts. "How did today go?" with no number is a nag; the
+    /// whole point is that it names how much is actually being asked, so it can
+    /// be declined honestly. Nil means say nothing — a day with nothing
+    /// assessable has no account to render, and a notification that fires to
+    /// report zero of zero is the app talking to itself.
+    static func reviewBody(markable: Int, alreadyAnswered: Int) -> String? {
+        let left = markable - alreadyAnswered
+        guard markable > 0, left > 0 else { return nil }
+        if alreadyAnswered == 0 {
+            return "\(left) thing\(left == 1 ? "" : "s") to mark — did they happen?"
+        }
+        return "\(alreadyAnswered) of \(markable) marked · \(left) still open"
+    }
+
+    /// Schedule the end-of-day account. Counted at commit time from the plan
+    /// itself, because a notification cannot compute anything when it fires.
+    static func scheduleDayReview(plan: GeneratedPlan, on date: Date, context: ModelContext) async {
+        guard NotificationService.remindersEnabled,
+              !isTravelDay(date, context: context),
+              await NotificationService.ensureAuthorized() else { return }
+
+        let markable = plan.blocks.filter {
+            ActivityUnit.isMeasurable(title: $0.title, kind: $0.kind)
+        }.count
+        let answered = Set(ActivitySession.onDay(date, in: context)
+            .filter { !$0.isLive }.map(\.blockKey)).count
+        guard let body = reviewBody(markable: markable, alreadyAnswered: answered) else { return }
+
+        let cal = Calendar.current
+        guard let fireAt = at(DayPlanner.dayEndMinute + reviewAfterBoundary, on: date, cal: cal),
+              fireAt > Date() else { return }
+        await schedule(id: "\(dayPrefix(for: date, cal: cal))review",
+                       title: "How did today go?",
+                       body: body, category: startCategory, at: fireAt, userInfo: [:])
+    }
+
     // MARK: the backstop
 
     /// Close anything left running past its plan + 30. Local notifications

@@ -178,6 +178,10 @@ enum PlanCoordinator {
         // …the timing nudges for the measurable ones, held in a chain so only
         // the block you're actually up to gets one…
         await ActivityTimekeeper.scheduleDay(plan: result.plan, on: day, context: context)
+        // The day's account, 15 minutes after the productive window closes.
+        // Everything else in the app tells you what is COMING; nothing ever
+        // told you how the day actually went.
+        await ActivityTimekeeper.scheduleDayReview(plan: result.plan, on: day, context: context)
         // …and a background traffic re-check ~90 min before the next commute.
         CommuteBackgroundRefresh.scheduleNext(context: context)
     }

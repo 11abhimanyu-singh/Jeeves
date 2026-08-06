@@ -90,6 +90,44 @@ final class ActivityTimekeeperTests: XCTestCase {
         XCTAssertEqual(ActivityTimekeeper.idsToClear(pending: pending, for: day(2026, 8, 9)), [])
     }
 
+    // MARK: the day's account
+    //
+    // Everything else in the app tells you what is COMING. Nothing ever told
+    // you how the day actually went — the adherence data reached the planner
+    // card, the Adherence screen and the Mac-side digest, and never the phone.
+
+    func testTheReviewNamesHowMuchIsBeingAsked() {
+        XCTAssertEqual(ActivityTimekeeper.reviewBody(markable: 6, alreadyAnswered: 0),
+                       "6 things to mark — did they happen?")
+        XCTAssertEqual(ActivityTimekeeper.reviewBody(markable: 1, alreadyAnswered: 0),
+                       "1 thing to mark — did they happen?")
+    }
+
+    func testPartialProgressIsShownWithItsDenominator() {
+        XCTAssertEqual(ActivityTimekeeper.reviewBody(markable: 6, alreadyAnswered: 4),
+                       "4 of 6 marked · 2 still open",
+                       "a count without its total is the thing this app refuses to print")
+    }
+
+    /// Silence is a feature. A notification that fires to report nothing is the
+    /// app talking to itself, and it is how a useful nudge gets muted.
+    func testADayWithNothingLeftToAnswerSaysNothing() {
+        XCTAssertNil(ActivityTimekeeper.reviewBody(markable: 6, alreadyAnswered: 6),
+                     "all marked — there is no account left to render")
+        XCTAssertNil(ActivityTimekeeper.reviewBody(markable: 0, alreadyAnswered: 0),
+                     "a travel day or an emptied day has nothing assessable")
+        XCTAssertNil(ActivityTimekeeper.reviewBody(markable: 2, alreadyAnswered: 5),
+                     "more answered than markable is nonsense, not a prompt")
+    }
+
+    func testTheReviewHasItsOwnIdentifierAndIsDayScopedLikeTheRest() {
+        let mon = ActivityTimekeeper.dayPrefix(for: day(2026, 8, 3)) + "review"
+        let tue = ActivityTimekeeper.dayPrefix(for: day(2026, 8, 4)) + "review"
+        XCTAssertNotEqual(mon, tue)
+        XCTAssertEqual(ActivityTimekeeper.idsToClear(pending: [mon, tue], for: day(2026, 8, 4)), [tue],
+                       "planning Tuesday must not clear Monday's account")
+    }
+
     func testTheStampIsZeroPaddedSoItSortsAndMatchesPredictably() {
         XCTAssertEqual(ActivityTimekeeper.dayPrefix(for: day(2026, 1, 5)), "jeeves.activity.20260105.")
         XCTAssertEqual(ActivityTimekeeper.dayPrefix(for: day(2026, 12, 31)), "jeeves.activity.20261231.")
