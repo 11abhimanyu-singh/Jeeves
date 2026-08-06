@@ -232,6 +232,13 @@ enum PlanGenerationService {
         let routine = req.routine ?? Baseline.activities
         if req.blankDay {
             s += "(NONE — the user has explicitly cleared this day. Schedule NO activities: no prep, no reading, no chores, no photography, not even a helpful suggestion. Any real anchors below — events, the gym — still stand, with their commutes. Everything else is a single free block. An empty day is what was asked for; filling it is the one wrong answer.)\n"
+        } else if req.routine?.isEmpty == true {
+            // A CONFIGURED routine that lands nothing on this date — a Sunday,
+            // say. Distinct from having no routine at all, and the difference
+            // matters: the "use your judgement" line below invited the model to
+            // invent a day precisely when the weekday cadence had correctly
+            // emptied one, which is the whole failure this work exists to stop.
+            s += "(NONE TODAY — the routine IS configured; nothing in it falls on this date. That is a decision the user made, not a gap for you to fill. Schedule no activities: no prep, no reading, no chores, not even a helpful suggestion. Real anchors below — events, the gym — still stand with their commutes, and the rest of the day is free time.)\n"
         } else if routine.isEmpty {
             s += "(none configured — use your judgement, but keep the day light)\n"
         } else {

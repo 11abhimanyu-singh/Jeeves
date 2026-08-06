@@ -42,6 +42,24 @@ enum ActivityTimekeeper {
 
     private static let idPrefix = "jeeves.activity."
 
+    /// Notification ids carry the DAY. Two things depended on this and neither
+    /// worked without it.
+    ///
+    /// `clear(for:)` took a date and ignored it, removing every pending nudge
+    /// for every day — and it is the first statement of `scheduleDay`, so
+    /// planning any day wiped every other day's chain. With a rolling 4-day
+    /// auto-plan window that meant today's nudges were deleted about two days
+    /// before today began, every day, permanently.
+    ///
+    /// And `AdherenceEngine.key` is "HH:MM|Title" with no date, so a routine
+    /// block at the same time on two days produced the SAME identifier —
+    /// committing tomorrow would overwrite today's request on `add` even if the
+    /// clear had been scoped. Both halves had to change or nothing fires.
+    static func dayPrefix(for date: Date, cal: Calendar = .current) -> String {
+        let c = cal.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%@%04d%02d%02d.", idPrefix, c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
     /// Registered TOGETHER with the workout watchdog's, because
     /// `setNotificationCategories` REPLACES the whole set — registering these
     /// on their own would silently delete "Close it / Still going" from the
@@ -98,7 +116,7 @@ enum ActivityTimekeeper {
 
             let fireMinute = max(0, start - leadMinutes)
             guard let fireAt = at(fireMinute, on: date, cal: cal), fireAt > now else { continue }
-            await schedule(id: "\(idPrefix)start.\(key)",
+            await schedule(id: "\(dayPrefix(for: date, cal: cal))start.\(key)",
                            title: block.title,
                            body: "Starts in \(leadMinutes) min · \(duration(block)) min planned",
                            category: startCategory, at: fireAt, userInfo: ["blockKey": key])
@@ -127,7 +145,7 @@ enum ActivityTimekeeper {
             return startAt <= now && !logged.contains(AdherenceEngine.key(block))
         }
         guard let overdue else { return }
-        await schedule(id: "\(idPrefix)start.now.\(AdherenceEngine.key(overdue))",
+        await schedule(id: "\(dayPrefix(for: date, cal: cal))start.now.\(AdherenceEngine.key(overdue))",
                        title: overdue.title,
                        body: "Up next — \(duration(overdue)) min planned",
                        category: startCategory, at: now.addingTimeInterval(2),
@@ -148,7 +166,7 @@ enum ActivityTimekeeper {
               await NotificationService.ensureAuthorized() else { return }
         let fireAt = startedAt.addingTimeInterval(Double(plannedMinutes + stopNudgeAfter) * 60)
         guard fireAt > Date() else { return }
-        await schedule(id: "\(idPrefix)stop.\(blockKey)",
+        await schedule(id: "\(dayPrefix(for: startedAt))stop.\(blockKey)",
                        title: title,
                        body: "\(stopNudgeAfter) min over. Still going?",
                        category: stopCategory, at: fireAt,
@@ -229,10 +247,15 @@ enum ActivityTimekeeper {
         try? await UNUserNotificationCenter.current().add(request)
     }
 
+    /// Clears ONE day's nudges. It used to take `date` and never read it,
+    /// filtering on the bare `jeeves.activity.` prefix and emptying the whole
+    /// app. NotificationService.clear(for:) has always been day-scoped, which
+    /// is why block reminders survived while the activity chain did not.
     static func clear(for date: Date) async {
         let center = UNUserNotificationCenter.current()
+        let prefix = dayPrefix(for: date)
         let pending = await center.pendingNotificationRequests()
-        let ids = pending.map(\.identifier).filter { $0.hasPrefix(idPrefix) }
+        let ids = pending.map(\.identifier).filter { $0.hasPrefix(prefix) }
         center.removePendingNotificationRequests(withIdentifiers: ids)
     }
 }

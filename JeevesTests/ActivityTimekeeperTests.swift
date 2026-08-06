@@ -12,6 +12,58 @@ import SwiftData
 @MainActor
 final class ActivityTimekeeperTests: XCTestCase {
 
+    // MARK: the day stamp on a notification id
+    //
+    // Why this exists: the user reported getting NO activity nudges at all,
+    // ever. Two defects compounded. `clear(for:)` took a date and never read
+    // it, deleting every pending nudge for every day — and it is the first
+    // statement of scheduleDay, so planning ANY day wiped every other day's
+    // chain. With a rolling 4-day auto-plan window, today's nudges were removed
+    // about two days before today began. And AdherenceEngine.key is
+    // "HH:MM|Title" with no date, so the same routine block on two days
+    // produced the SAME identifier and the later commit overwrote the earlier
+    // one on `add`. Fixing either alone still delivers nothing.
+
+    private func day(_ y: Int, _ m: Int, _ d: Int) -> Date {
+        Calendar.current.date(from: DateComponents(year: y, month: m, day: d, hour: 9))!
+    }
+
+    func testTwoDaysNeverShareANotificationIdentifier() {
+        let key = "09:00|Chores"   // the same routine block, two mornings running
+        let mon = ActivityTimekeeper.dayPrefix(for: day(2026, 8, 3)) + "start." + key
+        let tue = ActivityTimekeeper.dayPrefix(for: day(2026, 8, 4)) + "start." + key
+        XCTAssertNotEqual(mon, tue,
+                          "identical ids mean committing tomorrow overwrites today's pending request")
+    }
+
+    func testTheStampIsStableAcrossTimesOfTheSameDay() {
+        let cal = Calendar.current
+        let morning = cal.date(from: DateComponents(year: 2026, month: 8, day: 3, hour: 0, minute: 1))!
+        let night = cal.date(from: DateComponents(year: 2026, month: 8, day: 3, hour: 23, minute: 59))!
+        XCTAssertEqual(ActivityTimekeeper.dayPrefix(for: morning),
+                       ActivityTimekeeper.dayPrefix(for: night),
+                       "a day's own nudges must all clear together, whatever hour scheduled them")
+    }
+
+    /// The clear filters on this prefix. If one day's stamp were a prefix of
+    /// another's, clearing the shorter would take the longer with it — which is
+    /// the exact bug, reintroduced by a subtler route.
+    func testNoDayStampIsAPrefixOfAnother() {
+        let stamps = [day(2026, 8, 3), day(2026, 8, 30), day(2026, 1, 1), day(2026, 12, 31), day(2027, 1, 1)]
+            .map { ActivityTimekeeper.dayPrefix(for: $0) }
+        for a in stamps {
+            for b in stamps where a != b {
+                XCTAssertFalse(b.hasPrefix(a), "\(b) starts with \(a) — clearing one would clear both")
+            }
+        }
+        XCTAssertEqual(Set(stamps).count, stamps.count, "every day needs its own stamp")
+    }
+
+    func testTheStampIsZeroPaddedSoItSortsAndMatchesPredictably() {
+        XCTAssertEqual(ActivityTimekeeper.dayPrefix(for: day(2026, 1, 5)), "jeeves.activity.20260105.")
+        XCTAssertEqual(ActivityTimekeeper.dayPrefix(for: day(2026, 12, 31)), "jeeves.activity.20261231.")
+    }
+
     private var container: ModelContainer!
     private var context: ModelContext { container.mainContext }
 
