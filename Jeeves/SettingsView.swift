@@ -19,6 +19,9 @@ struct SettingsView: View {
     @Query(sort: \PlanGenerationLog.startedAt, order: .reverse) private var genLogs: [PlanGenerationLog]
 
     @AppStorage(NotificationService.enabledKey) private var remindersEnabled = true
+    /// Live iOS authorization state, refreshed whenever this screen appears —
+    /// it can change outside the app, in iOS Settings, at any time.
+    @State private var permission: NotificationService.Permission?
     @AppStorage(VoiceNoteSync.syncEnabledKey) private var syncVoiceNotes = true
     @AppStorage(DayPreferences.dayStartKey) private var dayStartMinute = DayPreferences.defaultDayStartMinute
     @AppStorage(DayPreferences.bodyWeightKey) private var bodyWeightKg = DayPreferences.defaultBodyWeightKg
@@ -116,7 +119,12 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showDeviceCalendars) { DeviceCalendarsSheet() }
-        .onAppear { seedLocationsIfNeeded(); Baseline.seed(into: modelContext); Baseline.regroup(in: modelContext) }
+        .onAppear {
+            seedLocationsIfNeeded(); Baseline.seed(into: modelContext); Baseline.regroup(in: modelContext)
+            // Re-read every time: permission can change in iOS Settings while
+            // the app is backgrounded, and a stale "Allowed" would be a lie.
+            Task { permission = await NotificationService.permission() }
+        }
     }
 
     // MARK: Diagnostics — how the planner is performing
@@ -199,8 +207,37 @@ struct SettingsView: View {
                         NotificationService.clearAll()
                     }
                 }
+            // The one fact that decides whether ANY of this can reach you, said
+            // out loud. Every scheduling path guards on authorization and
+            // returns silently when it fails — right for a background task,
+            // useless for a person tapping a button and seeing nothing.
+            HStack {
+                Text("iOS permission").font(.ui(14)).foregroundStyle(Color.textPrimary)
+                Spacer()
+                Text(permission?.label ?? "Checking…")
+                    .font(.ui(13, weight: .semibold))
+                    .foregroundStyle((permission?.canDeliver ?? true) ? Color.sageDeep : Color.accentDeep)
+            }
+            if let advice = permission?.advice {
+                Text(advice).font(.ui(12)).foregroundStyle(Color.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Label("Open iOS Settings", systemImage: "arrow.up.forward.app")
+                        .foregroundStyle(Color.accentDeep)
+                }
+            }
+
             Button {
-                Task { await NotificationService.sendTestReminder(body: nextTaskBody()) }
+                Task {
+                    let state = await NotificationService.permission()
+                    permission = state
+                    guard state.canDeliver else { return }   // the row above now explains why
+                    await NotificationService.sendTestReminder(body: nextTaskBody())
+                }
             } label: {
                 Label("Send me a test reminder (5s)", systemImage: "bell.badge")
                     .foregroundStyle(Color.accentDeep)

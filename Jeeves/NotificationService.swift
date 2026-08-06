@@ -92,6 +92,47 @@ enum NotificationService {
         try? await UNUserNotificationCenter.current().add(request)
     }
 
+    /// What iOS actually thinks, in words that say what to do about it.
+    ///
+    /// Every scheduling path in the app is guarded by `ensureAuthorized()` and
+    /// returns silently when it fails — which is correct behaviour for a
+    /// background task and useless for a person. "I tapped the test button and
+    /// nothing happened" was indistinguishable from "the feature is broken",
+    /// because nothing anywhere reported the one fact that decides it.
+    enum Permission {
+        case allowed, provisional, denied, notAsked
+
+        var label: String {
+            switch self {
+            case .allowed:     return "Allowed"
+            case .provisional: return "Quiet delivery only"
+            case .denied:      return "Blocked in iOS Settings"
+            case .notAsked:    return "Not asked yet"
+            }
+        }
+
+        /// Can a notification actually reach the user right now?
+        var canDeliver: Bool { self == .allowed || self == .provisional }
+
+        var advice: String? {
+            switch self {
+            case .allowed:     return nil
+            case .provisional: return "Notifications arrive silently in the summary. Open iOS Settings to allow banners and sounds."
+            case .denied:      return "iOS is blocking Jeeves notifications. Nothing the app schedules can reach you until this is changed."
+            case .notAsked:    return "iOS has never been asked. Open Jeeves once more, or tap below."
+            }
+        }
+    }
+
+    static func permission() async -> Permission {
+        switch await UNUserNotificationCenter.current().notificationSettings().authorizationStatus {
+        case .authorized, .ephemeral: return .allowed
+        case .provisional:            return .provisional
+        case .notDetermined:          return .notAsked
+        default:                      return .denied
+        }
+    }
+
     static var remindersEnabled: Bool {
         // Default on — a plan without reminders isn't much of a plan.
         UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true
