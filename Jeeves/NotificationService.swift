@@ -62,6 +62,21 @@ enum NotificationService {
         // Register the stuck-workout actions so "Close it" works from the
         // banner without opening the app.
         WorkoutWatchdog.registerCategory()
+
+        // ASK AT LAUNCH, in the foreground, where the system prompt can
+        // actually appear.
+        //
+        // Authorization used to be requested only lazily, inside the first
+        // scheduling attempt. But the first attempt is normally the overnight
+        // auto-plan, which runs in a BGTask — and requestAuthorization cannot
+        // present a prompt from the background. So the prompt was never shown,
+        // the status stayed .notDetermined, and every scheduling call returned
+        // early and silently. An app whose whole job is nudging you had no way
+        // to be allowed to.
+        //
+        // Cheap when already decided: ensureAuthorized only prompts on
+        // .notDetermined, and returns the stored answer otherwise.
+        Task { _ = await ensureAuthorized() }
     }
 
     /// Fires a reminder ~5s from now so the user can see reminders actually work
