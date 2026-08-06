@@ -27,7 +27,11 @@
 
 set -uo pipefail
 
-TOOLS="/Users/abhimanyusingh/Downloads/My projects/Jeeves/tools"
+# Resolve to this script's own directory rather than naming one. The previous
+# absolute path pointed at a checkout that was deleted on 2026-08-06, which
+# would have failed the next unattended run with nobody at the keyboard to see
+# it. A self-locating path survives the repo being moved again.
+TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIGEST="/tmp/jeeves-digest.md"
 PREV="/tmp/jeeves-digest-prev.md"
 ICLOUD="$HOME/Library/Mobile Documents/iCloud~abhimanyusingh~me~Jeeves/Documents"
