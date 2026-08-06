@@ -21,6 +21,13 @@ struct RemindersListView: View {
     @State private var draftHour = 9
     @State private var draftMinute = 0
     @State private var draftRecurrence: ReminderRecurrence = .once
+    /// The day a one-off lands on, and the anchor a Weekly repeats from. The
+    /// sheet used to build `fireAt` from `Date()` with no way to say otherwise,
+    /// so the only expressible one-offs were four times today and the same four
+    /// tomorrow — eight in total.
+    @State private var draftDate = Date()
+    /// Set when the user picks a time the four chips don't offer.
+    @State private var showTimePicker = false
     @State private var editing: Reminder?
     @State private var undoable: UndoableDelete?
 
@@ -161,13 +168,42 @@ struct RemindersListView: View {
                         .background(RoundedRectangle(cornerRadius: 12).fill(Color.surface))
 
                     Text("WHEN").font(.ui(10, weight: .bold)).kerning(1).foregroundStyle(Color.textMuted).padding(.top, 14)
-                    chipRow(timeChips.map(\.0)) { i in draftHour == timeChips[i].1 && draftMinute == timeChips[i].2 } pick: { i in
-                        draftHour = timeChips[i].1; draftMinute = timeChips[i].2
+                    chipRow(timeChips.map(\.0) + ["Other…"]) { i in
+                        i == timeChips.count
+                            ? !timeChips.contains { $0.1 == draftHour && $0.2 == draftMinute }
+                            : draftHour == timeChips[i].1 && draftMinute == timeChips[i].2
+                    } pick: { i in
+                        if i == timeChips.count { showTimePicker = true }
+                        else { draftHour = timeChips[i].1; draftMinute = timeChips[i].2; showTimePicker = false }
+                    }
+                    // The four chips stay as shortcuts — they cover most of what
+                    // gets typed — but they are no longer the whole vocabulary.
+                    if showTimePicker || !timeChips.contains(where: { $0.1 == draftHour && $0.2 == draftMinute }) {
+                        DatePicker("", selection: draftTimeBinding, displayedComponents: [.hourAndMinute])
+                            .labelsHidden().padding(.top, 6)
                     }
 
                     Text("REPEAT").font(.ui(10, weight: .bold)).kerning(1).foregroundStyle(Color.textMuted).padding(.top, 14)
                     chipRow(ReminderRecurrence.allCases.map(\.label)) { i in draftRecurrence == ReminderRecurrence.allCases[i] } pick: { i in
                         draftRecurrence = ReminderRecurrence.allCases[i]
+                    }
+
+                    // A one-off needs to say WHICH DAY; a weekly needs to say
+                    // which weekday, which it used to take silently from the day
+                    // you happened to create it on. Both are the same picker —
+                    // the label changes because the question does.
+                    if draftRecurrence == .once || draftRecurrence == .weekly {
+                        Text(draftRecurrence == .once ? "ON" : "REPEATS ON")
+                            .font(.ui(10, weight: .bold)).kerning(1)
+                            .foregroundStyle(Color.textMuted).padding(.top, 14)
+                        DatePicker("", selection: $draftDate,
+                                   in: draftRecurrence == .once ? Date().startOfDay... : Date.distantPast...,
+                                   displayedComponents: [.date])
+                            .labelsHidden()
+                        if draftRecurrence == .weekly {
+                            Text("Every \(draftDate.formatted(.dateTime.weekday(.wide)))")
+                                .font(.ui(12.5)).foregroundStyle(Color.textSoft)
+                        }
                     }
 
                     Button { saveReminder() } label: {
@@ -222,17 +258,48 @@ struct RemindersListView: View {
     }
 
     private func openAdd() {
-        draftTitle = ""; draftHour = 9; draftMinute = 0; draftRecurrence = .once; showAdd = true
+        draftTitle = ""; draftHour = 9; draftMinute = 0; draftRecurrence = .once
+        draftDate = Date(); showTimePicker = false; showAdd = true
+    }
+
+    /// Reads and writes the draft time through the same hour/minute the chips
+    /// set, so picking "Other…" and picking a chip stay one value.
+    private var draftTimeBinding: Binding<Date> {
+        Binding(
+            get: { Calendar.current.date(bySettingHour: draftHour, minute: draftMinute, second: 0, of: Date()) ?? Date() },
+            set: {
+                let c = Calendar.current.dateComponents([.hour, .minute], from: $0)
+                draftHour = c.hour ?? 9; draftMinute = c.minute ?? 0
+            })
+    }
+
+    /// The fire date a draft describes. Pure and static so the rule is tested
+    /// rather than trusted — it used to be three lines inline that pinned every
+    /// reminder to `Date()`.
+    static func fireDate(day: Date, hour: Int, minute: Int,
+                         recurrence: ReminderRecurrence, now: Date = Date(),
+                         cal: Calendar = .current) -> Date {
+        let base = recurrence == .once ? day : now
+        var fire = cal.date(bySettingHour: hour, minute: minute, second: 0, of: base) ?? base
+        // A one-off whose moment has already gone rolls forward a day, so a
+        // fully-specified calendar trigger still has a future fire. Only when
+        // the chosen DAY is today — picking a past date deliberately is the
+        // one thing the old sheet could not do, and rolling it would undo that.
+        if recurrence == .once, fire <= now, cal.isDate(base, inSameDayAs: now) {
+            fire = cal.date(byAdding: .day, value: 1, to: fire) ?? fire
+        }
+        // Weekly repeats on the weekday of `fireAt`, which the scheduler reads
+        // straight off it — so the anchor has to BE the day the user chose.
+        if recurrence == .weekly {
+            fire = cal.date(bySettingHour: hour, minute: minute, second: 0, of: day) ?? fire
+        }
+        return fire
     }
 
     private func saveReminder() {
         let title = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        var fire = Calendar.current.date(bySettingHour: draftHour, minute: draftMinute, second: 0, of: Date()) ?? Date()
-        // A one-off time already past today rolls to tomorrow, so a fully-specified
-        // calendar trigger still has a future fire.
-        if draftRecurrence == .once && fire < Date() {
-            fire = Calendar.current.date(byAdding: .day, value: 1, to: fire) ?? fire
-        }
+        let fire = Self.fireDate(day: draftDate, hour: draftHour, minute: draftMinute,
+                                 recurrence: draftRecurrence)
         modelContext.insert(Reminder(title: title.isEmpty ? "Reminder" : title, fireAt: fire, recurrence: draftRecurrence))
         modelContext.saveOrLog()
         showAdd = false

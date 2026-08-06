@@ -59,6 +59,37 @@ final class ActivityTimekeeperTests: XCTestCase {
         XCTAssertEqual(Set(stamps).count, stamps.count, "every day needs its own stamp")
     }
 
+    /// THE regression, stated directly: planning one day must not clear another
+    /// day's nudges. This is what silenced the feature completely — the auto
+    /// planner commits a rolling four-day window, so every pass wiped the days
+    /// around it and today was emptied before today began.
+    func testClearingOneDayLeavesEveryOtherDayAlone() {
+        let mon = day(2026, 8, 3), tue = day(2026, 8, 4)
+        let pending = [
+            ActivityTimekeeper.dayPrefix(for: mon) + "start.09:00|Chores",
+            ActivityTimekeeper.dayPrefix(for: mon) + "start.10:00|Interview prep — Reading",
+            ActivityTimekeeper.dayPrefix(for: tue) + "start.09:00|Chores",
+            "jeeves-20260803-2",            // a block reminder — different scheme entirely
+            "jeeves.workout.stuck",         // the watchdog
+        ]
+
+        let cleared = ActivityTimekeeper.idsToClear(pending: pending, for: tue)
+        XCTAssertEqual(cleared, [ActivityTimekeeper.dayPrefix(for: tue) + "start.09:00|Chores"],
+                       "planning Tuesday must touch nothing but Tuesday")
+
+        let survivors = pending.filter { !cleared.contains($0) }
+        XCTAssertEqual(survivors.count, 4)
+        XCTAssertTrue(survivors.contains { $0.hasPrefix(ActivityTimekeeper.dayPrefix(for: mon)) },
+                      "Monday's chain must still be armed after Tuesday is planned")
+        XCTAssertTrue(survivors.contains("jeeves.workout.stuck"),
+                      "and the activity clear has no business touching other features")
+    }
+
+    func testClearingADayWithNothingPendingRemovesNothing() {
+        let pending = [ActivityTimekeeper.dayPrefix(for: day(2026, 8, 3)) + "start.09:00|Chores"]
+        XCTAssertEqual(ActivityTimekeeper.idsToClear(pending: pending, for: day(2026, 8, 9)), [])
+    }
+
     func testTheStampIsZeroPaddedSoItSortsAndMatchesPredictably() {
         XCTAssertEqual(ActivityTimekeeper.dayPrefix(for: day(2026, 1, 5)), "jeeves.activity.20260105.")
         XCTAssertEqual(ActivityTimekeeper.dayPrefix(for: day(2026, 12, 31)), "jeeves.activity.20261231.")

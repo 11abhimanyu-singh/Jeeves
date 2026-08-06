@@ -251,11 +251,18 @@ enum ActivityTimekeeper {
     /// filtering on the bare `jeeves.activity.` prefix and emptying the whole
     /// app. NotificationService.clear(for:) has always been day-scoped, which
     /// is why block reminders survived while the activity chain did not.
+    /// Which of the pending ids belong to `date`. Pure, because the whole bug
+    /// was one line of filtering that nothing could see: the old version
+    /// matched the bare "jeeves.activity." prefix and swept every day.
+    static func idsToClear(pending: [String], for date: Date) -> [String] {
+        let prefix = dayPrefix(for: date)
+        return pending.filter { $0.hasPrefix(prefix) }
+    }
+
     static func clear(for date: Date) async {
         let center = UNUserNotificationCenter.current()
-        let prefix = dayPrefix(for: date)
         let pending = await center.pendingNotificationRequests()
-        let ids = pending.map(\.identifier).filter { $0.hasPrefix(prefix) }
+        let ids = idsToClear(pending: pending.map(\.identifier), for: date)
         center.removePendingNotificationRequests(withIdentifiers: ids)
     }
 }
