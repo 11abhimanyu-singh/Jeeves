@@ -64,6 +64,11 @@ enum PlanCoordinator {
         /// the UI describes what happened instead of predicting it.
         var resumedFromMinute: Int? = nil
         var keptBlocks: Int = 0
+        /// Rules the FIRST plan broke, when a repair round-trip was made. Carried
+        /// so the diagnostics log can tally which rule the model breaks most —
+        /// the repair is a second full generation, so this is where the latency
+        /// went.
+        var violations: [String] = []
     }
 
     // MARK: Where the plan starts
@@ -186,7 +191,8 @@ enum PlanCoordinator {
         let result = await generate(inputs)
         PlanDiagnostics.finish(log, isOffline: result.isOffline, retryCount: result.retryCount,
                                commuteMs: result.commuteMs, claudeMs: result.claudeMs,
-                               errorClass: result.error, startedAt: started, context: context)
+                               errorClass: result.error, startedAt: started, context: context,
+                               violations: result.violations)
         // Mirror state + diagnostics to iCloud Drive for hands-free reading.
         // Skip the heavy raw-SQLite copy on this per-generation path (which fires
         // on every planner tap / chat plan / overnight auto-plan) — launch and
@@ -261,14 +267,15 @@ enum PlanCoordinator {
                 return Result(plan: mergedFirst, isOffline: false, error: nil, commuteMs: commuteMs, claudeMs: elapsed())
             }
             // One repair pass, same as the normal path.
+            let broke = v.map(\.message)
             let repairRequest = requestWithCorrections(request, violations: v)
             guard let repaired = try? await PlanGenerationService.generate(repairRequest) else {
-                return Result(plan: mergedFirst, isOffline: false, error: nil, commuteMs: commuteMs, claudeMs: elapsed())
+                return Result(plan: mergedFirst, isOffline: false, error: nil, commuteMs: commuteMs, claudeMs: elapsed(), violations: broke)
             }
             let mergedRepaired = merge(repaired)
             let rv = PlanValidation.severe(mergedRepaired, request: request, replanNowMinute: from)
             let best = rv.count <= v.count ? mergedRepaired : mergedFirst
-            return Result(plan: best, isOffline: false, error: nil, retryCount: 1, commuteMs: commuteMs, claudeMs: elapsed())
+            return Result(plan: best, isOffline: false, error: nil, retryCount: 1, commuteMs: commuteMs, claudeMs: elapsed(), violations: broke)
         }
         let firstViolations = PlanValidation.severe(first, request: request)
         if firstViolations.isEmpty {
@@ -277,15 +284,18 @@ enum PlanCoordinator {
         }
 
         // One repair pass: tell the model exactly what was wrong.
+        let broke = firstViolations.map(\.message)
         let repairRequest = requestWithCorrections(request, violations: firstViolations)
         guard let repaired = try? await PlanGenerationService.generate(repairRequest) else {
             return Result(plan: first, isOffline: false, error: nil, // keep the first plan if the retry can't run
-                          commuteMs: commuteMs, claudeMs: Int(Date().timeIntervalSince(tClaude) * 1000))
+                          commuteMs: commuteMs, claudeMs: Int(Date().timeIntervalSince(tClaude) * 1000),
+                          violations: broke)
         }
         let repairedViolations = PlanValidation.severe(repaired, request: request)
         let best = repairedViolations.count <= firstViolations.count ? repaired : first
         return Result(plan: best, isOffline: false, error: nil, retryCount: 1,
-                      commuteMs: commuteMs, claudeMs: Int(Date().timeIntervalSince(tClaude) * 1000))
+                      commuteMs: commuteMs, claudeMs: Int(Date().timeIntervalSince(tClaude) * 1000),
+                      violations: broke)
     }
 
     private static func requestWithCorrections(_ req: PlanRequest, violations: [PlanValidation.Violation]) -> PlanRequest {

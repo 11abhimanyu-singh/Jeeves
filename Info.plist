@@ -7,24 +7,16 @@
 		<string>abhimanyusingh.me.Jeeves.commute-refresh</string>
 		<string>abhimanyusingh.me.Jeeves.auto-plan</string>
 	</array>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>fetch</string>
-		<string>processing</string>
-		<string>remote-notification</string>
-	</array>
-	<!-- Expose the app's iCloud container as a browsable folder in iCloud Drive
-	     (shows as "Jeeves" in the iPhone Files app AND syncs to iCloud-for-Windows
-	     on the PC). This surfaces the diagnostics + DB backup the daily health
-	     task reads, so that task can run on an always-on machine instead of only
-	     the Mac that mirrors the private container.
-
-	     TRAP: iCloud reads this dict ONLY at first install, and re-reads it only
-	     when CFBundleVersion increments. Shipping a change here without bumping
-	     CURRENT_PROJECT_VERSION is a silent no-op — the container stays private,
-	     the phone keeps reporting successful uploads, and the Mac's
-	     ~/Library/Mobile Documents/iCloud~abhimanyusingh~me~Jeeves/Documents
-	     stays empty forever. That cost days. Bump the version. -->
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Jeeves reads your calendars so your real commitments — from every account on this phone — shape the day it plans around them.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Jeeves reads your calendars so your real commitments — from every account on this phone — shape the day it plans around them.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Jeeves reads your heart rate during a run so it can show your live BPM and log the run's average.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Jeeves records your voice notes so you can speak instead of typing in chat.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Jeeves transcribes your voice notes into text for the chat.</string>
 	<key>NSUbiquitousContainers</key>
 	<dict>
 		<key>iCloud.abhimanyusingh.me.Jeeves</key>
@@ -37,11 +29,11 @@
 			<string>Any</string>
 		</dict>
 	</dict>
-	<key>NSHealthShareUsageDescription</key>
-	<string>Jeeves reads your heart rate during a run so it can show your live BPM and log the run's average.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Jeeves records your voice notes so you can speak instead of typing in chat.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Jeeves transcribes your voice notes into text for the chat.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+		<string>remote-notification</string>
+	</array>
 </dict>
 </plist>

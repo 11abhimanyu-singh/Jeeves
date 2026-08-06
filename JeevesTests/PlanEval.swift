@@ -92,8 +92,8 @@ final class PlanEval: XCTestCase {
     }
 
     func testPlanQualityWithChatGPTJudge() async throws {
-        try XCTSkipUnless(KeychainService.hasAPIKey, "no Anthropic key (needed to generate plans)")
-        try XCTSkipUnless(KeychainService.hasOpenAIAPIKey, "no OpenAI key (needed for the ChatGPT judge)")
+        try XCTSkipUnless(KeychainService.hasResolvableAPIKey, "no Anthropic key (needed to generate plans)")
+        try XCTSkipUnless(KeychainService.hasResolvableOpenAIKey, "no OpenAI key (needed for the ChatGPT judge)")
 
         var overalls: [Double] = []
         print("\n=========== PLAN EVAL (judge: \(OpenAIJudgeService.model), clock pinned 07:00) ===========")

@@ -133,10 +133,8 @@ struct PlannerSetupView: View {
             PhotosPicker(selection: $photoItem, matching: .images) {
                 Label("Add from ticket screenshot", systemImage: "photo.on.rectangle")
             }
-            if KeychainService.isGoogleCalendarConnected {
-                Button { importFromCalendar() } label: {
-                    Label("Import from Google Calendar", systemImage: "calendar")
-                }
+            Button { importFromCalendar() } label: {
+                Label("Import from my calendars", systemImage: "calendar")
             }
             if isReadingTicket {
                 HStack { ProgressView(); Text("Reading ticket…").font(.ui(12.5)).foregroundStyle(Color.textMuted) }
@@ -179,24 +177,26 @@ struct PlannerSetupView: View {
         ticketError = nil
         Task {
             defer { isImportingCalendar = false }
-            do {
-                let calEvents = try await GoogleCalendarService.events(on: today)
-                // Deleted synced events stay deleted — this path used to
-                // resurrect tombstoned events (and imported them without
-                // their externalID, so later syncs duplicated them).
-                let dead = CalendarTombstone.ids(in: modelContext)
-                let offerable = calEvents.filter { c in
-                    guard c.externalID.isEmpty || !dead.contains(c.externalID) else { return false }
-                    // Already on the day — nothing to offer.
-                    return !todayEvents.contains { $0.title == c.title && $0.startMinute == c.startMinute }
-                }
-                if offerable.isEmpty {
-                    ticketError = "Nothing new in your calendar for today."
-                } else {
-                    calendarReview = CalendarReview(date: today, events: offerable)
-                }
-            } catch {
-                ticketError = error.localizedDescription
+            guard await EventKitService.requestAccess() else {
+                ticketError = "Jeeves doesn't have calendar access. Turn it on in iOS Settings → Privacy & Security → Calendars → Jeeves."
+                return
+            }
+            let end = Calendar.current.date(byAdding: .day, value: 1, to: today) ?? today
+            let calEvents = EventKitService.events(from: today, to: end,
+                                                   calendarIDs: EventKitService.selectedCalendarIDs)
+            // Deleted synced events stay deleted — this path used to
+            // resurrect tombstoned events (and imported them without
+            // their externalID, so later syncs duplicated them).
+            let dead = CalendarTombstone.ids(in: modelContext)
+            let offerable = calEvents.filter { c in
+                guard c.externalID.isEmpty || !dead.contains(c.externalID) else { return false }
+                // Already on the day — nothing to offer.
+                return !todayEvents.contains { $0.title == c.title && $0.startMinute == c.startMinute }
+            }
+            if offerable.isEmpty {
+                ticketError = "Nothing new in your calendars for today."
+            } else {
+                calendarReview = CalendarReview(date: today, events: offerable)
             }
         }
     }

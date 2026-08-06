@@ -41,6 +41,7 @@ struct DayPlannerView: View {
     // Plan generation (the same PlanCoordinator call the chat uses).
     @State private var isPlanning = false
     @State private var showPicker = false
+    @State private var showDeviceCalendars = false
     @State private var planningStartedAt = Date()
     @State private var planningTask: Task<Void, Never>?
     @State private var planError: String?
@@ -95,6 +96,9 @@ struct DayPlannerView: View {
         .sheet(item: $editingTrip) { TripEditorView(trip: $0) }
         .sheet(isPresented: $showTicketImport) { TicketImportView() }
         .sheet(isPresented: $showPicker) { pickerSheet }
+        .sheet(isPresented: $showDeviceCalendars) {
+            DeviceCalendarsSheet { _ in importFromDeviceCalendars() }
+        }
         .sheet(isPresented: $showDateJump) {
             DateJumpSheet(selectedDate: $selectedDate, today: today)
                 .presentationDetents([.height(460)])
@@ -865,15 +869,26 @@ struct DayPlannerView: View {
                     .font(.ui(12, weight: .semibold))
                     .foregroundStyle(Color.textMuted)
                 Spacer()
-                if KeychainService.isGoogleCalendarConnected {
-                    Button { importFromCalendar() } label: {
-                        Image(systemName: "calendar.badge.plus")
-                            .font(.ui(16))
-                            .foregroundStyle(Color.accentDeep)
+                // Every calendar the PHONE holds — Outlook, iCloud, Google —
+                // without this app owning an OAuth flow for any of them.
+                Button {
+                    if EventKitService.isEnabled && EventKitService.isAuthorized {
+                        importFromDeviceCalendars()
+                    } else {
+                        showDeviceCalendars = true
                     }
-                    .buttonStyle(.plain)
-                    .disabled(isImportingCalendar)
+                } label: {
+                    Image(systemName: "calendar")
+                        .font(.ui(16))
+                        .foregroundStyle(Color.accentDeep)
                 }
+                .buttonStyle(.plain)
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityLabel("Add from my calendars")
+                .contextMenu {
+                    Button("Choose calendars…") { showDeviceCalendars = true }
+                }
+
                 Button { addEvent() } label: {
                     Label("Add", systemImage: "plus")
                         .font(.ui(13, weight: .semibold))
@@ -907,32 +922,41 @@ struct DayPlannerView: View {
 
     // MARK: Google Calendar import (reviewed)
 
-    private func importFromCalendar() {
-        isImportingCalendar = true
-        calendarError = nil
-        let day = selectedDate
+    /// Offer the selected day's events from every calendar on the phone.
+    ///
+    /// Review then confirm: nothing is written until the user ticks it,
+    /// deleted events stay deleted (tombstones), and what's already on the day
+    /// is only re-offered when it has actually changed.
+    private func importFromDeviceCalendars() {
         Task {
-            defer { isImportingCalendar = false }
-            do {
-                var evs = try await GoogleCalendarService.events(on: day)
-                // A deleted synced event stays deleted: tombstoned IDs are
-                // not even offered for re-import (they'd be pre-checked and
-                // quietly resurrected on confirm).
-                let dead = CalendarTombstone.ids(in: modelContext)
-                let before = evs.count
-                evs.removeAll { !$0.externalID.isEmpty && dead.contains($0.externalID) }
-                if evs.isEmpty {
-                    // "No events" would be a lie when everything on the day
-                    // was previously deleted here — say what actually happened.
-                    calendarError = before > 0
-                        ? "Only previously deleted events on this day — they stay deleted."
-                        : "No calendar events on \(day == today ? "today" : "this day")."
-                } else {
-                    calendarReview = CalendarReview(date: day, events: evs)
-                }
-            } catch {
-                calendarError = error.localizedDescription
+            guard await EventKitService.requestAccess() else {
+                showDeviceCalendars = true      // explains how to turn it on
+                return
             }
+            let day = selectedDate.startOfDay
+            let end = Calendar.current.date(byAdding: .day, value: 1, to: day) ?? day
+            let found = EventKitService.events(from: day, to: end,
+                                               calendarIDs: EventKitService.selectedCalendarIDs)
+            let dead = CalendarTombstone.ids(in: modelContext)
+            let offerable = found.filter { c in
+                guard c.externalID.isEmpty || !dead.contains(c.externalID) else { return false }
+                // An event we already hold is offered again when it has CHANGED
+                // — otherwise a title-and-start match hides a wrong end time or
+                // a stale address, and re-syncing can never heal a bad row.
+                if let held = events.first(where: { !c.externalID.isEmpty && $0.externalID == c.externalID }) {
+                    return held.endMinute != c.endMinute
+                        || held.startMinute != c.startMinute
+                        || held.isAllDay != c.isAllDay
+                        || held.destinationAddress != c.location
+                        || held.spanEndDate?.startOfDay != (c.spanDays > 1 ? c.endDay : nil)
+                }
+                return !selectedEvents.contains { $0.title == c.title && $0.startMinute == c.startMinute }
+            }
+            guard !offerable.isEmpty else {
+                planError = "Nothing new in this phone's calendars for \(prettyDate(selectedDate).lowercased())."
+                return
+            }
+            calendarReview = CalendarReview(date: day, events: offerable)
         }
     }
 
@@ -955,8 +979,10 @@ struct DayPlannerView: View {
                 existing.spanEndDate = c.spanDays > 1 ? c.endDay : nil
                 if !c.location.isEmpty, c.location != existing.destinationAddress {
                     existing.destinationAddress = c.location
-                    existing.destinationLat = nil     // stale pin for the old venue
-                    existing.destinationLng = nil
+                    // Stale pin for the old venue — unless the calendar just
+                    // handed us the new one.
+                    existing.destinationLat = c.latitude
+                    existing.destinationLng = c.longitude
                 }
                 // If this event backs a trip's stay, the trip must follow the
                 // edit: move the stay, grow the window, sweep the newly
@@ -977,7 +1003,7 @@ struct DayPlannerView: View {
                 $0.date == calendarReview?.date && $0.title == c.title && $0.startMinute == c.startMinute
             }
             guard !dup, let day = calendarReview?.date else { continue }
-            modelContext.insert(DailyEvent(
+            let event = DailyEvent(
                 date: c.startDay ?? day, title: c.title,
                 startMinute: c.startMinute, endMinute: c.endMinute,
                 destinationAddress: c.location, outboundStart: .home, source: .calendar,
@@ -986,7 +1012,12 @@ struct DayPlannerView: View {
                 // from a single sync instead of one orphaned day.
                 spanEndDate: c.spanDays > 1 ? c.endDay : nil,
                 externalID: c.externalID
-            ))
+            )
+            // A device calendar that carried a pin has already answered the
+            // question the geocoder would be asked.
+            event.destinationLat = c.latitude
+            event.destinationLng = c.longitude
+            modelContext.insert(event)
         }
         modelContext.saveOrLog()
         EventLog.log(.calendarSynced, "\(chosen.count) event(s) confirmed from Google Calendar",

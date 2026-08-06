@@ -60,9 +60,12 @@ enum PlanGenerationError: LocalizedError {
 enum PlanGenerationService {
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
     private static let model = "claude-fable-5"
+    /// Readable by the benchmark, so a comparison report names the model it
+    /// actually ran against rather than one someone assumed.
+    static var modelIdentifier: String { model }
 
     static func generate(_ req: PlanRequest) async throws -> GeneratedPlan {
-        guard let apiKey = KeychainService.loadAPIKey(), !apiKey.isEmpty else {
+        guard let apiKey = KeychainService.resolveAPIKey(), !apiKey.isEmpty else {
             throw PlanGenerationError.missingAPIKey
         }
 

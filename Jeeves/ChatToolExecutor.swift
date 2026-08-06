@@ -301,7 +301,6 @@ final class ChatToolExecutor {
         // date — it didn't move and it lost four hours. A second shift left it
         // at 00:00–00:00.
         let shiftDays = input["shift_by_days"] as? Int
-        var timesChanged = false
         var daysMoved: [String] = []
         // Every day this edit touched — the day an event LEFT counts as much as
         // the one it landed on, and the old gate saw neither.
@@ -384,7 +383,6 @@ final class ChatToolExecutor {
             }
             // Receipts quote the OLD and the NEW range, never just the new one.
             if e.startMinute != oldStart || e.endMinute != oldEnd {
-                timesChanged = true
                 changes.append("\(hhmm(oldStart))–\(hhmm(oldEnd)) → \(hhmm(e.startMinute))–\(hhmm(e.endMinute))")
             }
             // The day has edges. If a relative change hit one, say by how much
@@ -1915,21 +1913,24 @@ final class ChatToolExecutor {
     @MainActor
     private func toolFetchCalendar(_ input: [String: Any]) async -> JeevesChatService.ToolResult {
         let date = JeevesChatService.resolveDate(input["date"] as? String, relativeTo: today)
-        guard KeychainService.isGoogleCalendarConnected else {
-            return .init(text: "Google Calendar isn't connected. Tell the user to connect it in Plan setup (the calendar button), then try again.")
+        // Every calendar the phone holds, not one provider's. This used to read
+        // Google alone over OAuth, so an Outlook meeting was invisible to chat
+        // while sitting on the Day Planner in front of the user.
+        guard await EventKitService.requestAccess() else {
+            return .init(text: "Jeeves doesn't have calendar access on this phone. Tell the user to turn it on in iOS Settings → Privacy & Security → Calendars → Jeeves, then try again.")
         }
-        do {
-            let events = try await GoogleCalendarService.events(on: date)
-            guard !events.isEmpty else {
-                return .init(text: "No timed events on the user's calendar for \(dayLabel(date)).")
-            }
-            let lines = events.map { e in
-                "• \(e.title) \(hhmm(e.startMinute))–\(hhmm(e.endMinute))" + (e.location.isEmpty ? "" : " at \(e.location)")
-            }.joined(separator: "\n")
-            return .init(text: "Calendar events for \(dayLabel(date)):\n\(lines)\n\nRead these back to the user and confirm before adding any with add_event.")
-        } catch {
-            return .init(text: "Couldn't read the calendar: \(error.localizedDescription)")
+        let day = date.startOfDay
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: day) ?? day
+        let events = EventKitService.events(from: day, to: end,
+                                            calendarIDs: EventKitService.selectedCalendarIDs)
+        guard !events.isEmpty else {
+            return .init(text: "No events on the user's calendars for \(dayLabel(date)).")
         }
+        let lines = events.map { e in
+            let when = e.isAllDay ? "all day" : "\(hhmm(e.startMinute))–\(hhmm(e.endMinute))"
+            return "• \(e.title) \(when)" + (e.location.isEmpty ? "" : " at \(e.location)")
+        }.joined(separator: "\n")
+        return .init(text: "Calendar events for \(dayLabel(date)):\n\(lines)\n\nRead these back to the user and confirm before adding any with add_event.")
     }
 
     @MainActor

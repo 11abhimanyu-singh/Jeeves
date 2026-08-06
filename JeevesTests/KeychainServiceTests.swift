@@ -41,7 +41,29 @@ final class KeychainServiceTests: XCTestCase {
         XCTAssertTrue(KeychainService.hasAPIKey)
         KeychainService.deleteAPIKey()
         XCTAssertNil(KeychainService.loadAPIKey())
+        // hasAPIKey, deliberately NOT hasResolvableAPIKey: this is a test of the
+        // KEYCHAIN, and the resolvable form would be true whenever the runner
+        // happens to carry an environment key — a test that passes or fails on
+        // the shell it was launched from is worse than no test.
         XCTAssertFalse(KeychainService.hasAPIKey)
+    }
+
+    /// Resolution order: the Keychain wins, and the environment is only a
+    /// fallback. A key typed into Settings must never be shadowed by a stale
+    /// export in somebody's shell profile.
+    func testTheKeychainOutranksTheEnvironment() {
+        let saved = KeychainService.loadAPIKey()
+        defer { restore(saved, KeychainService.saveAPIKey, KeychainService.deleteAPIKey) }
+
+        KeychainService.saveAPIKey("from-the-keychain")
+        XCTAssertEqual(KeychainService.resolveAPIKey(), "from-the-keychain")
+        KeychainService.deleteAPIKey()
+        // With no stored key, resolution falls through to the environment —
+        // which is empty in a normal run, so this asserts the shape rather than
+        // a value the test cannot control.
+        let resolved = KeychainService.resolveAPIKey()
+        let fromEnv = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]
+        XCTAssertEqual(resolved, (fromEnv?.isEmpty == false) ? fromEnv : nil)
     }
 
     func testKeysAreIndependent() {

@@ -66,3 +66,45 @@ final class PlanDiagnosticsTests: XCTestCase {
         XCTAssertGreaterThan(s.p50ClaudeMs, s.p50CommuteMs, "Claude is the bottleneck, not the Maps lookups")
     }
 }
+
+/// Which rule the model broke, reduced to something countable.
+///
+/// Up to 45% of chat generations made TWO full ~53s calls because the first
+/// plan failed validation. The repair rate was visible; which rule caused it
+/// was not — so the largest slice of planner latency was unfixable.
+final class ViolationClassTests: XCTestCase {
+
+    func testAMessageBecomesItsKind() {
+        XCTAssertEqual(PlanDiagnostics.violationKinds(
+            ["'Lunch' starts 14:45, past the 14:30 deadline"]), "lunch-window")
+        XCTAssertEqual(PlanDiagnostics.violationKinds(
+            ["'Reading' 09:00–10:00 overlaps 'Chores' 09:30–10:10"]), "overlap")
+        XCTAssertEqual(PlanDiagnostics.violationKinds(
+            ["'Interview prep — Strategy' and 'Interview prep — Execution' have 0 min between them; interview-prep blocks need 10"]),
+            "prep-breather")
+    }
+
+    /// The point is a TALLY, so the same rule broken three times is one kind,
+    /// and the order can't depend on which violation happened to come first.
+    func testKindsAreDedupedAndStable() {
+        let messages = [
+            "'A' overlaps 'B'",
+            "'C' overlaps 'D'",
+            "'Lunch' starts 14:45, past the 14:30 deadline",
+        ]
+        XCTAssertEqual(PlanDiagnostics.violationKinds(messages), "lunch-window,overlap")
+        XCTAssertEqual(PlanDiagnostics.violationKinds(messages.reversed()),
+                       PlanDiagnostics.violationKinds(messages),
+                       "a tally must not depend on violation order")
+    }
+
+    /// An unrecognised message still counts as something — a rule that stops
+    /// being matched would otherwise vanish from the tally silently.
+    func testAnUnknownMessageIsStillCounted() {
+        XCTAssertEqual(PlanDiagnostics.violationKinds(["something nobody anticipated"]), "other")
+    }
+
+    func testNoViolationsRecordsNothing() {
+        XCTAssertEqual(PlanDiagnostics.violationKinds([]), "")
+    }
+}
