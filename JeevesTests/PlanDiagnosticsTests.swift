@@ -116,6 +116,18 @@ final class ViolationClassTests: XCTestCase {
         }
     }
 
+    /// The floor violation, VERBATIM, including a title that would otherwise
+    /// drag it into the wrong bucket. Every other arm matches on substrings a
+    /// block title can contain, which is why this one is keyed on wording only
+    /// the rule itself produces and sits above them.
+    func testAnUnderFloorBlockIsTalliedAsBelowFloorWhateverItIsCalled() {
+        for title in ["Interview prep — Strategy", "Lunch prep", "Gym paperwork", "Commute notes"] {
+            let message = "\"\(title)\" is 15 min — below the 30 min floor. Drop it and leave the time open rather than scheduling the remainder"
+            XCTAssertEqual(PlanDiagnostics.violationKinds([message]), "below-floor",
+                           "a block called '\(title)' is still a floor violation")
+        }
+    }
+
     /// An unrecognised message still counts as something — a rule that stops
     /// being matched would otherwise vanish from the tally silently.
     func testAnUnknownMessageIsStillCounted() {

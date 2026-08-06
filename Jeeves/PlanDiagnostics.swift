@@ -95,6 +95,11 @@ enum PlanDiagnostics {
             // draft of this guessed at wordings and classified the breather
             // rule, whose message never says "breather", as "other".
             if t.contains("overlap") { kind = "overlap" }
+            // Early, and keyed on words that cannot come from a block TITLE.
+            // Every arm below matches on substrings a title could contain —
+            // an under-floor block called "Lunch prep" would otherwise count
+            // as a lunch-window violation.
+            else if t.contains("min floor") { kind = "below-floor" }
             else if t.contains("lunch") { kind = "lunch-window" }
             else if t.contains("between them") || t.contains("interview-prep blocks need") {
                 kind = "prep-breather"

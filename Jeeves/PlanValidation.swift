@@ -70,6 +70,29 @@ enum PlanValidation {
             }
         }
 
+        // 2a. No activity is scheduled below the floor.
+        //
+        //     Fifteen minutes of Strategy at 09:38 was on the board because
+        //     fifteen minutes were left over, not because anyone can practise
+        //     in fifteen minutes — one of 39 sub-half-hour blocks across the
+        //     stored plans. The offline packer now refuses to trim past the
+        //     floor; this is the same rule for the model, and it has to be
+        //     SEVERE or it never reaches the repair round-trip, which is built
+        //     only from severe violations.
+        //
+        //     The floor bounds SHRINKING, so an activity the routine itself
+        //     configures short runs whole — and the shower keeps the exemption
+        //     it already has above.
+        let configuredDurations = Set((request.routine ?? []).map(\.durationMinutes))
+        for t in timed where t.block.kind.lowercased() == "activity" && !isShowerRoutine(t) {
+            let minutes = t.end - t.start
+            guard minutes > 0, minutes < DayPlanner.minActivityMinutes,
+                  !configuredDurations.contains(minutes) else { continue }
+            out.append(Violation(
+                severity: .severe,
+                message: "\"\(t.block.title)\" is \(minutes) min — below the \(DayPlanner.minActivityMinutes) min floor. Drop it and leave the time open rather than scheduling the remainder"))
+        }
+
         // 2b. The gym block is ONE block, and its length is the configured
         //     session — the workout must never be compressed to fit the day.
         //

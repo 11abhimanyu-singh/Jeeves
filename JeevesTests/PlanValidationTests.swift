@@ -38,6 +38,64 @@ final class PlanValidationTests: XCTestCase {
         XCTAssertTrue(PlanValidation.validate(plan, request: request()).isEmpty)
     }
 
+    // MARK: The minimum block
+    //
+    // "Interview prep — Strategy, 09:38–09:53" was on the real 4 Aug plan —
+    // fifteen minutes, scheduled because fifteen minutes were left over. The
+    // offline packer now refuses to trim past the floor; this is the same rule
+    // for the model, and it must be SEVERE or it never reaches the repair
+    // round-trip, which is built from severe violations alone.
+
+    private func routineRequest(_ durations: [Int]) -> PlanRequest {
+        var r = request()
+        r.routine = durations.enumerated().map {
+            BaselineActivity(name: "A\($0.offset)", durationMinutes: $0.element, tier: .important, note: nil)
+        }
+        return r
+    }
+
+    func testAnActivityBelowTheFloorIsSevereSoItReachesTheRepairPass() {
+        let plan = GeneratedPlan(
+            blocks: [b("Interview prep — Strategy", "09:38", "09:53"),
+                     b("Lunch", "13:00", "13:45", kind: "lunch")],
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        let severe = PlanValidation.severe(plan, request: routineRequest([45, 90]))
+        XCTAssertEqual(severe.count, 1)
+        XCTAssertTrue(severe[0].message.contains("15 min"), severe[0].message)
+        XCTAssertTrue(severe[0].message.contains("floor"), "the repair prompt is built from this text")
+    }
+
+    /// The floor bounds SHRINKING. An activity the routine configures short —
+    /// the user's own prep categories are 25 minutes — runs at its own length
+    /// and is not a violation.
+    func testAnActivityAtItsOwnConfiguredLengthIsNotAViolation() {
+        let plan = GeneratedPlan(
+            blocks: [b("Interview prep — Product Sense", "09:00", "09:25"),
+                     b("Lunch", "13:00", "13:45", kind: "lunch")],
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        XCTAssertTrue(PlanValidation.severe(plan, request: routineRequest([25, 90])).isEmpty,
+                      "25 minutes is what the routine asked for, not what was left over")
+    }
+
+    func testAShortShowerKeepsTheExemptionItAlreadyHad() {
+        let plan = GeneratedPlan(
+            blocks: [b("Lunch", "13:00", "13:45", kind: "lunch"),
+                     b("Shower (post-gym)", "13:50", "14:10")],
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        XCTAssertTrue(PlanValidation.severe(plan, request: routineRequest([90])).isEmpty,
+                      "a 20-minute shower is a hygiene routine, not a scheduling remainder")
+    }
+
+    func testNonActivityKindsAreOutOfScope() {
+        let plan = GeneratedPlan(
+            blocks: [b("Lunch", "13:00", "13:15", kind: "lunch"),
+                     b("Commute — home → clinic", "16:20", "16:35", kind: "commute"),
+                     b("Free time", "16:35", "16:50", kind: "free")],
+            dropped: [], shrunk: [], summary: "", boundaryTime: nil)
+        XCTAssertTrue(PlanValidation.severe(plan, request: routineRequest([90])).isEmpty,
+                      "a short commute is a physical fact and free time is honest — neither is a fragment")
+    }
+
     // MARK: Mid-day re-plan relaxations
 
     func testReplanBeforeLunchWindowStillRequiresLunch() {
