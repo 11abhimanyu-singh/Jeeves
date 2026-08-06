@@ -263,17 +263,30 @@ enum DayPlanner {
     /// Sleep anchor. Work never runs past 20:30, but the evening is real time
     /// the user still lives in — and Sleep gets a reminder like any anchor.
     private static func appendEvening(_ blocks: inout [PlanBlock], from lastEnd: Int) {
-        let windDownStart = min(lastEnd, sleepMinute)
-        if sleepMinute - windDownStart >= minDiscretionaryMinutes {
+        // Bedtime is 23:00 unless the day GENUINELY runs later. A gym at 21:00
+        // ends at 23:05 with the trip home and a shower still to come, and
+        // Sleep used to be appended at a fixed 23:00 regardless — so it started
+        // before the blocks it was supposed to follow, and "Commute home" began
+        // five minutes after the user was notionally asleep. The gym is a fixed
+        // commitment that may legitimately run late; sleep moves, the workout
+        // does not.
+        let bedtime = max(sleepMinute, lastEnd)
+        let windDownStart = min(lastEnd, bedtime)
+        if bedtime - windDownStart >= minDiscretionaryMinutes {
             // On a cleared day this block IS the day, so it opens at 08:00 —
             // and calling that "Evening" reads as a bug rather than an empty
             // day. Say what's true instead.
             let note = windDownStart < dayEndMinute
                 ? "Nothing scheduled — the day is yours"
                 : "Evening — no scheduled work"
-            blocks.append(PlanBlock(title: "Wind-down / personal time", startMinute: windDownStart, durationMinutes: sleepMinute - windDownStart, note: note, isAnchor: false))
+            blocks.append(PlanBlock(title: "Wind-down / personal time", startMinute: windDownStart, durationMinutes: bedtime - windDownStart, note: note, isAnchor: false))
         }
-        blocks.append(PlanBlock(title: "Sleep", startMinute: sleepMinute, durationMinutes: 8 * 60, note: "11 PM – 7 AM", isAnchor: true))
+        // Eight hours from whenever bed actually is, so a late gym costs the
+        // morning rather than silently overlapping the night.
+        let note = bedtime == sleepMinute
+            ? "11 PM – 7 AM"
+            : "\(label(for: bedtime)) — a late gym pushed bedtime back"
+        blocks.append(PlanBlock(title: "Sleep", startMinute: bedtime, durationMinutes: 8 * 60, note: note, isAnchor: true))
     }
 
     /// Orders the practice rows the routine gave us, most-neglected first, and

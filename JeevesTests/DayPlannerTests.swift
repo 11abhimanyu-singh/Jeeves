@@ -217,6 +217,21 @@ final class DayPlannerTests: XCTestCase {
         }
     }
 
+    /// A very late gym pushes commute-home and shower past the 23:00 bedtime
+    /// anchor, and Sleep is appended at a FIXED 23:00 regardless — so the two
+    /// overlap. Reported as a bug; this test says whether it is real.
+    func testAVeryLateGymDoesNotCollideWithSleep() {
+        for start in [19 * 60, 20 * 60, 21 * 60, 21 * 60 + 30] {
+            let blocks = DayPlanner.generate(gymMinute: start, prepSessions: [], leisureLogs: [])
+                .sorted { $0.startMinute < $1.startMinute }
+            for (a, b) in zip(blocks, blocks.dropFirst()) {
+                XCTAssertLessThanOrEqual(
+                    a.endMinute, b.startMinute,
+                    "gym at \(start / 60):00 — '\(a.title)' ends \(a.endMinute) but '\(b.title)' starts \(b.startMinute)")
+            }
+        }
+    }
+
     // MARK: what the offline packer may never emit
     //
     // The fallback ran on 4 of the 31 stored plan-days and produced, on 5 Aug
