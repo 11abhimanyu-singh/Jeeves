@@ -38,7 +38,8 @@ struct AdherenceScreen: View {
         return CatchUp.pending(
             days: window.map { day in
                 let state = dailyPlans.first { $0.date == day }
-                return (day, state?.plan, state?.withheldKeys ?? [], answered)
+                let skipped = Set((state?.manualOutcomes ?? [:]).filter { $0.value == .skipped }.keys)
+                return (day, state?.plan, state?.withheldKeys ?? [], answered, skipped)
             },
             sessions: sessions)
     }

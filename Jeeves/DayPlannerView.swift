@@ -565,7 +565,10 @@ struct DayPlannerView: View {
                 outcomes: outcomeMap(plan, effective),
                 onToggle: { block, current in toggleOutcome(block, current: current) },
                 onStart: isToday ? { block in startSession(block) } : nil,
-                startableKeys: startableKeys(plan)
+                startableKeys: startableKeys(plan),
+                // Chat prints the summary as its own turn; the planner never
+                // showed it at all.
+                showsSummary: true
             )
             adherenceCard(plan: plan, outcomes: effective)
         }

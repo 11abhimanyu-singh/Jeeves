@@ -33,20 +33,30 @@ enum CatchUp {
         enum Reason: Equatable {
             case neverAsked      // the chain held its nudge
             case closedItself    // auto-closed, duration unknown
+            /// Marked skipped on a day that has now passed. Not a question —
+            /// the user already answered it — but the work itself is still
+            /// undone and had nowhere to go. "Collect spectacles" was
+            /// scheduled and skipped on the 4th AND the 5th, and nothing ever
+            /// offered to do anything about it.
+            case leftUndone
 
             var label: String {
                 switch self {
                 case .neverAsked:   return "never asked"
                 case .closedItself: return "closed itself"
+                case .leftUndone:   return "not done"
                 }
             }
+
+            /// Whether the honest question is "did you?" or "what now?".
+            var wantsRescue: Bool { self == .leftUndone }
         }
     }
 
     /// What the app owes an answer for, across the backfill window.
     /// Pure input, so the rules are tested rather than trusted.
     static func pending(days: [(day: Date, plan: GeneratedPlan?, withheld: Set<String>,
-                                answered: Set<String>)],
+                                answered: Set<String>, skipped: Set<String>)],
                         sessions: [ActivitySession],
                         now: Date = .now) -> [Pending] {
         var out: [Pending] = []
@@ -55,13 +65,32 @@ enum CatchUp {
         for entry in days {
             guard ActivityTracker.isWithinBackfillWindow(entry.day, now: now) else { continue }
 
+            // Work the user SAID they didn't do, on a day that has now passed.
+            // Only once the day is over: a block skipped this morning may still
+            // happen this evening, and asking about it at lunchtime would be
+            // the app nagging rather than helping.
+            if let plan = entry.plan, entry.day.startOfDay < now.startOfDay {
+                for block in plan.blocks {
+                    let key = AdherenceEngine.key(block)
+                    guard entry.skipped.contains(key), !entry.answered.contains(key) else { continue }
+                    out.append(Pending(day: entry.day, blockKey: key, title: block.title,
+                                       plannedMinutes: max(0, (block.endMinute ?? 0) - (block.startMinute ?? 0)),
+                                       reason: .leftUndone))
+                }
+            }
+
             // Blocks whose nudge the chain swallowed.
             if let plan = entry.plan {
                 for block in plan.blocks {
                     let key = AdherenceEngine.key(block)
                     guard entry.withheld.contains(key),
                           ActivityUnit.isMeasurable(title: block.title, kind: block.kind),
-                          !entry.answered.contains(key) else { continue }
+                          !entry.answered.contains(key),
+                          // A block can be both withheld and later marked
+                          // skipped; "what now?" outranks "did you?", because
+                          // the second question already has its answer.
+                          !out.contains(where: { $0.blockKey == key && $0.day == entry.day })
+                    else { continue }
                     out.append(Pending(day: entry.day, blockKey: key, title: block.title,
                                        plannedMinutes: max(0, (block.endMinute ?? 0) - (block.startMinute ?? 0)),
                                        reason: .neverAsked))

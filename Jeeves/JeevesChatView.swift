@@ -821,6 +821,16 @@ struct PlanTimelineCard: View {
     var onStart: ((GeneratedBlock) -> Void)? = nil
     /// Which blocks may be started — measurable, today, not already logged.
     var startableKeys: Set<String> = []
+    /// Show Jeeves's reasoning above the timeline.
+    ///
+    /// Opt-in because chat already prints the summary as its own turn beside
+    /// this card, so switching it on there would say it twice. On the PLANNER
+    /// it appeared nowhere at all: every plan has carried a summary the whole
+    /// time — on 4 Aug it read "job applications and prep practice keep getting
+    /// skipped in these late slots anyway, I'd suggest we try them first thing
+    /// tomorrow morning instead" — and it was generated, stored, and never
+    /// shown to anyone who wasn't in chat.
+    var showsSummary: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -833,6 +843,17 @@ struct PlanTimelineCard: View {
                 }
             }
             .padding(.bottom, 10)
+
+            // Above the timeline, because it is context for the day rather than
+            // a footnote to it — and because the dropped/shortened lines below
+            // are what the planner could NOT do, which is a worse thing to read
+            // first than what it decided.
+            if showsSummary, !plan.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(plan.summary)
+                    .font(.serif(14)).foregroundStyle(Color.textSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 12)
+            }
 
             ForEach(Array(plan.blocks.enumerated()), id: \.offset) { _, block in
                 blockRow(block)

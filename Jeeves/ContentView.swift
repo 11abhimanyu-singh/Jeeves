@@ -328,7 +328,8 @@ struct ContentView: View {
         let pending = CatchUp.pending(
             days: window.map { day in
                 let state = allPlanStates.first { $0.date == day }
-                return (day, state?.plan, state?.withheldKeys ?? [], answered)
+                let skipped = Set((state?.manualOutcomes ?? [:]).filter { $0.value == .skipped }.keys)
+                return (day, state?.plan, state?.withheldKeys ?? [], answered, skipped)
             },
             sessions: allSessions)
         guard !pending.isEmpty else { return }

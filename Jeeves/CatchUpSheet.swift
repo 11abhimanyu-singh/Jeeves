@@ -23,6 +23,12 @@ struct CatchUpSheet: View {
     /// "leave them unknown" preserves.
     @State private var answers: [String: Bool] = [:]
 
+    /// What to do with work that didn't happen. Absent means undecided, and
+    /// undecided leaves the block exactly as it is — skipped, and still on the
+    /// day it was skipped on.
+    enum Rescue: Equatable { case todo, reminder, drop }
+    @State private var rescues: [String: Rescue] = [:]
+
     var body: some View {
         VStack(spacing: 0) {
             Capsule().fill(Color.textPrimary.opacity(0.22))
@@ -51,15 +57,15 @@ struct CatchUpSheet: View {
 
             VStack(spacing: 10) {
                 Button { save() } label: {
-                    Text(answers.isEmpty ? "Save" : "Save \(answers.count) answer\(answers.count == 1 ? "" : "s")")
+                    Text(decisions == 0 ? "Save" : "Save \(decisions) answer\(decisions == 1 ? "" : "s")")
                         .font(.ui(15, weight: .semibold))
                         .frame(maxWidth: .infinity, minHeight: 46)
                         .background(RoundedRectangle(cornerRadius: 13)
-                            .fill(answers.isEmpty ? Color.textMuted.opacity(0.35) : Color.accent))
+                            .fill(decisions == 0 ? Color.textMuted.opacity(0.35) : Color.accent))
                         .foregroundStyle(.white)
                 }
                 .buttonStyle(.plain)
-                .disabled(answers.isEmpty)
+                .disabled(decisions == 0)
 
                 Button {
                     // An honest gap beats a guess.
@@ -89,9 +95,11 @@ struct CatchUpSheet: View {
     private var explanation: String {
         let stalled = pending.filter { $0.reason == .neverAsked }.count
         let closed = pending.filter { $0.reason == .closedItself }.count
+        let undone = pending.filter { $0.reason == .leftUndone }.count
         var parts: [String] = []
         if stalled > 0 { parts.append("\(stalled) never got a notification — a session was left running") }
         if closed > 0 { parts.append("\(closed) closed \(closed == 1 ? "itself" : "themselves") without a duration") }
+        if undone > 0 { parts.append("\(undone) didn't happen and \(undone == 1 ? "has" : "have") nowhere to go") }
         return parts.joined(separator: ", ") + ". Worth a minute before the window closes tonight."
     }
 
@@ -104,12 +112,31 @@ struct CatchUpSheet: View {
                     .font(.ui(11)).foregroundStyle(Color.textMuted)
             }
             Spacer(minLength: 6)
-            HStack(spacing: 5) {
-                choice("Didn't", isOn: answers[item.blockKey] == false) {
-                    answers[item.blockKey] = false
+            // Work already answered "no" is not asked again. The question for
+            // it is what happens NEXT — a skipped block used to write one JSON
+            // entry and disappear, which is how "Collect spectacles" was
+            // scheduled and skipped on two consecutive days with nothing ever
+            // offering to carry it forward.
+            if item.reason.wantsRescue {
+                HStack(spacing: 5) {
+                    choice("Task", isOn: rescues[item.blockKey] == .todo) {
+                        rescues[item.blockKey] = rescues[item.blockKey] == .todo ? nil : .todo
+                    }
+                    choice("Remind", isOn: rescues[item.blockKey] == .reminder) {
+                        rescues[item.blockKey] = rescues[item.blockKey] == .reminder ? nil : .reminder
+                    }
+                    choice("Drop", isOn: rescues[item.blockKey] == .drop) {
+                        rescues[item.blockKey] = rescues[item.blockKey] == .drop ? nil : .drop
+                    }
                 }
-                choice("Did it", isOn: answers[item.blockKey] == true) {
-                    answers[item.blockKey] = true
+            } else {
+                HStack(spacing: 5) {
+                    choice("Didn't", isOn: answers[item.blockKey] == false) {
+                        answers[item.blockKey] = false
+                    }
+                    choice("Did it", isOn: answers[item.blockKey] == true) {
+                        answers[item.blockKey] = true
+                    }
                 }
             }
         }
@@ -126,6 +153,10 @@ struct CatchUpSheet: View {
         }
         .buttonStyle(.plain)
     }
+
+    /// Answers and rescues both count — choosing "Task" for undone work is
+    /// as much a decision as saying you did something.
+    private var decisions: Int { answers.count + rescues.count }
 
     private func save() {
         for item in pending {
@@ -149,10 +180,43 @@ struct CatchUpSheet: View {
                 }
             }
         }
+        for item in pending {
+            guard let rescue = rescues[item.blockKey] else { continue }
+            switch rescue {
+            case .todo:     makeTodo(item)
+            case .reminder: makeReminder(item)
+            case .drop:     break   // it stays skipped; the user let it go on purpose
+            }
+        }
         context.saveOrLog("catchUp.save")
         CatchUp.markAsked()
         onFinished()
         dismiss()
+    }
+
+    /// The block's TITLE and day are copied, never its key: AdherenceEngine.key
+    /// is "HH:MM|Title", so it stops matching the moment a re-plan moves the
+    /// block, and a todo that points at a key nothing resolves is worse than
+    /// one that just says what it is.
+    private func makeTodo(_ item: CatchUp.Pending) {
+        let open = ((try? context.fetch(FetchDescriptor<Todo>())) ?? []).filter { $0.doneAt == nil }.count
+        let todo = Todo(title: item.title, priority: .medium, sortOrder: -open - 1)
+        todo.notes = "Planned for \(Self.dayName(item.day)) and didn't happen."
+        context.insert(todo)
+    }
+
+    /// Same-title de-duplication, mirroring the chat tool: skipping a block two
+    /// days running must not mint two identical reminders — which is exactly
+    /// what "Collect spectacles" would have done on the 4th and the 5th.
+    private func makeReminder(_ item: CatchUp.Pending) {
+        let all = (try? context.fetch(FetchDescriptor<Reminder>())) ?? []
+        let fire = RemindersListView.fireDate(day: Date(), hour: 9, minute: 0, recurrence: .once)
+        if let existing = all.first(where: { $0.isActive && $0.title.lowercased() == item.title.lowercased() }) {
+            existing.fireAt = fire
+        } else {
+            context.insert(Reminder(title: item.title, fireAt: fire, recurrence: .once))
+        }
+        ReminderScheduler.reschedule((try? context.fetch(FetchDescriptor<Reminder>())) ?? [])
     }
 
     private static func dayName(_ day: Date) -> String {
