@@ -108,22 +108,63 @@ struct RoutineCatalogView: View {
     }
 
     private func row(_ a: RoutineActivity) -> some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(a.name.isEmpty ? "Untitled" : a.name)
-                    .font(.serif(16))
-                    .foregroundStyle(a.enabled ? Color.textPrimary : Color.textMuted)
-                Text("\(a.durationMinutes) min · \(a.tier.rawValue)")
-                    .font(.ui(12.5)).foregroundStyle(Color.textSoft)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(a.name.isEmpty ? "Untitled" : a.name)
+                        .font(.serif(16))
+                        .foregroundStyle(a.enabled ? Color.textPrimary : Color.textMuted)
+                    Text("\(a.durationMinutes) min · \(a.tier.rawValue) · \(a.cadence.description)")
+                        .font(.ui(12.5)).foregroundStyle(Color.textSoft)
+                }
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { a.enabled },
+                    set: { a.enabled = $0; context.saveOrLog() }
+                ))
+                .labelsHidden().tint(Color.accent)
             }
-            Spacer()
-            Toggle("", isOn: Binding(
-                get: { a.enabled },
-                set: { a.enabled = $0; context.saveOrLog() }
-            ))
-            .labelsHidden().tint(Color.accent)
+            // The switch answers "do I do this at all"; the chips answer "which
+            // days". A row that is off keeps its days, so switching it back on
+            // restores the shape it had rather than a blank week.
+            weekdayStrip(a)
         }
         .padding(.vertical, 2)
+    }
+
+    /// Seven taps, Monday-first. Writes straight through like the enabled
+    /// toggle above — the editor sheet is @State-buffered, but a row control
+    /// that needs a Save button to take effect reads as broken.
+    private func weekdayStrip(_ a: RoutineActivity) -> some View {
+        HStack(spacing: 5) {
+            ForEach(Array(Cadence.orderedWeekdays.enumerated()), id: \.offset) { i, weekday in
+                let on = a.cadence.isDue(onWeekday: weekday)
+                Button {
+                    toggle(weekday, on: a)
+                } label: {
+                    Text(Cadence.initials[i])
+                        .font(.ui(11.5, weight: .semibold))
+                        .frame(minWidth: 26, minHeight: 26)
+                        .foregroundStyle(on ? Color.accentDeep : Color.textMuted)
+                        .background(Circle().fill(on ? Color.accent.opacity(0.15) : Color.surface))
+                        .overlay(Circle().stroke(on ? Color.accent : Color.textPrimary.opacity(0.08), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .opacity(a.enabled ? 1 : 0.45)
+                .accessibilityLabel(Cadence.shortLabel(weekday))
+                .accessibilityAddTraits(on ? [.isSelected] : [])
+            }
+        }
+    }
+
+    /// Turning off the last remaining day means "every day" rather than "never":
+    /// an activity that runs on no day at all is what the on/off switch is for,
+    /// and leaving a row that can never be planned is a trap.
+    private func toggle(_ weekday: Int, on a: RoutineActivity) {
+        var days = a.cadence.isEveryDay ? Set(1...7) : a.cadence.weekdays
+        if days.contains(weekday) { days.remove(weekday) } else { days.insert(weekday) }
+        a.cadence = (days.isEmpty || days.count == 7) ? .everyDay : Cadence(weekdays: days)
+        context.saveOrLog("routine.cadence")
     }
 
     // Both index into `ungrouped`, which is what the list actually shows.

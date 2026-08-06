@@ -1602,7 +1602,12 @@ final class ChatToolExecutor {
                     "tier": a.tier.rawValue,
                     "in_routine": a.enabled,
                     "order": a.sortOrder,
-                    "planned_today": a.enabled && selection.includes(a.plannerName),
+                    // Same predicate the planner filters by, deliberately shared
+                    // rather than restated: chat claiming an activity is on
+                    // today while the planner drops it is the drift that one
+                    // rule in two places always ends in.
+                    "planned_today": a.isPlanned(on: today, selection: selection),
+                    "runs_on": a.cadence.description,
                     "placement": a.group == .gym
                         ? "part of the gym session — sets its LENGTH, placed at the gym time"
                         : (a.enabled ? "the planner picks its time — it has no start time of its own"

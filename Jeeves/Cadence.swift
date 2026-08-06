@@ -54,7 +54,13 @@ struct Cadence: Equatable {
     // MARK: the question the planner asks
 
     func isDue(on date: Date, calendar: Calendar = .current) -> Bool {
-        isEveryDay || weekdays.contains(calendar.component(.weekday, from: date))
+        isDue(onWeekday: calendar.component(.weekday, from: date))
+    }
+
+    /// The same question asked of a bare weekday number, for the chip strip —
+    /// which is drawing the week, not a particular date.
+    func isDue(onWeekday weekday: Int) -> Bool {
+        isEveryDay || weekdays.contains(weekday)
     }
 
     /// How many due days have gone by since this was last done, counting `date`

@@ -93,6 +93,24 @@ final class RoutineCatalogTests: XCTestCase {
                       "nothing is due on Tuesday, and nothing is what the day should contain")
     }
 
+    /// `isPlanned` is the single rule both the planner filter and chat's
+    /// `planned_today` read. Testing it directly is what stops the two drifting
+    /// into chat saying an activity is on today while the planner drops it.
+    func testIsPlannedIsTheOneRuleBothThePlannerAndChatAsk() {
+        let a = withCadence("Photography", [7], order: 0)   // Saturdays
+
+        XCTAssertFalse(a.isPlanned(on: aug(4)), "Tuesday is not one of its days")
+        XCTAssertTrue(a.isPlanned(on: aug(8)), "Saturday is")
+        XCTAssertTrue(a.isPlanned(on: aug(4), selection: .only(["Photography"])),
+                      "an explicit tick outranks the cadence")
+        XCTAssertTrue(a.isPlanned(on: nil), "no day in hand must never lose an activity")
+
+        a.enabled = false
+        XCTAssertFalse(a.isPlanned(on: aug(8)), "the switch outranks the cadence")
+        XCTAssertFalse(a.isPlanned(on: aug(4), selection: .only(["Photography"])),
+                       "and it outranks an explicit tick too — that rule is unchanged")
+    }
+
     func testWithoutADateCadenceIsNotConsultedAtAll() {
         let acts = [withCadence("Photography", [7], order: 0)]
         XCTAssertEqual(Baseline.routine(from: acts).map(\.name), ["Photography"],

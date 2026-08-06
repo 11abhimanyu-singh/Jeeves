@@ -69,6 +69,24 @@ final class RoutineActivity {
         set { weekdaysRaw = newValue.raw }
     }
 
+    /// The ONE rule for "does this activity belong in that day's plan": the
+    /// routine switch, the day's pick, and the cadence — with an explicit pick
+    /// beating the cadence, and the switch beating everything.
+    ///
+    /// It lives here rather than inline because two callers ask it — the
+    /// planner's own filter and chat's `planned_today` — and a rule copied into
+    /// two places is a rule that eventually disagrees with itself. Chat telling
+    /// the user an activity is on today while the planner drops it is precisely
+    /// the failure this prevents.
+    ///
+    /// `date` nil means the caller has no day in hand, so cadence is not
+    /// consulted; that must never silently lose activities.
+    func isPlanned(on date: Date?, selection: ActivitySelection = .routine) -> Bool {
+        guard enabled, selection.includes(plannerName) else { return false }
+        guard let date, !selection.isExplicit else { return true }
+        return cadence.isDue(on: date)
+    }
+
     /// What the planner sees. A child carries its group in the name so the
     /// generated block is self-describing — "Interview prep — Product Sense"
     /// rather than a bare "Product Sense" that nothing downstream can classify.
@@ -215,11 +233,7 @@ extension Baseline {
         if enabled.isEmpty { return self.activities }
 
         return enabled
-            .filter {
-                guard selection.includes($0.plannerName) else { return false }
-                guard let date, !selection.isExplicit else { return true }
-                return $0.cadence.isDue(on: date)
-            }
+            .filter { $0.isPlanned(on: date, selection: selection) }
             .map(\.asBaseline)
     }
 

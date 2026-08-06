@@ -39,6 +39,11 @@ struct ActivityPickerSheet: View {
         activities.filter { $0.enabled && $0.group != .gym }
             .sorted { $0.sortOrder < $1.sortOrder }
     }
+    /// Everything pickable stays listed — the cadence only decides what arrives
+    /// already ticked.
+    private var dueToday: [RoutineActivity] {
+        pickable.filter { $0.cadence.isDue(on: day) }
+    }
     private var ungrouped: [RoutineActivity] { pickable.filter { $0.group == .none } }
     private var groups: [RoutineGroup] {
         RoutineGroup.allCases.filter { group in
@@ -245,7 +250,12 @@ struct ActivityPickerSheet: View {
         loaded = true
         let state = DailyPlanState.forDay(day, in: context)
         switch state.activitySelection {
-        case .routine:          ticked = Set(pickable.map(\.plannerName))
+        // The default ticks are what the CADENCE says is due, not everything
+        // enabled — otherwise opening the picker on a Tuesday arrives with
+        // Photography pre-ticked and you plan a Saturday activity by accident.
+        // Every row stays listed and tickable: an explicit tick still beats the
+        // cadence, which is the whole precedence rule.
+        case .routine:          ticked = Set(dueToday.map(\.plannerName))
         case .only(let names):  ticked = names
         }
         gymOn = state.hasGymToday
