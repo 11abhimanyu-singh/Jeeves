@@ -1,0 +1,57 @@
+{
+  "permissionMode": "dontAsk",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "Write(*.swift)",
+      "Write(*.py)",
+      "WebSearch",
+      "WebFetch",
+
+      "Bash(xcodebuild *)",
+      "Bash(xcrun devicectl *)",
+      "Bash(python3 tools/*)",
+      "Bash(uv run * tools/*)",
+      "Bash(uv run --with * python3 tools/*)",
+      "Bash(python3 -m pytest *)",
+      "Bash(security find-generic-password *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git branch *)",
+      "Bash(git fetch *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git restore --staged *)",
+      "Bash(git checkout -- *)",
+      "Bash(git switch *)",
+      "Bash(git pull *)",
+      "Bash(git stash *)"
+    ],
+    "ask": [
+      "Write(*.md)",
+      "Write(*.json)",
+      "Bash(git push *)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)",
+      "Bash(sudo *)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean -f*)",
+      "Bash(git branch -D*)",
+      "Bash(git checkout -B*)",
+      "Read(.env)",
+      "Read(*.env)",
+      "Read(*.p12)",
+      "Read(*.pem)",
+      "Read(*.key)",
+      "Read(build_device/**)",
+      "Read(**/build_device/**)"
+    ]
+  }
+}
