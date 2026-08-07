@@ -289,20 +289,33 @@ final class DayPlannerTests: XCTestCase {
         XCTAssertGreaterThan(checked, 0, "a test that checked nothing has not passed")
     }
 
-    /// The breather survives as a GAP. PlanRules measures the distance between
-    /// consecutive prep blocks and ignores what sits between them, so removing
-    /// the block must not start failing the rule it was built to satisfy.
-    func testRemovingTheBreatherBlockDidNotBreakTheBreatherRule() {
+    /// The break survives as a GAP rather than a block. PlanRules measures the
+    /// distance between blocks and ignores what sits between them, so removing
+    /// the "Breather" item must not start failing the rule it was built for.
+    ///
+    /// The kind mapping matters more than it looks: Lunch has to arrive as
+    /// kind "lunch", because the whole exception is that a meal already IS the
+    /// break. Labelling it "activity" here would make the test enforce a rule
+    /// the app deliberately does not have.
+    func testTheOfflinePackerNeverWorksMoreThanNinetyMinutesUnbroken() {
         for (label, blocks) in everyOfflineDay() {
-            let generated = blocks.map {
-                GeneratedBlock(title: $0.title,
-                               startTime: GeneratedBlock.hhmm($0.startMinute),
-                               endTime: GeneratedBlock.hhmm($0.endMinute),
-                               note: nil, isAnchor: $0.isAnchor,
-                               kind: $0.isAnchor ? "anchor" : "activity")
+            let generated = blocks.map { b -> GeneratedBlock in
+                let kind: String
+                if b.title == "Lunch" { kind = "lunch" }
+                else if b.title.localizedCaseInsensitiveContains("commute") { kind = "commute" }
+                else if b.title == "Gym" { kind = "gym" }
+                else if b.isAnchor { kind = "anchor" }
+                else if b.title.localizedCaseInsensitiveContains("free")
+                            || b.title.localizedCaseInsensitiveContains("discretionary")
+                            || b.title.localizedCaseInsensitiveContains("wind-down") { kind = "free" }
+                else { kind = "activity" }
+                return GeneratedBlock(title: b.title,
+                                      startTime: GeneratedBlock.hhmm(b.startMinute),
+                                      endTime: GeneratedBlock.hhmm(b.endMinute),
+                                      note: nil, isAnchor: b.isAnchor, kind: kind)
             }
-            XCTAssertEqual(PlanRules.prepBreatherViolations(generated), [],
-                           "\(label) put two prep blocks closer than the breather allows")
+            XCTAssertEqual(PlanRules.longRunViolations(generated), [],
+                           "\(label): \(PlanRules.longRunViolations(generated).joined(separator: "; "))")
         }
     }
 

@@ -224,27 +224,30 @@ enum DayPlanner {
         // The post-gym region places overflow itself rather than going back
         // through packQueue, so the breather has to be honoured here too —
         // this is where the prep blocks land on a gym day.
-        var lastWasPrep = false
+        var continuous = 0
         for item in overflow {
             // Lunch is never seated before 12:30, even when the gym ended early.
             var placeAt = gymCursor
             if item.title == "Lunch", placeAt < lunchEarliestMinute { placeAt = lunchEarliestMinute }
-            let isPrep = PlanRules.isPrepBlock(title: item.title)
-            // The breather between two prep blocks is a GAP, not a block. The
-            // rule measures the distance between consecutive prep blocks and
-            // ignores whatever sits between them, so an empty ten minutes
-            // satisfies it exactly as a block titled "Breather" did — without
-            // adding a ten-minute item to a day that already had three of them.
-            if lastWasPrep, isPrep, placeAt == gymCursor {
-                let breather = PlanRules.prepBreatherMinutes
-                guard placeAt + breather + item.minutes <= dayEndMinute else { continue }
-                placeAt += breather
+            let isWork = item.title != "Lunch"
+            // The break is a GAP, not a block. PlanRules measures the distance
+            // between blocks and ignores what sits between them, so ten empty
+            // minutes satisfy it exactly as a block titled "Breather" did —
+            // without adding an item to a day that already had three of them.
+            let needsBreak = isWork && continuous > 0
+                && continuous + item.minutes > PlanRules.maxContinuousMinutes
+                && placeAt == gymCursor
+            if needsBreak {
+                guard placeAt + PlanRules.breakMinutes + item.minutes <= dayEndMinute else { continue }
+                placeAt += PlanRules.breakMinutes
             }
             // Don't pack past the 20:30 boundary — drop what won't fit.
             guard placeAt + item.minutes <= dayEndMinute else { continue }
             blocks.append(PlanBlock(title: item.title, startMinute: placeAt, durationMinutes: item.minutes, note: item.note, isAnchor: false, prepCategory: item.category))
             gymCursor = placeAt + item.minutes
-            lastWasPrep = isPrep
+            // A gap we did not create (lunch pushed forward, the gym itself)
+            // is a break too, so only contiguous work accumulates.
+            continuous = isWork ? (needsBreak ? item.minutes : continuous + item.minutes) : 0
         }
 
         let postGymSlack = dayEndMinute - gymCursor
@@ -357,7 +360,10 @@ enum DayPlanner {
         var remaining = queue
         let lunchMinutes = queue.first { $0.title == "Lunch" }?.minutes ?? 0
         var lunchPlaced = !queue.contains { $0.title == "Lunch" }
-        var lastWasPrep = false
+        // Minutes of unbroken work since the last break. Lunch resets it — the
+        // meal IS the break, and adding a breather beside it would read as the
+        // app not noticing what it just scheduled.
+        var continuous = 0
 
         while !remaining.isEmpty {
             var item = remaining.removeFirst()
@@ -373,12 +379,14 @@ enum DayPlanner {
                 }
             }
 
-            // A breather between back-to-back prep blocks. The rule lived in
-            // the prompt and in PlanValidation, but the offline planner packed
-            // Product Sense straight into Execution — a rule the fallback
-            // didn't know about is a rule the fallback breaks.
-            let needsBreather = lastWasPrep && PlanRules.isPrepBlock(title: item.title)
-            let breather = needsBreather ? PlanRules.prepBreatherMinutes : 0
+            // A break after 90 minutes of unbroken work — whatever the work is.
+            // This used to fire only between two interview-prep blocks, so 150
+            // minutes of prep was caught and 150 minutes of anything else was
+            // not. The trigger is the LENGTH of the run now, not its subject.
+            let isWork = item.title != "Lunch"
+            let needsBreak = isWork && continuous > 0
+                && continuous + item.minutes > PlanRules.maxContinuousMinutes
+            let breather = needsBreak ? PlanRules.breakMinutes : 0
 
             if let pool, filled + breather + item.minutes > pool {
                 // Commute and parking are non-negotiable; the day gets shorter
@@ -399,7 +407,7 @@ enum DayPlanner {
                                             prepCategory: item.category))
                     cursor += room
                     filled += room
-                    lastWasPrep = PlanRules.isPrepBlock(title: item.title)
+                    continuous = needsBreak ? room : continuous + room
                 } else {
                     overflow.append(item)
                 }
@@ -431,7 +439,8 @@ enum DayPlanner {
                 blocks.append(PlanBlock(title: item.title, startMinute: cursor, durationMinutes: item.minutes, note: item.note, isAnchor: false, prepCategory: item.category))
                 cursor += item.minutes
                 filled += item.minutes
-                lastWasPrep = PlanRules.isPrepBlock(title: item.title)
+                // Lunch is the break; work accumulates toward the next one.
+                continuous = isWork ? (needsBreak ? item.minutes : continuous + item.minutes) : 0
             }
             if item.title == "Lunch" { lunchPlaced = true }
         }

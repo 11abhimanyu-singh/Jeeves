@@ -15,51 +15,83 @@ final class PlanRulesTests: XCTestCase {
         GeneratedBlock(title: title, startTime: start, endTime: end, note: nil, isAnchor: false, kind: "activity")
     }
 
-    // MARK: the breather
+    private func lunch(_ start: String, _ end: String) -> GeneratedBlock {
+        GeneratedBlock(title: "Lunch", startTime: start, endTime: end, note: nil, isAnchor: false, kind: "lunch")
+    }
 
-    func testBackToBackPrepBlocksAreFlagged() {
-        let v = PlanRules.prepBreatherViolations([
+    // MARK: the break after 90 minutes
+    //
+    // This replaced a prep-only breather that fired between two interview-prep
+    // blocks and nowhere else, so 150 minutes of prep was caught and 150
+    // minutes of anything else was not. The trigger is the LENGTH of the run
+    // now. Note the deliberate consequence: two 45-minute prep blocks total
+    // exactly 90 and are FINE — the old rule flagged them.
+
+    func testAnHourAndAHalfOfWorkIsAllowedToRunUnbroken() {
+        XCTAssertTrue(PlanRules.longRunViolations([
             b("Interview prep — Product Sense", "09:00", "09:45"),
             b("Interview prep — Execution", "09:45", "10:30"),
+        ]).isEmpty, "90 minutes is the limit, not the trigger")
+    }
+
+    /// The user's own example: 150 minutes of prep must not run back to back.
+    func testAHundredAndFiftyMinuteRunIsFlagged() {
+        let v = PlanRules.longRunViolations([
+            b("Interview prep — Product Sense", "09:00", "10:15"),
+            b("Interview prep — Execution", "10:15", "11:30"),
         ])
         XCTAssertEqual(v.count, 1)
-        XCTAssertTrue(v[0].contains("0 min"), v[0])
+        XCTAssertTrue(v[0].contains("150 min"), v[0])
+        XCTAssertTrue(v[0].contains("Product Sense"), "name where the run started, not just where it ended")
     }
 
-    func testTenMinutesBetweenPrepBlocksPasses() {
-        XCTAssertTrue(PlanRules.prepBreatherViolations([
-            b("Interview prep — Product Sense", "09:00", "09:45"),
-            b("Interview prep — Execution", "09:55", "10:40"),
+    func testATenMinuteGapBreaksTheRun() {
+        XCTAssertTrue(PlanRules.longRunViolations([
+            b("Interview prep — Product Sense", "09:00", "10:15"),
+            b("Interview prep — Execution", "10:25", "11:40"),
         ]).isEmpty)
     }
 
-    func testAGapShorterThanTheBreatherIsStillFlagged() {
-        XCTAssertEqual(PlanRules.prepBreatherViolations([
-            b("Interview prep — Strategy", "09:00", "09:45"),
-            b("Interview prep — Behavioral", "09:50", "10:35"),
-        ]).count, 1, "5 minutes is not a breather")
+    func testAShorterGapIsNotABreak() {
+        XCTAssertEqual(PlanRules.longRunViolations([
+            b("Interview prep — Product Sense", "09:00", "10:15"),
+            b("Interview prep — Execution", "10:20", "11:35"),
+        ]).count, 1, "five minutes is not a break")
     }
 
-    /// The rule is about prep, not about every activity — a routine where
-    /// nothing may touch anything would have gaps all day.
-    func testNonPrepNeighboursMayRunContiguously() {
-        XCTAssertTrue(PlanRules.prepBreatherViolations([
-            b("Chores", "09:00", "10:00"),
-            b("Lunch", "10:00", "10:30"),
-            b("Job applications", "10:30", "11:45"),
-        ]).isEmpty)
+    /// The exception that gives the rule its shape: lunch IS the break, so
+    /// nothing is owed beside it. Adding a breather next to lunch would read as
+    /// the app not noticing the meal it just scheduled.
+    func testLunchCountsAsTheBreak() {
+        XCTAssertTrue(PlanRules.longRunViolations([
+            b("Reading", "10:00", "11:30"),
+            lunch("11:30", "12:00"),
+            b("Job applications", "12:00", "13:15"),
+        ]).isEmpty, "150 minutes of work, but the meal sits in the middle of it")
     }
 
-    func testPrepBlocksSeparatedBySomethingElseAreFine() {
-        XCTAssertTrue(PlanRules.prepBreatherViolations([
-            b("Interview prep — Product Sense", "09:00", "09:45"),
-            b("Lunch", "12:30", "13:00"),
-            b("Interview prep — Execution", "13:00", "13:45"),
-        ]).isEmpty, "the gap between them is hours; what sits in it is irrelevant")
+    func testTheGymAndACommuteAlsoResetTheRun() {
+        for (title, kind) in [("Commute — home → gym", "commute"), ("Gym", "gym"), ("Free time", "free")] {
+            XCTAssertTrue(PlanRules.longRunViolations([
+                b("Reading", "09:00", "10:30"),
+                GeneratedBlock(title: title, startTime: "10:30", endTime: "11:00",
+                               note: nil, isAnchor: false, kind: kind),
+                b("Job applications", "11:00", "12:15"),
+            ]).isEmpty, "\(title) is already a break from work")
+        }
+    }
+
+    /// One run, one complaint — otherwise a long afternoon reports the same
+    /// fault once per block after the limit and the repair prompt fills with it.
+    func testALongRunIsReportedOnce() {
+        XCTAssertEqual(PlanRules.longRunViolations([
+            b("A", "09:00", "10:00"), b("B", "10:00", "11:00"),
+            b("C", "11:00", "12:00"), b("D", "12:00", "13:00"),
+        ]).count, 2, "120 min trips it, then the count restarts and 120 more trips it again")
     }
 
     func testOverlapsAreLeftToTheOverlapCheck() {
-        XCTAssertTrue(PlanRules.prepBreatherViolations([
+        XCTAssertTrue(PlanRules.longRunViolations([
             b("Interview prep — Product Sense", "09:00", "10:00"),
             b("Interview prep — Execution", "09:30", "10:30"),
         ]).isEmpty, "reporting the same fault twice helps nobody")
@@ -81,10 +113,22 @@ final class PlanRulesTests: XCTestCase {
     /// nothing and passed. Build the strings the parser actually reads.
     private func asGenerated(_ blocks: [PlanBlock]) -> [GeneratedBlock] {
         func hhmm(_ m: Int) -> String { String(format: "%02d:%02d", (m / 60) % 24, m % 60) }
-        return blocks.map {
-            GeneratedBlock(title: $0.title, startTime: hhmm($0.startMinute),
-                           endTime: hhmm($0.endMinute), note: nil,
-                           isAnchor: $0.isAnchor, kind: "activity")
+        // The KIND matters now: lunch, a commute and the gym are breaks, and
+        // flattening everything to "activity" would make these tests enforce a
+        // rule the app deliberately does not have.
+        return blocks.map { b -> GeneratedBlock in
+            let kind: String
+            if b.title == "Lunch" { kind = "lunch" }
+            else if b.title.localizedCaseInsensitiveContains("commute") { kind = "commute" }
+            else if b.title == "Gym" { kind = "gym" }
+            else if b.title.localizedCaseInsensitiveContains("free")
+                        || b.title.localizedCaseInsensitiveContains("discretionary")
+                        || b.title.localizedCaseInsensitiveContains("wind-down")
+                        || b.title == "Sleep" { kind = "free" }
+            else { kind = "activity" }
+            return GeneratedBlock(title: b.title, startTime: hhmm(b.startMinute),
+                                  endTime: hhmm(b.endMinute), note: nil,
+                                  isAnchor: b.isAnchor, kind: kind)
         }
     }
 
@@ -97,14 +141,14 @@ final class PlanRulesTests: XCTestCase {
                       "and there must be prep blocks to check in the first place")
     }
 
-    func testTheOfflinePlannerLeavesTheBreatherToo() {
-        let v = PlanRules.prepBreatherViolations(
+    func testTheOfflinePlannerLeavesTheBreakToo() {
+        let v = PlanRules.longRunViolations(
             asGenerated(DayPlanner.generate(gymMinute: nil, prepSessions: [], leisureLogs: [])))
         XCTAssertTrue(v.isEmpty, v.joined(separator: "\n"))
     }
 
-    func testTheBreatherSurvivesAGymDayToo() {
-        let v = PlanRules.prepBreatherViolations(
+    func testTheBreakSurvivesAGymDayToo() {
+        let v = PlanRules.longRunViolations(
             asGenerated(DayPlanner.generate(gymMinute: 11 * 60, prepSessions: [], leisureLogs: [])))
         XCTAssertTrue(v.isEmpty, v.joined(separator: "\n"))
     }

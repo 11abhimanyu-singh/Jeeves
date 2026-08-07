@@ -227,11 +227,13 @@ enum PlanValidation {
             }
         }
 
-        // Two prep blocks butted together. A rule that lives only in the prompt
-        // is a request — the gym durations were "FIXED" for months with nothing
-        // checking whether the model agreed.
-        for message in PlanRules.prepBreatherViolations(plan.blocks) {
-            out.append(Violation(severity: .quality, message: message))
+        // More than 90 minutes of unbroken work. SEVERE, because the repair
+        // round-trip is built from severe violations alone — as .quality this
+        // was reported into a log nobody reads and the model never heard about
+        // it. The offline packer always inserts the break, so leaving the model
+        // exempt would mean the two paths disagreed about the same rule.
+        for message in PlanRules.longRunViolations(plan.blocks) {
+            out.append(Violation(severity: .severe, message: message))
         }
 
         // A shaved commute is severe, not cosmetic: it is the one kind of error

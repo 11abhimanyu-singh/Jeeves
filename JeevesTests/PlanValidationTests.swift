@@ -31,7 +31,11 @@ final class PlanValidationTests: XCTestCase {
     func testValidPlanHasNoViolations() {
         let plan = GeneratedPlan(
             blocks: [b("Interview prep — Reading", "08:00", "09:30", anchor: true),
-                     b("Job applications", "09:30", "11:00"),
+                     // 09:30–09:40 is the break. 90 minutes of reading followed
+                     // straight by 90 of applications is 180 unbroken, which the
+                     // long-run rule now catches — so a plan that used to be the
+                     // canonical VALID one had to grow the gap it always owed.
+                     b("Job applications", "09:40", "11:10"),
                      b("Lunch", "13:00", "13:45", kind: "lunch"),
                      b("Free time", "13:45", "20:30", kind: "free")],
             dropped: [], shrunk: [], summary: "ok", boundaryTime: nil)
@@ -357,7 +361,10 @@ final class PlanValidationTests: XCTestCase {
     func testContiguousGymWithSplitActivityAroundItIsFine() {
         let plan = GeneratedPlan(
             blocks: [b("Interview prep — Reading", "08:00", "09:30", anchor: true),
-                     b("Interview prep — practice (part 1 of 120)", "09:30", "10:40"),
+                     // 09:30–09:40 is the break: 90 minutes of reading running
+                     // straight into practice is 160 unbroken, which is a
+                     // different rule's business. This test is about the gym.
+                     b("Interview prep — practice (part 1 of 120)", "09:40", "10:40"),
                      b("Mobility", "10:40", "11:00", kind: "gym"),
                      b("Weightlifting", "11:00", "12:10", anchor: true, kind: "gym"),
                      b("Cardio", "12:10", "12:45", kind: "gym"),
