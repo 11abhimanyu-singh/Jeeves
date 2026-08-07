@@ -41,11 +41,22 @@ enum MorningPrompt {
     /// statement from "not today", and only the second belongs in a morning
     /// list.
     static func candidates(routine: [RoutineActivity], on date: Date) -> [Candidate] {
-        routine
+        let rows = routine
             .filter { $0.enabled && $0.group != .gym }
             .sorted { $0.sortOrder < $1.sortOrder }
-            .map { Candidate(name: $0.plannerName, minutes: $0.durationMinutes,
-                             tier: $0.tier, dueToday: $0.cadence.isDue(on: date)) }
+        // Nothing stored yet? Offer what the PLANNER would build from, which is
+        // the same hardcoded fallback `Baseline.routine` uses. Without this the
+        // two disagreed on a store that had never been seeded: the planner
+        // produced a full day from the defaults while the offer, seeing an
+        // empty table, decided it had nothing to say — so the day got planned
+        // and never got offered. Defaults carry no cadence, so all are due.
+        guard rows.isEmpty else {
+            return rows.map { Candidate(name: $0.plannerName, minutes: $0.durationMinutes,
+                                        tier: $0.tier, dueToday: $0.cadence.isDue(on: date)) }
+        }
+        return Baseline.activities.map {
+            Candidate(name: $0.name, minutes: $0.durationMinutes, tier: $0.tier, dueToday: true)
+        }
     }
 
     /// The notification body. It names a COUNT so it can be declined honestly —

@@ -36,6 +36,13 @@ enum MorningPromptService {
     /// Marks the notification so a tap can be told apart from every other
     /// banner the app schedules.
     static let userInfoKey = "morningPromptDay"
+    /// How long after opening the app a late-start offer lands. Long enough
+    /// not to collide with the launch animation, short enough to be obviously
+    /// a response to opening the app.
+    static let catchUpDelay: TimeInterval = 10
+    /// The last day an offer was pushed out. Stops the catch-up repeating on
+    /// every foregrounding of the same unchosen day.
+    static let offeredDayKey = "jeeves.morningOfferedOn"
 
     // MARK: pure
 
@@ -73,6 +80,32 @@ enum MorningPromptService {
         !hasPlan && candidateCount > 0 && !alreadyShowing
     }
 
+    /// A day you started late still deserves its offer.
+    ///
+    /// `fireDate` refuses to arm a moment that has already gone — correct, or
+    /// "your morning plan" arrives at lunchtime. But the consequence was that
+    /// opening the app at 10am produced no offer at all that day, which is
+    /// precisely the day that most needs one.
+    ///
+    /// Two ways to still be owed an offer, and it only takes one.
+    ///
+    /// NO PLAN — the obvious one, including a day just cleared. And NOT CHOSEN:
+    /// a plan you did not pick (the overnight planner's leftovers, or one built
+    /// before you had a say) is exactly what this whole change exists to stop
+    /// counting as your decision. Requiring both would have gone quiet on the
+    /// two states that most need the offer.
+    ///
+    /// A day you actually picked has both a plan and an explicit selection, so
+    /// it is settled and stays silent.
+    static func needsCatchUp(day: Date, now: Date, hasPlan: Bool, chosen: Bool,
+                             lastOfferedDay: String?, cal: Calendar = .current) -> Bool {
+        guard cal.isDate(day, inSameDayAs: now) else { return false }
+        // Still before 07:00 — the scheduled offer will do its job.
+        guard fireDate(for: day, now: now, cal: cal) == nil else { return false }
+        guard !hasPlan || !chosen else { return false }
+        return lastOfferedDay != dayKey(day, cal: cal)
+    }
+
     // MARK: scheduling
 
     /// Clears and re-arms the coming mornings. Cheap and idempotent — safe to
@@ -81,9 +114,19 @@ enum MorningPromptService {
     @MainActor
     static func reschedule(context: ModelContext, now: Date = Date()) async {
         let centre = UNUserNotificationCenter.current()
-        let pending = await centre.pendingNotificationRequests()
+        let pending = await centre.pendingNotificationRequests().map(\.identifier)
+        // Sweep the FUTURE mornings only.
+        //
+        // Sweeping today's as well made the catch-up delete itself: this method
+        // runs on both onAppear and the scenePhase change — twice within a few
+        // milliseconds on a cold launch — so run one armed today's offer ten
+        // seconds out and stamped the day, and run two removed it and then
+        // declined to re-create it because the stamp said "already offered".
+        // The loop below only ever re-adds FUTURE days, so anything it cannot
+        // re-create it must not destroy.
+        let today = id(for: Calendar.current.startOfDay(for: now))
         centre.removePendingNotificationRequests(withIdentifiers:
-            pending.map(\.identifier).filter { $0.hasPrefix(idPrefix) })
+            pending.filter { $0.hasPrefix(idPrefix) && $0 != today })
 
         guard NotificationService.remindersEnabled, await NotificationService.ensureAuthorized() else { return }
 
@@ -113,6 +156,52 @@ enum MorningPromptService {
                 repeats: false)
             try? await centre.add(UNNotificationRequest(identifier: id(for: day),
                                                         content: content, trigger: trigger))
+        }
+
+        await catchUpToday(context: context, now: now, routine: routine, states: states,
+                           alreadyArmed: pending.contains(today))
+    }
+
+    /// Today's offer, delivered late, when 07:00 has been and gone and the day
+    /// still isn't one you chose. At most once per day.
+    @MainActor
+    private static func catchUpToday(context: ModelContext, now: Date,
+                                     routine: [RoutineActivity], states: [DailyPlanState],
+                                     alreadyArmed: Bool) async {
+        // One is already in flight — adding again would reset its ten seconds
+        // every time the app is foregrounded, so it would never actually land.
+        guard !alreadyArmed else { return }
+        let today = Calendar.current.startOfDay(for: now)
+        let state = states.first { $0.date.startOfDay == today }
+        guard needsCatchUp(day: today, now: now,
+                           hasPlan: state?.plan != nil,
+                           chosen: state?.activitySelection.isExplicit ?? false,
+                           lastOfferedDay: UserDefaults.standard.string(forKey: offeredDayKey)),
+              !TravelGuard.isTravelDay(today, context: context) else { return }
+
+        let due = MorningPrompt.candidates(routine: routine, on: today).filter(\.dueToday).count
+        let gym = (state?.hasGymToday ?? false) ? state?.gymMinute : nil
+        guard let body = MorningPrompt.notificationBody(dueCount: due, gymAt: gym) else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Plan today?"
+        content.body = body
+        content.sound = .default
+        content.userInfo = [userInfoKey: dayKey(today)]
+
+        // Stamp only once the request is genuinely accepted. Stamping first
+        // POISONS the day: if the add then fails — or something removes the
+        // request before it fires, which is exactly what the old sweep did —
+        // the stamp says "already offered" forever and that day can never be
+        // offered again. A day that goes silent is worse than one nudged twice.
+        do {
+            try await UNUserNotificationCenter.current().add(UNNotificationRequest(
+                identifier: id(for: today), content: content,
+                trigger: UNTimeIntervalNotificationTrigger(timeInterval: catchUpDelay, repeats: false)))
+            UserDefaults.standard.set(dayKey(today), forKey: offeredDayKey)
+        } catch {
+            EventLog.log(.nudgeScheduled, "FAILED morning offer for \(dayKey(today)): \(error.localizedDescription)",
+                         context: context)
         }
     }
 }

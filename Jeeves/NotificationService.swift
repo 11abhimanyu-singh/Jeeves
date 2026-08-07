@@ -25,9 +25,15 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     /// the "Close it" button on a stuck-workout banner has nothing to write to.
     @MainActor static var modelContext: ModelContext?
 
-    /// Set when the morning offer is tapped and the app wasn't running to hear
-    /// the broadcast. ContentView reads and clears it on the next foreground.
-    @MainActor static var wantsMorningPrompt = false
+    /// The day key of a morning offer the user actually TAPPED.
+    ///
+    /// Two readers, deliberately: ContentView opens chat on it and leaves it
+    /// alone, then chat consumes it to force the card up. Chat's own gate
+    /// refuses to post over a day that already has a plan — correct when you
+    /// merely opened chat, wrong when you tapped an offer that promised you a
+    /// list. Tapping is the answer to "does he want this", so it outranks the
+    /// gate; anything else, the gate stands.
+    @MainActor static var morningPromptTap: String?
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
@@ -48,9 +54,9 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         // cold launch has no observer yet, a tap while the app is open has no
         // second launch. Whichever arrives first wins; the flag is cleared on
         // read so it can't fire twice.
-        if info[MorningPromptService.userInfoKey] != nil {
+        if let day = info[MorningPromptService.userInfoKey] as? String {
             Task { @MainActor in
-                NotificationDelegate.wantsMorningPrompt = true
+                NotificationDelegate.morningPromptTap = day
                 NotificationCenter.default.post(name: .jeevesOpenMorningPrompt, object: nil)
                 completionHandler()
             }

@@ -117,14 +117,10 @@ struct JeevesChatView: View {
                     // competed with every one of them for the tap. That, not
                     // the buttons themselves, is why they felt dead.
                     //
-                    // SIMULTANEOUS, not exclusive. As `onTapGesture` it also
-                    // swallowed taps aimed at controls INSIDE the conversation:
-                    // the morning card's gym switch was completely dead while
-                    // the Buttons beside it worked, because a Button installs a
-                    // higher-priority gesture and a Toggle does not. Anything
-                    // that isn't a Button — switches, pickers, sliders — loses
-                    // that race. Running both means the control gets its tap
-                    // and the keyboard still goes away.
+                    // It does NOT explain the morning card's dead gym switch —
+                    // removing this gesture entirely left the switch just as
+                    // dead, so that was the Toggle itself, and the fix was to
+                    // make the row a Button like every other row in the card.
                     .contentShape(Rectangle())
                     .onTapGesture { dismissKeyboard() }
                 }
@@ -136,7 +132,7 @@ struct JeevesChatView: View {
                     withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
                 .onAppear {
-                    postMorningOfferIfNeeded()
+                    postMorningOffer()
                     if let last = turns.last { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
@@ -271,6 +267,23 @@ struct JeevesChatView: View {
                         .padding(.horizontal, 14)
                         .frame(minHeight: 36)
                         .background(Capsule().fill(Color.accent))
+                    }
+                    .buttonStyle(.plain)
+
+                    // The way back to the list. "Plan my day" hands the day to
+                    // Jeeves; this hands it to you first.
+                    Button { postMorningOffer(force: true) } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "checklist").font(.ui(12, weight: .semibold))
+                            Text("Pick today").font(.ui(13.5, weight: .semibold))
+                        }
+                        .foregroundStyle(Color.accentDeep)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 36)
+                        .background(
+                            Capsule().fill(Color.accent.opacity(0.14))
+                                .overlay(Capsule().stroke(Color.accent.opacity(0.5)))
+                        )
                     }
                     .buttonStyle(.plain)
 
@@ -564,11 +577,23 @@ struct JeevesChatView: View {
     /// 07:00 has scrolled out of the 45-minute window by evening, and a day
     /// still unplanned at 8pm should be offered again rather than silently
     /// counted as asked.
-    private func postMorningOfferIfNeeded() {
+    /// - Parameter force: the user asked for the list outright, so post it even
+    ///   though the day already carries a plan. Without this an already-planned
+    ///   day is a dead end — the only route back to the picker was an LLM tool
+    ///   call, so "actually, let me choose again" had nowhere to go.
+    private func postMorningOffer(force: Bool = false) {
         guard !TravelGuard.isTravelDay(today, context: modelContext) else { return }
+        // Arriving by tapping the offer is itself the request. Without this the
+        // banner is a dead end on any day that already carries a plan: it
+        // promises a list, opens chat, and the gate below silently swallows it.
+        var force = force
+        if NotificationDelegate.morningPromptTap == MorningPromptService.dayKey(today) {
+            NotificationDelegate.morningPromptTap = nil
+            force = true
+        }
         let showing = turns.contains { $0.morningPromptDay?.startOfDay == today }
         guard MorningPromptService.shouldPost(
-            hasPlan: todayPlanState?.plan != nil,
+            hasPlan: force ? false : todayPlanState?.plan != nil,
             candidateCount: MorningPrompt.candidates(routine: routineActivities, on: today).count,
             alreadyShowing: showing) else { return }
 

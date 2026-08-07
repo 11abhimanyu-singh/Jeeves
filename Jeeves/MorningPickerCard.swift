@@ -31,6 +31,9 @@ struct MorningPickerCard: View {
     @State private var gymOn = false
     @State private var gymTime = Date()
     @State private var loaded = false
+    /// Set by THIS card's own button, not by "a plan exists". A card reopened
+    /// on an already-planned day must still be usable — re-picking is the
+    /// whole point of being able to reopen it.
     @State private var planned = false
 
     private var candidates: [MorningPrompt.Candidate] {
@@ -199,11 +202,17 @@ struct MorningPickerCard: View {
     private func load() {
         guard !loaded else { return }
         loaded = true
-        ticked = Set(MorningPrompt.candidates(routine: routine, on: day)
-            .filter(\.dueToday).map(\.name))
+        // A day you have already chosen reopens on YOUR choice, not on the
+        // cadence's — otherwise "let me adjust one thing" starts by silently
+        // undoing everything you unticked an hour ago.
+        if case .only(let chosen) = state?.activitySelection {
+            ticked = chosen
+        } else {
+            ticked = Set(MorningPrompt.candidates(routine: routine, on: day)
+                .filter(\.dueToday).map(\.name))
+        }
         if let state {
             gymOn = state.hasGymToday
-            planned = state.plan != nil
             if let m = state.gymMinute,
                let d = Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: day) {
                 gymTime = d

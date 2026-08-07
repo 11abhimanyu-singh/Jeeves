@@ -288,11 +288,16 @@ struct ContentView: View {
             // the backfill window is only useful if the ask comes to you.
             offerCatchUpIfNeeded()
             openChatIfMorningOfferTapped()
+            // ALSO on appear, not only on the scenePhase change. A cold launch
+            // starts life already `.active`, so `onChange` never fires — which
+            // meant the very first run after installing armed no offer at all,
+            // and the app stayed silent until the user happened to background
+            // and reopen it. That is the one launch where being silent is worst.
+            armMorningOffer()
         }
         // Tapped while the app was already running — no launch, no foreground
         // transition, so neither of the other two hooks would ever see it.
         .onReceive(NotificationCenter.default.publisher(for: .jeevesOpenMorningPrompt)) { _ in
-            NotificationDelegate.wantsMorningPrompt = false
             navigator.chatPresented = true
         }
         .onChange(of: selectedDate) { _, newDate in loadFields(for: newDate) }
@@ -302,14 +307,10 @@ struct ContentView: View {
             // and nudge the leave-by if it moved.
             if phase == .active {
                 openChatIfMorningOfferTapped()
+                armMorningOffer()
                 Task {
                     await CommuteRefresh.run(context: modelContext)
                     CommuteBackgroundRefresh.scheduleNext(context: modelContext)
-                    // Nothing plans a day behind the user any more. What gets
-                    // re-armed here is the OFFER — the coming mornings' 07:00
-                    // notifications, whose bodies have to stay honest as the
-                    // routine, the gym and the trips change.
-                    await MorningPromptService.reschedule(context: modelContext)
                     await WorkoutWatchdog.sweep(context: modelContext)
                     ActivityTimekeeper.sweepStale(context: modelContext)
                 }
@@ -323,11 +324,22 @@ struct ContentView: View {
         }
     }
 
+    /// Arms the coming mornings' offers, in its OWN task.
+    ///
+    /// It used to be queued behind `CommuteRefresh.run`, which makes live Maps
+    /// calls — so on a slow or absent network the offer was not armed until
+    /// those requests timed out. Whether Jeeves can ask you about your day
+    /// should not depend on whether it can price your commute.
+    private func armMorningOffer() {
+        Task { await MorningPromptService.reschedule(context: modelContext) }
+    }
+
     /// A cold launch from the morning banner: the delegate ran before this view
     /// existed, so it left a flag rather than shouting into an empty room.
     private func openChatIfMorningOfferTapped() {
-        guard NotificationDelegate.wantsMorningPrompt else { return }
-        NotificationDelegate.wantsMorningPrompt = false
+        guard NotificationDelegate.morningPromptTap != nil else { return }
+        // Not cleared here — chat consumes it, and chat is the thing that has
+        // to know the user arrived by tapping rather than by browsing.
         navigator.chatPresented = true
     }
 
