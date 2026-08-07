@@ -9,9 +9,9 @@
 //  while the user flies to Bali), their block notifications still fire, and
 //  the overnight auto-planner happily refills the days as they approach.
 //
-//  Every generator — Plan-my-day, the chat's plan_day/replan_today, and
-//  AutoPlanService's overnight loop — asks the same question here, so the
-//  rule can't drift out of sync per surface.
+//  Every generator — Plan-my-day, the chat's plan_day/replan_today, and the
+//  07:00 offer that decides which mornings to ask about — asks the same
+//  question here, so the rule can't drift out of sync per surface.
 //
 
 import Foundation

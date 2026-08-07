@@ -14,10 +14,12 @@ struct JeevesApp: App {
         // Show reminders even while the app is open.
         NotificationService.configure()
         // Register the background handlers before launch finishes (a hard
-        // requirement of BGTaskScheduler): commute re-pricing and the overnight
-        // auto-planner that has the coming days ready before the user wakes.
+        // requirement of BGTaskScheduler). Commute re-pricing is the only one
+        // left: the overnight auto-planner is gone. It built four days while
+        // the user slept and committed them, and days nobody chose were kept
+        // 0%, 0%, 0%, 13%, 36% of the time. The 07:00 offer replaced it, and a
+        // notification needs no background task to fire.
         CommuteBackgroundRefresh.register(container: sharedModelContainer)
-        AutoPlanService.register(container: sharedModelContainer)
         // The Watch workout inbox needs the store to file finished workouts,
         // and old lift/run logs get wrapped into Workouts once.
         WatchLink.shared.configure(container: sharedModelContainer)

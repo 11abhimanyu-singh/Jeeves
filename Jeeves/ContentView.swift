@@ -287,6 +287,13 @@ struct ContentView: View {
             // Ask once a day about blocks the app failed to resolve —
             // the backfill window is only useful if the ask comes to you.
             offerCatchUpIfNeeded()
+            openChatIfMorningOfferTapped()
+        }
+        // Tapped while the app was already running — no launch, no foreground
+        // transition, so neither of the other two hooks would ever see it.
+        .onReceive(NotificationCenter.default.publisher(for: .jeevesOpenMorningPrompt)) { _ in
+            NotificationDelegate.wantsMorningPrompt = false
+            navigator.chatPresented = true
         }
         .onChange(of: selectedDate) { _, newDate in loadFields(for: newDate) }
         .onChange(of: scenePhase) { _, phase in
@@ -294,15 +301,15 @@ struct ContentView: View {
             // any commute departing within the next 90 min against live traffic
             // and nudge the leave-by if it moved.
             if phase == .active {
+                openChatIfMorningOfferTapped()
                 Task {
                     await CommuteRefresh.run(context: modelContext)
                     CommuteBackgroundRefresh.scheduleNext(context: modelContext)
-                    // Backstop for the overnight auto-planner: if the system
-                    // never granted a background slot, fill any missing upcoming
-                    // day now so today's plan is ready the moment they open the
-                    // app. A no-op once the window is already planned.
-                    await AutoPlanService.ensureUpcomingPlans(context: modelContext)
-                    AutoPlanService.scheduleNext(context: modelContext)
+                    // Nothing plans a day behind the user any more. What gets
+                    // re-armed here is the OFFER — the coming mornings' 07:00
+                    // notifications, whose bodies have to stay honest as the
+                    // routine, the gym and the trips change.
+                    await MorningPromptService.reschedule(context: modelContext)
                     await WorkoutWatchdog.sweep(context: modelContext)
                     ActivityTimekeeper.sweepStale(context: modelContext)
                 }
@@ -314,6 +321,14 @@ struct ContentView: View {
                 SyncOutbox.exportAll(context: modelContext, includeRawBackup: false)
             }
         }
+    }
+
+    /// A cold launch from the morning banner: the delegate ran before this view
+    /// existed, so it left a flag rather than shouting into an empty room.
+    private func openChatIfMorningOfferTapped() {
+        guard NotificationDelegate.wantsMorningPrompt else { return }
+        NotificationDelegate.wantsMorningPrompt = false
+        navigator.chatPresented = true
     }
 
     /// Ask once a day, and only when there is something the app genuinely

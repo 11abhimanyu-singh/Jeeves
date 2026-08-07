@@ -21,6 +21,9 @@ final class ChatTurn {
     var content: String = ""
     var planJSON: String?    // encoded GeneratedPlan when this turn is a plan
     var isOfflinePlan: Bool = false
+    /// Set when this turn IS the morning offer for that day — it renders the
+    /// pick-your-activities card rather than a bubble. Defaulted for CloudKit.
+    var morningPromptDay: Date? = nil
     @Attribute(.externalStorage) var imageData: Data?  // uploaded ticket, shown in-thread
     /// Encoded [ChatReceipt] read out of this turn's TOOL RESULTS — the
     /// old→new pairs the reply is supposed to quote. Rendered as a card under
@@ -35,6 +38,7 @@ final class ChatTurn {
         isOfflinePlan: Bool = false,
         imageData: Data? = nil,
         receiptsJSON: String? = nil,
+        morningPromptDay: Date? = nil,
         timestamp: Date = .now
     ) {
         self.id = UUID()
@@ -46,6 +50,7 @@ final class ChatTurn {
         self.isOfflinePlan = isOfflinePlan
         self.imageData = imageData
         self.receiptsJSON = receiptsJSON
+        self.morningPromptDay = morningPromptDay
     }
 
     var isUser: Bool { roleRaw == "user" }

@@ -25,6 +25,10 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     /// the "Close it" button on a stuck-workout banner has nothing to write to.
     @MainActor static var modelContext: ModelContext?
 
+    /// Set when the morning offer is tapped and the app wasn't running to hear
+    /// the broadcast. ContentView reads and clears it on the next foreground.
+    @MainActor static var wantsMorningPrompt = false
+
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
@@ -39,6 +43,19 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let info = response.notification.request.content.userInfo
         let action = response.actionIdentifier
+        // The morning offer's only job is to get you into chat — the choosing
+        // happens there. Two channels because either can be the live one: a
+        // cold launch has no observer yet, a tap while the app is open has no
+        // second launch. Whichever arrives first wins; the flag is cleared on
+        // read so it can't fire twice.
+        if info[MorningPromptService.userInfoKey] != nil {
+            Task { @MainActor in
+                NotificationDelegate.wantsMorningPrompt = true
+                NotificationCenter.default.post(name: .jeevesOpenMorningPrompt, object: nil)
+                completionHandler()
+            }
+            return
+        }
         if action == WorkoutWatchdog.closeAction,
            let raw = info["workoutID"] as? String, let id = UUID(uuidString: raw) {
             Task { @MainActor in

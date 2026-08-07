@@ -76,16 +76,17 @@ final class TravelGuardTests: XCTestCase {
         XCTAssertNotNil(s.generatedPlanJSON)
     }
 
-    func testAutoPlannerSkipsTravelDays() throws {
+    /// "What shall we do today?" on the morning of a flight is the same mistake
+    /// the overnight planner used to make, asked politely instead of committed
+    /// silently. A trip owns its days here too.
+    func testTheMorningOfferSkipsTravelDays() throws {
         let context = try makeContext()
         context.insert(Trip(title: "Bali", startDate: day(2026, 9, 4), endDate: day(2026, 9, 11)))
 
-        // The overnight loop's day selection, filtered the way the service
-        // filters it — trip-covered days must never be refilled.
-        let needed = AutoPlanService.daysNeedingPlans(from: day(2026, 9, 2), days: 6, plannedDays: [])
+        let armed = MorningPromptService.days(from: day(2026, 9, 2), count: 6)
             .filter { !TravelGuard.isTravelDay($0, context: context) }
-        XCTAssertEqual(needed, [day(2026, 9, 2), day(2026, 9, 3)],
-                       "only the pre-trip days survive the filter")
+        XCTAssertEqual(armed, [day(2026, 9, 2), day(2026, 9, 3)],
+                       "only the pre-trip mornings get an offer")
     }
 
     func testAbsorbGrowsTheTripToCoverAJourney() async throws {

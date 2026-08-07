@@ -116,6 +116,15 @@ struct JeevesChatView: View {
                     // above the mic, the attach button and the field and
                     // competed with every one of them for the tap. That, not
                     // the buttons themselves, is why they felt dead.
+                    //
+                    // SIMULTANEOUS, not exclusive. As `onTapGesture` it also
+                    // swallowed taps aimed at controls INSIDE the conversation:
+                    // the morning card's gym switch was completely dead while
+                    // the Buttons beside it worked, because a Button installs a
+                    // higher-priority gesture and a Toggle does not. Anything
+                    // that isn't a Button — switches, pickers, sliders — loses
+                    // that race. Running both means the control gets its tap
+                    // and the keyboard still goes away.
                     .contentShape(Rectangle())
                     .onTapGesture { dismissKeyboard() }
                 }
@@ -127,6 +136,7 @@ struct JeevesChatView: View {
                     withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
                 .onAppear {
+                    postMorningOfferIfNeeded()
                     if let last = turns.last { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
@@ -301,6 +311,13 @@ struct JeevesChatView: View {
     private func turnView(_ turn: ChatTurn) -> some View {
         if let plan = turn.plan {
             PlanTimelineCard(plan: plan, isOffline: turn.isOfflinePlan)
+        } else if let day = turn.morningPromptDay {
+            // The morning offer renders as a card rather than a bubble. It is
+            // the interface, not a description of one — the alternative was
+            // asking the user to type back a list of names at 7am.
+            // Same path the picker sheet uses: the card stores the selection,
+            // the executor plans it. One planning route, reached two ways.
+            MorningPickerCard(day: day, onPlan: planPickedDay)
         } else {
             bubble(for: turn)
         }
@@ -534,6 +551,31 @@ struct JeevesChatView: View {
         modelContext.insert(turn)
         modelContext.saveOrLog()
         return turn
+    }
+
+    /// Jeeves has already made the offer by the time you get here.
+    ///
+    /// The point of the redesign is that opening chat in the morning shows you
+    /// a list to choose from, not an empty box waiting for you to ask. The
+    /// notification is only the doorbell — this is the thing behind the door,
+    /// and it has to work identically when you arrive by tapping the bubble.
+    ///
+    /// Scoped to the visible session, not all of history: a card posted at
+    /// 07:00 has scrolled out of the 45-minute window by evening, and a day
+    /// still unplanned at 8pm should be offered again rather than silently
+    /// counted as asked.
+    private func postMorningOfferIfNeeded() {
+        guard !TravelGuard.isTravelDay(today, context: modelContext) else { return }
+        let showing = turns.contains { $0.morningPromptDay?.startOfDay == today }
+        guard MorningPromptService.shouldPost(
+            hasPlan: todayPlanState?.plan != nil,
+            candidateCount: MorningPrompt.candidates(routine: routineActivities, on: today).count,
+            alreadyShowing: showing) else { return }
+
+        let turn = ChatTurn(role: ChatMessage.Role.assistant.rawValue, content: "",
+                            day: today, morningPromptDay: today)
+        modelContext.insert(turn)
+        modelContext.saveOrLog("morning.offer")
     }
 
     /// "New chat": move the session marker forward. Nothing is deleted — the

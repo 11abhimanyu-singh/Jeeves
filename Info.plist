@@ -5,7 +5,6 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>abhimanyusingh.me.Jeeves.commute-refresh</string>
-		<string>abhimanyusingh.me.Jeeves.auto-plan</string>
 	</array>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Jeeves reads your calendars so your real commitments — from every account on this phone — shape the day it plans around them.</string>
