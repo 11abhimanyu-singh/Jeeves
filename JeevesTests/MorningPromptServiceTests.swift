@@ -102,7 +102,17 @@ final class MorningPromptServiceTests: XCTestCase {
             "a plan exists, but nobody chose it")
         XCTAssertFalse(MorningPromptService.needsCatchUp(
             day: day(7), now: at(7, 10, 30), hasPlan: true, chosen: true, lastOfferedDay: nil),
-            "picked AND planned — the day is settled")
+            "picked AND planned AND not empty — the day is settled")
+    }
+
+    /// The state this actually failed in: the user cleared the day to start
+    /// over, which left a plan of lunch and free time and an explicitly EMPTY
+    /// selection — and the app read that as a settled decision and said nothing.
+    func testAClearedDayIsNotASettledDay() {
+        XCTAssertTrue(MorningPromptService.needsCatchUp(
+            day: day(7), now: at(7, 10, 30), hasPlan: true, chosen: true,
+            isBlankDay: true, lastOfferedDay: nil),
+            "an empty day is the absence of a plan, not a plan")
     }
 
     func testTheCatchUpFiresAtMostOncePerDay() {

@@ -87,22 +87,28 @@ enum MorningPromptService {
     /// opening the app at 10am produced no offer at all that day, which is
     /// precisely the day that most needs one.
     ///
-    /// Two ways to still be owed an offer, and it only takes one.
+    /// One state is settled, and everything else is still owed an offer.
     ///
-    /// NO PLAN — the obvious one, including a day just cleared. And NOT CHOSEN:
-    /// a plan you did not pick (the overnight planner's leftovers, or one built
-    /// before you had a say) is exactly what this whole change exists to stop
-    /// counting as your decision. Requiring both would have gone quiet on the
-    /// two states that most need the offer.
+    /// SETTLED means all three: a plan exists, you chose it, and what you chose
+    /// wasn't nothing. Miss any one and the day is open —
     ///
-    /// A day you actually picked has both a plan and an explicit selection, so
-    /// it is settled and stays silent.
+    ///   • no plan — including a day just cleared;
+    ///   • a plan nobody picked — the overnight planner's leftovers, or one
+    ///     built before you had a say, which is what this whole change exists
+    ///     to stop counting as your decision;
+    ///   • a BLANK day — `.only([])` plus a plan of lunch and free time. This is
+    ///     technically a choice, and treating it as a settled one is what kept
+    ///     the app silent on the day its owner cleared the board specifically to
+    ///     start over. An empty day is the absence of a plan, not a plan; it
+    ///     earns exactly one nudge, which the stamp below then closes off.
     static func needsCatchUp(day: Date, now: Date, hasPlan: Bool, chosen: Bool,
+                             isBlankDay: Bool = false,
                              lastOfferedDay: String?, cal: Calendar = .current) -> Bool {
         guard cal.isDate(day, inSameDayAs: now) else { return false }
         // Still before 07:00 — the scheduled offer will do its job.
         guard fireDate(for: day, now: now, cal: cal) == nil else { return false }
-        guard !hasPlan || !chosen else { return false }
+        let settled = hasPlan && chosen && !isBlankDay
+        guard !settled else { return false }
         return lastOfferedDay != dayKey(day, cal: cal)
     }
 
@@ -176,6 +182,7 @@ enum MorningPromptService {
         guard needsCatchUp(day: today, now: now,
                            hasPlan: state?.plan != nil,
                            chosen: state?.activitySelection.isExplicit ?? false,
+                           isBlankDay: state?.activitySelection.isBlankDay ?? false,
                            lastOfferedDay: UserDefaults.standard.string(forKey: offeredDayKey)),
               !TravelGuard.isTravelDay(today, context: context) else { return }
 
