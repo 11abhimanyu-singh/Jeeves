@@ -19,7 +19,9 @@ struct JeevesApp: App {
         // the user slept and committed them, and days nobody chose were kept
         // 0%, 0%, 0%, 13%, 36% of the time. The 07:00 offer replaced it, and a
         // notification needs no background task to fire.
-        CommuteBackgroundRefresh.register(container: sharedModelContainer)
+        if !EvidenceSeed.isActive {
+            CommuteBackgroundRefresh.register(container: sharedModelContainer)
+        }
         // The Watch workout inbox needs the store to file finished workouts,
         // and old lift/run logs get wrapped into Workouts once.
         WatchLink.shared.configure(container: sharedModelContainer)
@@ -35,6 +37,10 @@ struct JeevesApp: App {
         // a launch mid-CloudKit-sync sees half-imported data, and deletes
         // propagate to every device.
         let context = sharedModelContainer.mainContext
+        // A known cast of data, and none of the launch-time repair/export work
+        // that would race the first screenshot or write to iCloud Drive.
+        EvidenceSeed.apply(container: sharedModelContainer)
+        if EvidenceSeed.isActive { return }
         Task {
             TravelRepair.repairSafe(context: context)
             await TravelRepair.repairWindows(context: context)
@@ -84,7 +90,15 @@ struct JeevesApp: App {
         //
         // The XCTest host has no usable iCloud in its sandbox, so tests use a
         // plain local store — CloudKit init there crashes the runner.
+        //
+        // `XCTestConfigurationFilePath` is set in the process XCTest LAUNCHES.
+        // For unit tests that is this app; for a UI test it is the separate
+        // runner, and the app under test sees nothing — so a UI-tested launch
+        // took the CloudKit branch against an account the simulator does not
+        // have and died at the fatalError below. EvidenceSeed's launch argument
+        // is the flag that survives the process boundary.
         let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || EvidenceSeed.isActive
         let configuration: ModelConfiguration = isTesting
             ? ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
             : ModelConfiguration(schema: schema, isStoredInMemoryOnly: false,

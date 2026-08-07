@@ -99,6 +99,12 @@ enum NotificationService {
         //
         // Cheap when already decided: ensureAuthorized only prompts on
         // .notDetermined, and returns the stored answer otherwise.
+        //
+        // Except under an evidence run, where the system alert would sit on top
+        // of the first screenshot. It cannot be dismissed from outside either —
+        // `simctl privacy` has no `notifications` service — so the only way to
+        // keep it off the glass is not to ask.
+        guard !EvidenceSeed.isActive else { return }
         Task { _ = await ensureAuthorized() }
     }
 
