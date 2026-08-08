@@ -92,7 +92,12 @@ struct PlanningProgressCard: View {
         if elapsed > Self.typicalSeconds {
             return "Longer days take longer to think through. Still going."
         }
-        return "Usually about two to four minutes — it's reasoning through the whole day, not filling slots."
+        // The median is FOUR minutes, not two — so "two to four" is optimistic
+        // for about half of all runs, and the correction only arrives after the
+        // promise has already been broken. An estimate that is wrong half the
+        // time costs more trust than no estimate, and this card is otherwise
+        // scrupulous about not lying. Quote the median as the floor.
+        return "Usually four minutes or so — it's reasoning through the whole day, not filling slots."
     }
 
     private func clock(_ seconds: Int) -> String {

@@ -131,6 +131,43 @@ extension View {
 
 private let monthlyGoal = 20
 
+/// Apple's minimum comfortable touch target.
+///
+/// `JeevesChatView` already had this as a private constant and was fully
+/// compliant because of it; every other file guessed, and landed on 28, 30 or
+/// 34. `.contentShape(Rectangle())` was applied correctly throughout — which
+/// makes the whole frame tappable rather than just the glyph, and does nothing
+/// whatever to make the frame 44. Lifting the constant here is what stops the
+/// next control being guessed too.
+enum Touch {
+    static let target: CGFloat = 44
+}
+
+/// Motion the user has asked not to see.
+///
+/// `accessibilityReduceMotion` was honoured in exactly one file out of
+/// twenty-two, which is a WCAG failure with a very small blast radius — the
+/// progress ring's trim, the date dial, the Done drawer and the undo banner.
+/// A helper rather than four scattered `@Environment` reads, so the next
+/// animation someone writes inherits the check instead of forgetting it.
+enum Motion {
+    /// Nil when the user has asked for reduced motion, which is how SwiftUI
+    /// spells "apply no animation at all".
+    static var standard: Animation? {
+        UIAccessibility.isReduceMotionEnabled ? nil : .easeInOut(duration: 0.3)
+    }
+
+    static func honouring(_ animation: Animation?) -> Animation? {
+        UIAccessibility.isReduceMotionEnabled ? nil : animation
+    }
+
+    /// `withAnimation`, skipped entirely when motion is reduced.
+    static func run(_ animation: Animation? = .default, _ body: () -> Void) {
+        if UIAccessibility.isReduceMotionEnabled { body() }
+        else { withAnimation(animation) { body() } }
+    }
+}
+
 // MARK: - ContentView
 
 struct ContentView: View {
@@ -709,6 +746,7 @@ struct ContentView: View {
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
     private func cardioTypeButton(_ type: String) -> some View {
@@ -730,6 +768,7 @@ struct ContentView: View {
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(cardioType == type ? [.isSelected] : [])
     }
 
     /// A locked chip is auto-derived from a logged workout: shown ticked, not
@@ -755,6 +794,13 @@ struct ContentView: View {
             )
         }
         .buttonStyle(.plain)
+        // Fill colour and a seal glyph carried the whole state. Both are
+        // invisible to VoiceOver, so every chip announced identically whether
+        // it was on or off — on the form this app asks you to fill in daily.
+        .accessibilityLabel(label)
+        .accessibilityValue(locked ? "logged from a workout" : (on ? "yes" : "no"))
+        .accessibilityAddTraits(on ? [.isSelected] : [])
+        .accessibilityHint(locked ? "Comes from a logged workout — delete the workout to change it" : "")
     }
 
     private func numberField(_ label: String, text: Binding<String>, allowDecimal: Bool = false) -> some View {
@@ -833,7 +879,7 @@ struct ContentView: View {
                     .stroke(Color.accent, style: StrokeStyle(lineWidth: 10, lineCap: .round))
                     .frame(width: 112, height: 112)
                     .rotationEffect(.degrees(-90))
-                    .animation(.easeInOut(duration: 0.4), value: progressPct)
+                    .animation(Motion.honouring(.easeInOut(duration: 0.4)), value: progressPct)
                 VStack(spacing: 0) {
                     Text("\(monthDaysCount)").font(.heading(24)).foregroundStyle(Color.textPrimary)
                     Text("of \(monthlyGoal) days").font(.ui(11, weight: .semibold)).foregroundStyle(Color.textMuted)

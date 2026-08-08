@@ -57,7 +57,9 @@ struct UndoBanner: View {
             .padding(.horizontal, 13)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 13).fill(Color.surfaceDeep))
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .transition(UIAccessibility.isReduceMotionEnabled
+                        ? .opacity
+                        : .move(edge: .bottom).combined(with: .opacity))
             // Keyed to the item's id so a second delete restarts the clock
             // instead of inheriting the first one's remaining time.
             .task(id: item.id) {

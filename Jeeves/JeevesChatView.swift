@@ -38,6 +38,13 @@ struct JeevesChatView: View {
     @State private var inputText = ""
     @State private var isSending = false
     @State private var isPlanning = false
+    /// When the current generation began, so the card can count up. Set at the
+    /// same moment `isPlanning` goes true, never later — a start time that
+    /// lags the spinner shows a wait shorter than the real one.
+    @State private var planningStartedAt = Date()
+    /// Held so the card's cancel can actually stop the work rather than just
+    /// hiding the fact that it is still running.
+    @State private var planningTask: Task<Void, Never>?
     @State private var errorText: String?
     @State private var showSetup = false
     @State private var showSettings = false
@@ -94,7 +101,25 @@ struct JeevesChatView: View {
                             turnView(turn).id(turn.id)
                         }
 
-                        if isSending || isPlanning || isReadingTicket {
+                        // THE LONG WAIT GETS THE REAL CARD.
+                        //
+                        // Planning runs the same pipeline here as on the
+                        // planner — median four minutes, mean nine, worst
+                        // observed five and a half hours — but chat showed a
+                        // small spinner and one static line, which is exactly
+                        // the interface a spinner-for-six-minutes audit called a
+                        // category error. And chat is the BUSIER door: it floats
+                        // on all five tabs, and the morning notification opens it
+                        // directly, before the planner has been seen at all. So
+                        // the wait people meet first was the one left alone.
+                        //
+                        // Short waits keep the spinner: a ticket read or a chat
+                        // reply is seconds, and a cancel button on a two-second
+                        // wait is noise.
+                        if isPlanning {
+                            PlanningProgressCard(startedAt: planningStartedAt) { cancelPlanning() }
+                                .id("activity")
+                        } else if isSending || isReadingTicket {
                             HStack(spacing: 8) {
                                 ProgressView().controlSize(.small)
                                 Text(planningStatus)
@@ -720,13 +745,14 @@ struct JeevesChatView: View {
         errorText = nil
         dismissKeyboard()
         isPlanning = true
+        planningStartedAt = Date()
         let userContext = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !userContext.isEmpty {
             addTurn(role: .user, userContext)
             inputText = ""
         }
 
-        Task {
+        planningTask = Task {
             // Hold a background assertion so the whole flow (anchor extraction +
             // planning) survives the user switching away mid-request.
             let result = await BackgroundActivity.run("plan-my-day") { () -> PlanCoordinator.Result in
@@ -777,8 +803,9 @@ struct JeevesChatView: View {
     /// like one chosen by asking.
     private func planPickedDay(_ day: Date) {
         isPlanning = true
+        planningStartedAt = Date()
         let executor = toolExecutor
-        Task {
+        planningTask = Task {
             let result = await BackgroundActivity.run("plan-my-day") {
                 await executor.planDay(day, note: "Plan only the activities the user ticked.")
             }
@@ -791,6 +818,19 @@ struct JeevesChatView: View {
             addTurn(role: .assistant, "", plan: result.plan, isOfflinePlan: result.isOffline)
             isPlanning = false
         }
+    }
+
+    /// Stop the generation and keep whatever plan already exists.
+    ///
+    /// Cancelling the TASK is the point: hiding the card while the work carries
+    /// on would be the same lie as a spinner that never ends, and the plan would
+    /// still land minutes later on top of a screen that said it had stopped.
+    private func cancelPlanning() {
+        planningTask?.cancel()
+        planningTask = nil
+        isPlanning = false
+        addTurn(role: .assistant,
+                "Stopped planning. Whatever plan you already had is untouched.")
     }
 
     /// Extracts events/gym from the message, persists any new ones, and returns

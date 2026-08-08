@@ -1341,7 +1341,7 @@ struct SegmentEditorView: View {
                 // what separates "looks small" from "is hard to hit".
                 Button { value.wrappedValue = max(0, value.wrappedValue - step) } label: {
                     Image(systemName: "minus").font(.ui(11, weight: .bold))
-                        .frame(width: 28, height: 28)
+                        .frame(width: Touch.target, height: Touch.target)
                         .background(Circle().fill(Color.bg))
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
@@ -1354,7 +1354,7 @@ struct SegmentEditorView: View {
                     .accessibilityLabel("\(title): \(value.wrappedValue) \(unit)")
                 Button { value.wrappedValue += step } label: {
                     Image(systemName: "plus").font(.ui(11, weight: .bold))
-                        .frame(width: 28, height: 28)
+                        .frame(width: Touch.target, height: Touch.target)
                         .background(Circle().fill(Color.bg))
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())

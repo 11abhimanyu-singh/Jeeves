@@ -828,7 +828,7 @@ struct DayPlannerView: View {
             // in from the left edge as a reference point.
             .onAppear { proxy.scrollTo(selectedDate, anchor: UnitPoint(x: 0.18, y: 0.5)) }
             .onChange(of: selectedDate) { _, d in
-                withAnimation { proxy.scrollTo(d, anchor: UnitPoint(x: 0.18, y: 0.5)) }
+                Motion.run { proxy.scrollTo(d, anchor: UnitPoint(x: 0.18, y: 0.5)) }
             }
         }
     }
@@ -847,7 +847,7 @@ struct DayPlannerView: View {
         let numberSize: CGFloat = selected ? 20 : (isPast ? 15 : max(15, 19 - CGFloat(max(0, distance - 1))))
         let numberColor: Color = selected ? .white : (isPast ? Color.textMuted : Color.textPrimary)
 
-        return Button { withAnimation { selectedDate = date } } label: {
+        return Button { Motion.run { selectedDate = date } } label: {
             VStack(spacing: 6) {
                 Text(date.formatted(.dateTime.weekday(.abbreviated)).uppercased())
                     .font(.ui(10, weight: .semibold))

@@ -143,7 +143,7 @@ struct MorningPickerCard: View {
                     .font(.ui(12, weight: .semibold))
                     .foregroundStyle(pickedMinutes > freeMinutes ? Color.accentDeep : Color.textPrimary)
                 Text("of \(MorningPrompt.duration(freeMinutes)) free")
-                    .font(.ui(12)).foregroundStyle(Color.textMuted)
+                    .font(.ui(12)).foregroundStyle(Color.textSoft)
                 Spacer()
             }
             .padding(.top, 10)
@@ -175,7 +175,7 @@ struct MorningPickerCard: View {
             } label: {
                 Image(systemName: on ? "checkmark.square.fill" : "square")
                     .font(.ui(18)).foregroundStyle(on ? Color.accent : Color.textMuted)
-                    .frame(width: 30, height: 34)
+                    .frame(width: Touch.target, height: Touch.target)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -185,7 +185,7 @@ struct MorningPickerCard: View {
                     .foregroundStyle(on ? Color.textPrimary : Color.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
                 if !item.dueToday {
-                    Text("not usually today").font(.ui(10.5)).foregroundStyle(Color.textMuted)
+                    Text("not usually today").font(.ui(10.5)).foregroundStyle(Color.textSoft)
                 }
             }
             Spacer(minLength: 4)
@@ -205,7 +205,7 @@ struct MorningPickerCard: View {
             }
             Text("\(length(item))m")
                 .font(.ui(11.5, weight: minutes[item.name] == nil ? .regular : .semibold))
-                .foregroundStyle(minutes[item.name] == nil ? Color.textMuted : Color.accentDeep)
+                .foregroundStyle(minutes[item.name] == nil ? Color.textSoft : Color.accentDeep)
                 .monospacedDigit()
                 .frame(minWidth: 34)
             stepButton("plus", enabled: on && length(item) < Self.ceilingMinutes) {
@@ -219,7 +219,7 @@ struct MorningPickerCard: View {
                 ticked.remove(item.name)
             } label: {
                 Image(systemName: "trash").font(.ui(12.5)).foregroundStyle(Color.textMuted)
-                    .frame(width: 34, height: 34).contentShape(Rectangle())
+                    .frame(width: Touch.target, height: Touch.target).contentShape(Rectangle())
                     .accessibilityLabel("Remove \(item.name) from today's list")
             }
             .buttonStyle(.plain)
@@ -232,7 +232,7 @@ struct MorningPickerCard: View {
             Image(systemName: symbol)
                 .font(.ui(11, weight: .bold))
                 .foregroundStyle(enabled ? Color.accent : Color.textMuted.opacity(0.35))
-                .frame(width: 30, height: 34)
+                .frame(width: Touch.target, height: Touch.target)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -261,7 +261,7 @@ struct MorningPickerCard: View {
             HStack(spacing: 9) {
                 Image(systemName: gymOn ? "checkmark.square.fill" : "square")
                     .font(.ui(18)).foregroundStyle(gymOn ? Color.accent : Color.textMuted)
-                    .frame(width: 30, height: 34)
+                    .frame(width: Touch.target, height: Touch.target)
                 Text("Gym").font(.ui(13))
                     .foregroundStyle(gymOn ? Color.textPrimary : Color.textMuted)
                 Spacer(minLength: 4)

@@ -184,7 +184,7 @@ struct TodosListView: View {
     private var doneSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) { showDone.toggle() }
+                Motion.run(.easeInOut(duration: 0.2)) { showDone.toggle() }
             } label: {
                 HStack(spacing: 6) {
                     Text("Done (\(doneTodos.count))")

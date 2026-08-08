@@ -75,7 +75,7 @@ struct AppMenuButton: View {
             Image(systemName: "line.3.horizontal")
                 .font(.ui(17, weight: .semibold))
                 .foregroundStyle(Color.textSoft)
-                .frame(width: 30, height: 30)
+                .frame(width: Touch.target, height: Touch.target)
                 .contentShape(Rectangle())
         }
         .accessibilityLabel("Menu")
@@ -115,7 +115,7 @@ struct StatsScreenView: View {
             HStack(spacing: 8) {
                 Circle()
                     .fill(Color.accent)
-                    .frame(width: 30, height: 30)
+                    .frame(width: Touch.target, height: Touch.target)
                     .overlay(Image(systemName: screen.icon)
                         .foregroundStyle(.white).font(.ui(13)))
                 Text(screen.label).font(.heading(18)).foregroundStyle(Color.textPrimary)
@@ -124,7 +124,7 @@ struct StatsScreenView: View {
                     Image(systemName: "xmark")
                         .font(.ui(15, weight: .semibold))
                         .foregroundStyle(Color.textSoft)
-                        .frame(width: 30, height: 30)
+                        .frame(width: Touch.target, height: Touch.target)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
