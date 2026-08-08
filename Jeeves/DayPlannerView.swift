@@ -823,6 +823,10 @@ struct DayPlannerView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
+                // One container the rotor can jump into and out of, instead of
+                // sixty-two loose stops sitting in front of the day's content.
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Date picker")
             }
             // Keep the selected day near the left so exactly one past day peeks
             // in from the left edge as a reference point.
@@ -852,6 +856,7 @@ struct DayPlannerView: View {
                 Text(date.formatted(.dateTime.weekday(.abbreviated)).uppercased())
                     .font(.ui(10, weight: .semibold))
                     .foregroundStyle(isPast ? Color.textMuted : Color.textSoft)
+                    .fitsOneLine()
                 ZStack {
                     if selected {
                         Circle().fill(Color.accent).frame(width: 50, height: 50)
@@ -859,17 +864,33 @@ struct DayPlannerView: View {
                     Text(date.formatted(.dateTime.day()))
                         .font(.serif(numberSize))
                         .foregroundStyle(numberColor)
+                        .fitsOneLine()
                 }
                 .frame(width: 50, height: 50)
                 Circle()
                     .fill(hasEvents ? Color.accent : .clear)
                     .frame(width: 5, height: 5)
             }
-            .frame(width: 52)
+            .frame(minWidth: 52)
             .opacity(opacity)
         }
         .buttonStyle(.plain)
         .id(date)
+        // SIXTY-TWO STOPS BEFORE THE DAY'S CONTENT.
+        //
+        // The dial is yesterday plus today plus sixty days, and every one was
+        // an unlabelled button carrying its state purely in size, colour and
+        // opacity — none of which a screen reader can see. Swiping linearly
+        // meant sixty-two identical stops in front of the planner.
+        //
+        // Each pill names its own day and whether anything is on it; the
+        // container below turns the whole strip into ONE stop you step through
+        // with the rotor, rather than sixty-two you must swipe past.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(date.formatted(.dateTime.weekday(.wide).day().month(.wide))
+                            + (hasEvents ? ", has events" : ""))
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .accessibilityHint(selected ? "" : "Show this day")
     }
 
     // MARK: Events for the selected day
@@ -877,10 +898,17 @@ struct DayPlannerView: View {
     private var eventsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 14) {
+                // Two lines, and shrink rather than break: at AX-XXXL the row
+                // shares its width with the calendar button and Add, and
+                // "Saturday" alone is wider than what is left — so Text broke
+                // it as "Saturda / y, 8 Aug" rather than at the space.
                 Text(prettyDate(selectedDate))
                     .font(.ui(12, weight: .semibold))
                     .foregroundStyle(Color.textMuted)
-                Spacer()
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
                 // Every calendar the PHONE holds — Outlook, iCloud, Google —
                 // without this app owning an OAuth flow for any of them.
                 Button {
@@ -1043,7 +1071,8 @@ struct DayPlannerView: View {
                 Text(event.isAllDay ? "All day" : hhmm(event.startMinute))
                     .font(.ui(12.5, weight: .semibold))
                     .foregroundStyle(Color.accentDeep)
-                    .frame(width: 52, alignment: .trailing)
+                    .fitsOneLine()
+                    .frame(minWidth: 52, alignment: .trailing)
                 Rectangle().fill(Color.accent).frame(width: 3).cornerRadius(1.5)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(event.title)

@@ -143,6 +143,24 @@ enum Touch {
     static let target: CGFloat = 44
 }
 
+extension View {
+    /// Keep text on one line inside a fixed-width column, shrinking instead of
+    /// wrapping or truncating.
+    ///
+    /// Every point size in the app scales now, but the frames the text sits in
+    /// did not — so at accessibility sizes the date dial broke "FRI" across two
+    /// lines and rendered whole days as a bare ellipsis, and the event column
+    /// showed "15:" where "15:00" belonged. A clipped clock is worse than a
+    /// small one.
+    ///
+    /// 0.6 rather than the tab bar's 0.75: a clock has to survive AX-XXXL,
+    /// which is roughly double, and a tab label only has to survive looking
+    /// cramped.
+    func fitsOneLine(_ minimumScale: CGFloat = 0.6) -> some View {
+        self.lineLimit(1).minimumScaleFactor(minimumScale)
+    }
+}
+
 /// Motion the user has asked not to see.
 ///
 /// `accessibilityReduceMotion` was honoured in exactly one file out of

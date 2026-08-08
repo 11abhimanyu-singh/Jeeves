@@ -59,7 +59,7 @@ struct WorkoutTodaySection: View {
 
             if today.isEmpty {
                 Text("Nothing yet today.\nStart a workout on your watch \u{2014} it lands here.")
-                    .font(.ui(13)).foregroundStyle(Color.textMuted)
+                    .font(.ui(13)).foregroundStyle(Color.textSoft)
                     .frame(maxWidth: .infinity)
                     .multilineTextAlignment(.center)
                     .padding(.vertical, 16)
@@ -989,7 +989,7 @@ struct UnifiedHistoryList: View {
             LazyVStack(spacing: 8) {
                 if days.isEmpty {
                     Text("Nothing logged yet.")
-                        .font(.ui(13.5)).foregroundStyle(Color.textMuted)
+                        .font(.ui(13.5)).foregroundStyle(Color.textSoft)
                         .padding(.vertical, 32)
                 }
                 ForEach(days) { day in

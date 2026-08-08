@@ -183,6 +183,8 @@ struct LibraryView: View {
     @State private var showCamera = false
     @State private var cameraImage: UIImage?
     @State private var isScanning = false
+    @State private var scanStartedAt = Date()
+    @State private var scanTask: Task<Void, Never>?
     @State private var scanError: String?
     @State private var detectedBooks: [DetectedBook] = []
     @State private var showReviewSheet = false
@@ -241,11 +243,45 @@ struct LibraryView: View {
         .task { await backfillMissingMetadata() }
         .overlay {
             if isScanning {
+                // A vision call on a photograph: seconds at best, a network
+                // timeout at worst — and the scrim means nothing else on the
+                // screen is reachable while it runs. A scrim with no elapsed
+                // time and no way out is the same category error as a spinner
+                // on a nine-minute plan, just shorter.
                 ZStack {
                     Color.black.opacity(0.25).ignoresSafeArea()
-                    ProgressView("Reading the shelf…")
-                        .padding(20)
+                    TimelineView(.periodic(from: scanStartedAt, by: 1)) { context in
+                        let elapsed = max(0, Int(context.date.timeIntervalSince(scanStartedAt)))
+                        VStack(spacing: 12) {
+                            HStack(spacing: 9) {
+                                ProgressView()
+                                Text("Reading the shelf…")
+                                    .font(.ui(14, weight: .semibold))
+                                    .foregroundStyle(Color.textPrimary)
+                                Text(String(format: "%d:%02d", elapsed / 60, elapsed % 60))
+                                    .font(.ui(13, weight: .semibold)).monospacedDigit()
+                                    .foregroundStyle(Color.textSoft)
+                            }
+                            if elapsed > 20 {
+                                Text("Longer than usual — a big shelf or a slow connection.")
+                                    .font(.ui(12)).foregroundStyle(Color.textSoft)
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Button { cancelScan() } label: {
+                                Text("Stop")
+                                    .font(.ui(13.5, weight: .semibold))
+                                    .foregroundStyle(Color.accentDeep)
+                                    .frame(maxWidth: .infinity, minHeight: Touch.target)
+                                    .background(RoundedRectangle(cornerRadius: 11)
+                                        .fill(Color.accent.opacity(0.14)))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(18)
+                        .frame(maxWidth: 280)
                         .background(RoundedRectangle(cornerRadius: 16).fill(Color.surface))
+                    }
                 }
             }
         }
@@ -308,7 +344,7 @@ struct LibraryView: View {
         .onChange(of: photoPickerItem) { _, newItem in
             guard let newItem else { return }
             showAddBooksPage = false
-            Task {
+            scanTask = Task {
                 if let data = try? await newItem.loadTransferable(type: Data.self), let uiImage = UIImage(data: data) {
                     await scan(uiImage)
                 }
@@ -318,7 +354,7 @@ struct LibraryView: View {
         .onChange(of: cameraImage) { _, newImage in
             guard let newImage else { return }
             showAddBooksPage = false
-            Task {
+            scanTask = Task {
                 await scan(newImage)
                 cameraImage = nil
             }
@@ -575,8 +611,19 @@ struct LibraryView: View {
 
     // MARK: Scanning
 
+    /// Stop the scan and say so. Cancelling the TASK matters: a vision call
+    /// left running would drop its results onto a screen that had already said
+    /// it stopped.
+    private func cancelScan() {
+        scanTask?.cancel()
+        scanTask = nil
+        isScanning = false
+        scanError = "Stopped reading the shelf. Nothing was added."
+    }
+
     private func scan(_ image: UIImage) async {
         isScanning = true
+        scanStartedAt = Date()
         scanError = nil
         do {
             let results = try await ClaudeVisionService.detectBooks(in: image)
@@ -586,7 +633,10 @@ struct LibraryView: View {
                 detectedBooks = results
                 showReviewSheet = true
             }
+        } catch is CancellationError {
+            return          // cancelScan already said what happened
         } catch {
+            guard !Task.isCancelled else { return }
             scanError = error.localizedDescription
         }
         isScanning = false

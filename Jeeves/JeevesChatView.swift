@@ -349,6 +349,13 @@ struct JeevesChatView: View {
     private func turnView(_ turn: ChatTurn) -> some View {
         if let plan = turn.plan {
             PlanTimelineCard(plan: plan, isOffline: turn.isOfflinePlan)
+                // The plan does not replace the spinner, it ARRIVES: the newest
+                // one slides up and fades in, older turns are already on screen
+                // and do not re-animate. Reduce Motion turns this into a plain
+                // fade rather than nothing, so there is still an ending.
+                .transition(UIAccessibility.isReduceMotionEnabled
+                            ? .opacity
+                            : .move(edge: .bottom).combined(with: .opacity))
         } else if let day = turn.morningPromptDay {
             // The morning offer renders as a card rather than a bubble. It is
             // the interface, not a description of one — the alternative was
@@ -707,7 +714,10 @@ struct JeevesChatView: View {
                 }
                 // Any plans the agent built, as timeline cards after the reply.
                 for made in reply.plans {
-                    addTurn(role: .assistant, "", plan: made.plan, isOfflinePlan: made.isOffline)
+                    Haptics.success()
+                    Motion.run(.spring(duration: 0.45)) {
+                        addTurn(role: .assistant, "", plan: made.plan, isOfflinePlan: made.isOffline)
+                    }
                 }
                 // Never leave the turn visibly silent: if the model exhausted the
                 // tool-loop with no closing text and no plan, still acknowledge.
@@ -793,7 +803,10 @@ struct JeevesChatView: View {
             } else {
                 addTurn(role: .assistant, result.plan.summary)
             }
-            addTurn(role: .assistant, "", plan: result.plan, isOfflinePlan: result.isOffline)
+            Haptics.success()
+            Motion.run(.spring(duration: 0.45)) {
+                addTurn(role: .assistant, "", plan: result.plan, isOfflinePlan: result.isOffline)
+            }
             isPlanning = false
         }
     }
@@ -815,7 +828,10 @@ struct JeevesChatView: View {
             } else {
                 addTurn(role: .assistant, result.plan.summary)
             }
-            addTurn(role: .assistant, "", plan: result.plan, isOfflinePlan: result.isOffline)
+            Haptics.success()
+            Motion.run(.spring(duration: 0.45)) {
+                addTurn(role: .assistant, "", plan: result.plan, isOfflinePlan: result.isOffline)
+            }
             isPlanning = false
         }
     }
@@ -987,7 +1003,8 @@ struct PlanTimelineCard: View {
             Text(block.startTime)
                 .font(.ui(12.5, weight: .semibold))
                 .foregroundStyle(block.isAnchor ? Color.accentDeep : Color.textSoft)
-                .frame(width: 46, alignment: .leading)
+                .fitsOneLine()
+                .frame(minWidth: 46, alignment: .leading)
             Rectangle()
                 .fill(block.isAnchor ? Color.accent : Color.sage.opacity(0.5))
                 .frame(width: 3).cornerRadius(1.5)
