@@ -22,6 +22,20 @@ python3 tools/diagnose.py <workdir> --pull               # store-audit + traject
   legs/trips, numbers not traceable to tool results, claimed actions absent
   from the store, unanswered turns, self-date confusion.
 
+### Known: `ChatToolExecutorTests` is excluded from the evidence channel
+
+`testClearingTheDayAlsoRebuildsIt` drives `set_day_activities` → re-plan. On some
+machines that returns in milliseconds; on others it blocks for many minutes, and
+an unattended 08:36 run cannot afford that. The other 878 tests complete in
+0.75 s, so the class is skipped in `capture-evidence.sh` and the skip is written
+into `tests.txt` rather than left silent — a shorter list read by the judge as
+"these rules are not enforced" would be exactly the lie this layer exists to stop.
+
+Not yet root-caused. Ruled out: the keychain (setUp removes the key), the scheme
+(injects no environment), and the app's own changes (the only edit on that path
+is a defaulted parameter). Next step is to bisect it against a commit from before
+2026-08-07, since the same class ran green in 1.3 s that morning.
+
 ## 1b. Conformance — did we build what was agreed? (weekly)
 
 ```bash
