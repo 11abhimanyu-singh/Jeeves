@@ -109,7 +109,7 @@ final class EvidenceWalkthroughTests: XCTestCase {
         // MARK: chat and the morning offer.
         rec.step("chat") { self.tapAny("Ask Jeeves") }
         rec.step("chat.morning_card") { self.tapAny("Pick today") }
-        rec.step("chat.morning_card.reorder") { self.tapAny("Reorder activities") }
+        rec.step("chat.morning_card.reorder") { self.tapAny("Reorder or remove activities") }
         rec.step("chat.morning_card.scrolled") { self.scrollToBottom(); return true }
         rec.step("chat.menu") { self.tapAny("More") }
         dismissSheet()

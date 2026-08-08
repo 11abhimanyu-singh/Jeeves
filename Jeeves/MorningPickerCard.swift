@@ -35,10 +35,10 @@ struct MorningPickerCard: View {
     /// The user's order for today, by planner name. Empty until they move
     /// something — the routine's own order is the default shape of a day.
     @State private var order: [String] = []
-    /// Reordering is a MODE, not extra buttons on every row. The row already
-    /// carries a checkbox, a name, minus, minutes, plus and a bin; two more
-    /// arrows would be eight controls across 402 points. Swapping the
-    /// duration controls for arrows keeps every target at its full width.
+    /// Editing is a MODE, not extra buttons on every row. Eight controls will
+    /// not fit across 402 points at 44pt each, so the row shows the duration
+    /// controls by default and swaps them for the arrows and the bin here. Every
+    /// target keeps its full width, and the default row keeps its name legible.
     @State private var reordering = false
     @State private var gymOn = false
     @State private var gymTime = Date()
@@ -118,18 +118,21 @@ struct MorningPickerCard: View {
 
             HStack {
                 Spacer()
+                // "Edit", not "Reorder": the mode moves rows AND bins them, and
+                // a control that deletes must not be hiding behind a word that
+                // only promises to rearrange.
                 Button { reordering.toggle() } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: reordering ? "checkmark" : "arrow.up.arrow.down")
+                        Image(systemName: reordering ? "checkmark" : "pencil")
                             .font(.ui(10.5, weight: .bold))
-                        Text(reordering ? "Done" : "Reorder").font(.ui(11.5, weight: .semibold))
+                        Text(reordering ? "Done" : "Edit").font(.ui(11.5, weight: .semibold))
                     }
                     .foregroundStyle(Color.accentDeep)
                     .padding(.horizontal, 10).frame(minHeight: 30)
                     .background(Capsule().fill(Color.accent.opacity(reordering ? 0.2 : 0.1)))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(reordering ? "Finish reordering" : "Reorder activities")
+                .accessibilityLabel(reordering ? "Finish editing" : "Reorder or remove activities")
             }
             .padding(.bottom, 6)
 
@@ -181,26 +184,27 @@ struct MorningPickerCard: View {
     /// beneath. This also holds at large Dynamic Type, where no fixed column
     /// division could.
     ///
-    /// BE CLEAR ABOUT THE COST, because the first version of this comment was
-    /// not. The fixed chrome is 268pt — tickBox 44, three 9pt gaps, a 4pt
-    /// Spacer, and 193pt of controls. On the 402pt capture device the card's
-    /// content is 342pt wide, so the name gets 74pt, NOT the ~110pt originally
-    /// claimed here. Measured off the a11y frames in
-    /// evidence/20260808-193634/steps/033__chat.morning_card__a11y.json, 9 of
-    /// the day's 11 rows take the stacked branch — only "Chores" (43.3pt) and
-    /// "Lunch" (37.3pt) stay on one line. Stacking is the normal case, not the
-    /// exception, and it roughly doubles the card's height.
+    /// HOW MUCH ROOM THE NAME ACTUALLY GETS, measured rather than guessed — the
+    /// first version of this comment claimed ~110pt and was wrong. The card's
+    /// content is 342pt wide on the 402pt capture device, and the fixed chrome
+    /// is tickBox 44 + three 9pt gaps + a 4pt Spacer + the controls:
     ///
-    /// That is a real trade and it is the one deliberately taken: a tall card
-    /// scrolls, and the summary and "Plan my day" stay on screen because chat
-    /// pins the newest turn. A word cut in half does not scroll. If the height
-    /// ever needs winning back, the room is in the 193pt of controls — moving
-    /// the bin into the reorder mode frees 53pt — not in the name column.
+    ///   default (− 34m +)      140pt of controls → 127pt for the name
+    ///   editing (↑ ↓ bin)      150pt of controls → 117pt for the name
     ///
-    /// Reordering swaps those controls for two arrows, ~97pt, so there every row
-    /// but the longest name fits on one line. That is why the stacked branch
-    /// indents its controls under the name instead of right-aligning them: one
-    /// row taking the fallback among ten that do not must still read as one row.
+    /// With the bin still on every default row the controls were 193pt and the
+    /// name got 74pt, so nine of eleven rows stacked — verified against the a11y
+    /// frames in evidence/20260808-193634. Moving the bin into the edit mode
+    /// bought back 53pt, which is the difference between "Photography" (78pt),
+    /// "Chore buffer" (77), "Reading habit" (84) and "Job applications" (100)
+    /// fitting on one line and not fitting.
+    ///
+    /// The four "Interview prep — …" names are 155–194pt and stack in both
+    /// modes. Nothing short of truncating them changes that, and a truncated
+    /// name in a list you are choosing from is worse than a tall row. That is
+    /// why the stacked branch indents its controls under the name rather than
+    /// right-aligning them: a row taking the fallback among rows that do not
+    /// must still read as one row.
     private func row(_ item: MorningPrompt.Candidate) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 9) {
@@ -274,6 +278,23 @@ struct MorningPickerCard: View {
                            enabled: index > 0) { move(item.name, by: -1) }
                 stepButton("arrow.down", label: "Move \(item.name) down",
                            enabled: index < names.count - 1) { move(item.name, by: 1) }
+
+                // Ticking off says "not today"; the bin says "not on this list".
+                // It is today's list only — tomorrow the cadence puts it back.
+                //
+                // It lives in the edit mode rather than on every row because the
+                // default row could not afford it: four 44pt controls left the
+                // name 74pt, so nine of eleven rows stacked. Without the bin the
+                // name gets 127pt and most rows are one line again.
+                Button {
+                    binned.insert(item.name)
+                    ticked.remove(item.name)
+                } label: {
+                    Image(systemName: "trash").font(.ui(12.5)).foregroundStyle(Color.textMuted)
+                        .frame(width: Touch.target, height: Touch.target).contentShape(Rectangle())
+                        .accessibilityLabel("Remove \(item.name) from today's list")
+                }
+                .buttonStyle(.plain)
             } else {
                 // Buttons, not a Stepper: a Stepper is the same class of control
                 // as the Toggle that was completely dead to touch in this card,
@@ -291,18 +312,6 @@ struct MorningPickerCard: View {
                            enabled: on && length(item) < Self.ceilingMinutes) {
                     nudge(item, by: Self.step)
                 }
-
-                // Ticking off says "not today"; the bin says "not on this list".
-                // It is today's list only — tomorrow the cadence puts it back.
-                Button {
-                    binned.insert(item.name)
-                    ticked.remove(item.name)
-                } label: {
-                    Image(systemName: "trash").font(.ui(12.5)).foregroundStyle(Color.textMuted)
-                        .frame(width: Touch.target, height: Touch.target).contentShape(Rectangle())
-                        .accessibilityLabel("Remove \(item.name) from today's list")
-                }
-                .buttonStyle(.plain)
             }
         }
     }
