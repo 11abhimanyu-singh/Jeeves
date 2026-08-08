@@ -219,7 +219,6 @@ final class EvidenceWalkthroughTests: XCTestCase {
             // A sheet scrolled to its bottom will not drag-dismiss, and its
             // Close button is off-screen — which is how Settings swallowed
             // nineteen consecutive steps.
-            scrollToTop()
             var closed = false
             for label in ["Close", "Done", "Cancel", "Minimise chat"] {
                 let button = app.buttons[label].firstMatch
@@ -251,10 +250,21 @@ final class EvidenceWalkthroughTests: XCTestCase {
         return "\(weekday.string(from: day).uppercased()), \(Calendar.current.component(.day, from: day))"
     }
 
+    /// Scroll back to the top WITHOUT dismissing the sheet you are in.
+    ///
+    /// This used to drag from 0.25 down to 0.85 — a downward drag beginning in
+    /// the top quarter of the screen, which on a sheet IS the dismiss gesture.
+    /// So `tapAny`'s hunt closed Settings on its way to looking for a control
+    /// inside Settings, and four screens in a row reported themselves missing:
+    /// the sync button, the routine catalog, its activity editor, and the chat
+    /// menu. The instrument lying about the app, for the third time, and again
+    /// because of a fix I made to stop it lying.
+    ///
+    /// Starting below the halfway line keeps the gesture inside the content.
     private func scrollToTop() {
-        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
-        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85))
-        for _ in 0..<5 { start.press(forDuration: 0.05, thenDragTo: end) }
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.92))
+        for _ in 0..<6 { start.press(forDuration: 0.05, thenDragTo: end) }
     }
 
     private func scrollToBottom() {
