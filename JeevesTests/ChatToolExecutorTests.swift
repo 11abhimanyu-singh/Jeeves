@@ -34,8 +34,27 @@ final class ChatToolExecutorTests: XCTestCase {
         return state
     }
 
+    /// Whatever key this simulator happened to accumulate, put back in tearDown.
+    private var stashedKey: String?
+
     override func setUp() {
         super.setUp()
+        // FORCE THE OFFLINE PLANNER.
+        //
+        // Several tests here drive a tool that re-plans the day, and
+        // PlanCoordinator only goes offline when NO key resolves. With one
+        // present they attempt a live generation, which costs money on every
+        // run and — on a machine without outbound network — blocks until
+        // URLSession times out rather than failing fast. Either way the suite's
+        // runtime stops being a property of the suite.
+        //
+        // Honest scope: this removes the KEYCHAIN as a source of that, which is
+        // one source and not the only one. These tests are about the executor's
+        // own bookkeeping; the deterministic packer is the right planner for
+        // them regardless of what keys happen to be lying around.
+        stashedKey = KeychainService.loadAPIKey()
+        KeychainService.deleteAPIKey()
+
         let schema = Schema([
             Trip.self, TravelSegment.self, TripStay.self, DailyEvent.self,
             SavedLocation.self, AppEvent.self, CalendarTombstone.self,
@@ -51,6 +70,8 @@ final class ChatToolExecutorTests: XCTestCase {
     }
 
     override func tearDown() {
+        if let stashedKey { KeychainService.saveAPIKey(stashedKey) }
+        stashedKey = nil
         executor = nil
         container = nil
         super.tearDown()
