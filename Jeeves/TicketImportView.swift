@@ -113,6 +113,9 @@ struct TicketImportView: View {
             }
             .accessibilityLabel("Choose a ticket photo")
 
+            // Stays muted deliberately: this sits on the PAGE (Color.bg) where
+            // textMuted measures 4.71:1 and passes. The card-backed rows below
+            // are the ones that had to move — 4.18:1 on surface.
             Text("PDF, photo or screenshot. A PDF with real text is read directly — anything else is looked at, which is slower and less certain.")
                 .font(.ui(11)).foregroundStyle(Color.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -242,7 +245,7 @@ struct TicketImportView: View {
             HStack(alignment: .top, spacing: 8) {
                 endBlock(leg.fromPlace, terminal: leg.fromTerminal,
                          time: leg.departAt, zone: leg.fromTimeZoneID, align: .leading)
-                Text("→").font(.ui(11)).foregroundStyle(Color.textMuted).padding(.top, 2)
+                Text("→").font(.ui(11)).foregroundStyle(Color.textSoft).padding(.top, 2)
                 endBlock(leg.toPlace, terminal: leg.toTerminal,
                          time: leg.arriveAt, zone: leg.toTimeZoneID, align: .trailing)
             }
@@ -253,16 +256,16 @@ struct TicketImportView: View {
     private func endBlock(_ place: String, terminal: String?, time: Date,
                           zone: String, align: HorizontalAlignment) -> some View {
         VStack(alignment: align, spacing: 2) {
-            Text(place).font(.ui(11)).foregroundStyle(Color.textMuted)
+            Text(place).font(.ui(11)).foregroundStyle(Color.textSoft)
                 .lineLimit(2).multilineTextAlignment(align == .leading ? .leading : .trailing)
             HStack(spacing: 4) {
                 Text(clock(time, zone: zone)).font(.ui(14, weight: .semibold))
                     .foregroundStyle(Color.textPrimary).monospacedDigit()
-                Text(abbrev(zone)).font(.ui(9.5, weight: .semibold)).foregroundStyle(Color.textMuted)
+                Text(abbrev(zone)).font(.ui(9.5, weight: .semibold)).foregroundStyle(Color.textSoft)
             }
             Text(terminal.map { "Terminal \($0)" } ?? "Terminal —")
                 .font(.ui(9.5, weight: .semibold))
-                .foregroundStyle(terminal == nil ? Color.textMuted : Color.travelInk)
+                .foregroundStyle(terminal == nil ? Color.textSoft : Color.travelInk)
         }
         .frame(maxWidth: .infinity, alignment: align == .leading ? .leading : .trailing)
     }
