@@ -101,9 +101,14 @@ against this app and each was wrong:
     ever produces.
 
   - A HORIZONTALLY SCROLLING STRIP MAY SHOW A PARTIAL ITEM AT ITS TRAILING EDGE.
-    Chat's suggestion chips scroll sideways on purpose, to keep one row of
-    height instead of two; the half-visible chip is the cue that there are more.
-    Report it only if the strip does not scroll.
+    A ROW of similar items — chips, pills, date cells — running to the screen
+    edge with one sliced in half is a strip you swipe, and the half-visible item
+    is the cue that there are more. The app has several: chat's suggestion
+    chips, the planner's date dial, the filter chips. Judge the PATTERN, not the
+    list — this rule named only the chat chips once and the identical date dial
+    was reported three times in one run.
+    A single label cut at the right edge with no siblings beside it is different,
+    and is still a finding.
 
 The test for all of these is the same one: name what the user loses. If they lose
 nothing — the text is marked, or complete on the next line, or one swipe away —
