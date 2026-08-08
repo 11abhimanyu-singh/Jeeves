@@ -134,6 +134,9 @@ if [ "$(date +%u)" = "7" ]; then
       # Exits non-zero when something agreed is missing, which is a finding and
       # not an error — report it either way rather than letting set -e swallow it.
       python3 "$TOOLS/screen-judge.py" "$RUN" "$REPO_DOCS/SPEC.md" 2>&1 || true
+      # The pixels, which the accessibility tree cannot carry: contrast and tap
+      # targets MEASURED, layout defects looked at. Non-zero is a finding.
+      python3 "$TOOLS/visual-judge.py" "$RUN" 2>&1 || true
     else
       echo "conformance: capture produced no run directory — see above"
     fi

@@ -54,6 +54,15 @@ python3 tools/screen-judge.py evidence/<run>    # exits non-zero on a real gap
   `SPEC.gpt.md` by GPT from the transcripts; `spec-diff.py` merges them and
   marks every ONE-SIDED entry. On its first run that flag caught nine
   requirements the hand-written register had dropped.
+- **tools/visual-judge.py** is the pass over the PNGs, and it is deliberately
+  split three ways. Contrast is COMPUTED from the palette in
+  `Jeeves/ContentView.swift`; tap targets are COMPUTED from the accessibility
+  frames; only genuine layout defects — wrapped labels, clipped text, overlap —
+  go to the vision model, which is explicitly forbidden from reporting a ratio
+  or a size. Both of those started as model questions and both produced
+  confident nonsense: 48 of 54 screens flagged for contrast (it was reading
+  `accent` FILLS as text) and "about 58px, far smaller than 132px" measured off
+  an image the tool had itself downscaled.
 - **A step never fails the walk.** An unreachable screen records
   `reachable:false` and the walk continues, because losing forty-five screens to
   one missing control is how you end up with no evidence at all.
