@@ -16,7 +16,7 @@ Usage:
     python3 tools/notification-dump.py <udid> [out.json]
 """
 import json
-import plistlib
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -24,52 +24,36 @@ from pathlib import Path
 ROOT = Path.home() / "Library/Developer/CoreSimulator/Devices"
 
 
-def decode(path: Path) -> object:
-    """Simulator plists are binary; plutil is the reliable decoder."""
-    try:
-        out = subprocess.run(["plutil", "-convert", "json", "-o", "-", str(path)],
-                             capture_output=True, text=True, check=True).stdout
-        return json.loads(out)
-    except Exception:                                  # noqa: BLE001
-        try:
-            return plistlib.loads(path.read_bytes())
-        except Exception:                              # noqa: BLE001
-            return None
+def entries(path: Path, prefix: str = "jeeves") -> list[dict]:
+    """Pull our notification identifiers out of a store plist.
 
-
-def requests_in(blob: object, prefix: str) -> list[dict]:
-    """Pull every request whose identifier starts with `prefix`.
-
-    The store's shape is version-dependent, so walk it rather than assuming a
-    path: find dicts that look like a notification request and keep ours.
+    Deliberately text-based. The first version modelled the store's structure —
+    walking for dicts with an `AppNotificationIdentifier` key — and found
+    NOTHING, while `plutil -p` on the same file printed the identifiers plainly.
+    The store's shape is an implementation detail of the notification daemon and
+    varies by iOS version; the identifiers we ourselves chose are not. So parse
+    what plutil prints and stop pretending to know the schema.
     """
-    found: list[dict] = []
+    try:
+        text = subprocess.run(["plutil", "-p", str(path)],
+                              capture_output=True, text=True, check=True).stdout
+    except Exception:                                  # noqa: BLE001
+        return []
 
-    def walk(node: object) -> None:
-        if isinstance(node, dict):
-            ident = node.get("AppNotificationIdentifier") or node.get("identifier") or ""
-            if isinstance(ident, str) and ident.startswith(prefix):
-                found.append({
-                    "id": ident,
-                    "title": node.get("AppNotificationTitle") or node.get("title") or "",
-                    "body": node.get("AppNotificationBody") or node.get("body") or "",
-                    "date": str(node.get("TriggerDate") or node.get("date") or ""),
-                })
-            for value in node.values():
-                walk(value)
-        elif isinstance(node, list):
-            for item in node:
-                walk(item)
-
-    walk(blob)
-    # One entry per identifier; the store repeats them across indexes.
-    seen, out = set(), []
-    for item in found:
-        if item["id"] in seen:
-            continue
-        seen.add(item["id"])
-        out.append(item)
-    return sorted(out, key=lambda r: r["id"])
+    ids = sorted(set(re.findall(rf'"({re.escape(prefix)}[\w.:|\- ]*)"', text)))
+    # Bodies live near their identifier but not at a predictable path; pair them
+    # up by proximity, and say nothing rather than guess when there is no match.
+    out = []
+    for ident in ids:
+        body = ""
+        index = text.find(f'"{ident}"')
+        if index != -1:
+            window = text[max(0, index - 4000): index + 4000]
+            hit = re.search(r'"AppNotificationBody" => "([^"]+)"', window)
+            if hit:
+                body = hit.group(1)
+        out.append({"id": ident, "body": body})
+    return out
 
 
 def main() -> None:
@@ -85,10 +69,15 @@ def main() -> None:
         for kind, filename in (("pending", "PendingNotifications.plist"),
                                ("delivered", "DeliveredNotifications.plist")):
             for path in base.rglob(filename):
-                blob = decode(path)
-                if blob is None:
+                result[kind] += entries(path)
+        for kind in ("pending", "delivered"):
+            seen, unique = set(), []
+            for item in result[kind]:
+                if item["id"] in seen:
                     continue
-                result[kind] += requests_in(blob, "jeeves")
+                seen.add(item["id"])
+                unique.append(item)
+            result[kind] = unique
         if not result["pending"] and not result["delivered"]:
             result["note"] = "store present but no jeeves notifications in it"
 
