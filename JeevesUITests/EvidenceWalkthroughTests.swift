@@ -93,12 +93,12 @@ final class EvidenceWalkthroughTests: XCTestCase {
         // The routine catalog carries the WEEKDAY CHIPS and each activity's
         // DURATION — two requirements that were graded "unknown" purely because
         // this screen was never reached.
-        rec.step("settings.routine") { self.tapAny("Routine") }
+        rec.step("settings.sync_calendars") { self.tapAny("Sync calendars now") }
+
+        rec.step("settings.routine") { self.tapAny("Daily routine") }
         rec.step("settings.routine.scrolled") { self.scrollToBottom(); return true }
         rec.step("settings.routine.activity") { self.tapAny("Chores") }
         dismissSheet()
-
-        rec.step("settings.sync_calendars") { self.tapAny("Sync calendars now") }
 
         // The calendar sheet: whether one button syncs every account.
         rec.step("settings.calendars") {
@@ -124,8 +124,12 @@ final class EvidenceWalkthroughTests: XCTestCase {
         // Yesterday's plan is the OFFLINE one. The banner is a persistent
         // property of the stored plan, invisible to a walk that only ever looks
         // at an online day.
-        rec.step("planner.yesterday") { self.tapAny("Jump to a date") }
-        dismissSheet()
+        //
+        // Tapping "Jump to a date" and dismissing does NOT move the day — it
+        // opens a picker and throws it away, which is why the previous run still
+        // photographed today and the marker still graded absent. The date strip
+        // itself is a row of buttons labelled "FRI, 7", so tap yesterday's.
+        rec.step("planner.yesterday") { self.tapAny(self.dateStripLabel(daysAgo: 1)) }
         rec.step("planner.offline_marker") { self.scrollToTop(); return true }
 
         rec.step("planner.activity_picker") { self.tapAny("Choose this day's activities") }
@@ -236,6 +240,15 @@ final class EvidenceWalkthroughTests: XCTestCase {
     private func atRoot() -> Bool {
         let tab = app.buttons["Planner"].firstMatch
         return tab.exists && tab.isHittable
+    }
+
+    /// The date strip renders each day as a button labelled like "FRI, 7".
+    private func dateStripLabel(daysAgo: Int) -> String {
+        let day = Calendar.current.date(byAdding: .day, value: -daysAgo, to: Date()) ?? Date()
+        let weekday = DateFormatter()
+        weekday.dateFormat = "EEE"
+        weekday.locale = Locale(identifier: "en_IN")
+        return "\(weekday.string(from: day).uppercased()), \(Calendar.current.component(.day, from: day))"
     }
 
     private func scrollToTop() {

@@ -88,18 +88,41 @@ def keychain(service: str) -> str:
         return ""
 
 
-def evidence_block(walk: dict, budget: int = 60_000) -> str:
-    """Render the walkthrough compactly enough to fit beside the requirements.
+def evidence_block(walk: dict, budget: int = 250_000) -> str:
+    """Render the walkthrough for the judge.
 
-    Truncation is REPORTED, never silent: a judge that quietly saw half the app
-    would produce exactly the false "absent" verdicts this tool exists to avoid.
+    Two things this has to get right, both learned by getting them wrong:
+
+    CHROME IS NOISE. "Menu", "Drag", the five tab buttons and the Jeeves title
+    appear on all fifty-odd screens. Repeating them per step burned most of the
+    budget on text that distinguishes nothing, so anything present on more than
+    two-thirds of screens is listed ONCE up front.
+
+    TRUNCATION IS A LIE IF IT IS SILENT — and it is nearly a lie even when it is
+    not. At 60k the tail of a 54-step walk was dropped, and three requirements
+    came back "unknown: the screen was omitted" for screens that had in fact been
+    captured perfectly well. The budget is generous now, and anything still cut
+    is named.
     """
-    lines, used, dropped = [], 0, []
-    for step in walk["steps"]:
+    steps = walk["steps"]
+    counts: dict[str, int] = {}
+    for step in steps:
+        for line in set(step.get("elements", [])):
+            counts[line] = counts.get(line, 0) + 1
+    threshold = max(2, int(len(steps) * 0.66))
+    chrome = {line for line, n in counts.items() if n >= threshold}
+
+    lines = []
+    if chrome:
+        lines.append("## CHROME — present on nearly every screen, listed once\n"
+                     + "\n".join(sorted(chrome)) + "\n")
+
+    used, dropped = 0, []
+    for step in steps:
         head = (f'## step {step["index"]} — {step["label"]}'
                 f'{" [UNREACHABLE]" if not step.get("reachable", True) else ""}'
                 f'{" [screen did not change]" if not step.get("changed", True) else ""}')
-        body = "\n".join(step.get("elements", []))
+        body = "\n".join(e for e in step.get("elements", []) if e not in chrome)
         chunk = f"{head}\n{body}\n"
         if used + len(chunk) > budget:
             dropped.append(step["label"])
