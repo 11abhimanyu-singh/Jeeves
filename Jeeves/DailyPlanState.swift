@@ -70,6 +70,15 @@ final class DailyPlanState {
     /// stored Set: nil and "[]" have to stay distinguishable.
     var activitySelectionJSON: String? = nil
 
+    /// Per-day durations, keyed by planner name — "today Chores is 90 minutes,
+    /// not its usual 60".
+    ///
+    /// Deliberately NOT a write to `RoutineActivity.durationMinutes`: that would
+    /// change every future day too, which is the opposite of what "just today"
+    /// means. Nil for the overwhelming majority of days, which is why this is a
+    /// sparse map and not a field on every row.
+    var durationOverridesJSON: String? = nil
+
     /// When something the plan was BUILT FROM changed after it was built.
     ///
     /// Five tools move a planner input — add/delete/edit an event, set the gym,
@@ -123,6 +132,25 @@ final class DailyPlanState {
         set {
             withheldKeysJSON = newValue.isEmpty ? nil
                 : (try? JSONEncoder().encode(newValue)).flatMap { String(data: $0, encoding: .utf8) }
+        }
+    }
+
+    /// Planner name → minutes, for this day only. Empty when nothing was nudged.
+    var durationOverrides: [String: Int] {
+        get {
+            guard let json = durationOverridesJSON, let data = json.data(using: .utf8),
+                  let map = try? JSONDecoder().decode([String: Int].self, from: data)
+            else { return [:] }
+            return map
+        }
+        set {
+            // An empty map is the absence of overrides, not a meaningful value —
+            // unlike `.only([])`, which really does mean "a blank day".
+            guard !newValue.isEmpty, let data = try? JSONEncoder().encode(newValue) else {
+                durationOverridesJSON = nil
+                return
+            }
+            durationOverridesJSON = String(data: data, encoding: .utf8)
         }
     }
 

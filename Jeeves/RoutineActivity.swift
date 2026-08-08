@@ -219,9 +219,15 @@ extension Baseline {
     /// `enabled` behaves — a switched-off row stays off however hard you tick it
     /// — because "I don't do this at all" and "not usually today" are different
     /// claims. See testATickedActivityPlansEvenWhenItsCadenceExcludesTheDay.
+    /// - Parameter durationOverrides: per-day minutes by planner name. Applied
+    ///   HERE rather than at any call site, for the same reason the cadence
+    ///   filter lives here: this is the single point where the online prompt and
+    ///   the offline packer both read the day's activities, and anything applied
+    ///   in only one of them makes the two disagree about what the day contains.
     static func routine(from activities: [RoutineActivity],
                         selection: ActivitySelection = .routine,
-                        on date: Date? = nil) -> [BaselineActivity] {
+                        on date: Date? = nil,
+                        durationOverrides: [String: Int] = [:]) -> [BaselineActivity] {
         let enabled = activities
             .filter { $0.enabled && $0.group != .gym }
             .sorted { $0.sortOrder < $1.sortOrder }
@@ -230,11 +236,21 @@ extension Baseline {
         // came out empty: a day the user deliberately cleared, and a day the
         // cadence simply left light, are both correct answers, and refilling
         // either with the eight hardcoded defaults would undo the whole point.
-        if enabled.isEmpty { return self.activities }
+        if enabled.isEmpty { return applying(durationOverrides, to: self.activities) }
 
-        return enabled
+        return applying(durationOverrides, to: enabled
             .filter { $0.isPlanned(on: date, selection: selection) }
-            .map(\.asBaseline)
+            .map(\.asBaseline))
+    }
+
+    private static func applying(_ overrides: [String: Int],
+                                 to activities: [BaselineActivity]) -> [BaselineActivity] {
+        guard !overrides.isEmpty else { return activities }
+        return activities.map { activity in
+            guard let minutes = overrides[activity.name] else { return activity }
+            return BaselineActivity(name: activity.name, durationMinutes: minutes,
+                                    tier: activity.tier, note: activity.note)
+        }
     }
 
     /// The gym session as configured: enabled parts, in order, with their own

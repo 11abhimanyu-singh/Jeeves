@@ -32,12 +32,26 @@ MODEL = "gpt-5.6-terra"
 RUBRIC = """You audit whether an iOS app ("Jeeves", a single-user personal
 planner) actually contains what its owner asked for.
 
-You are given (1) REQUIREMENTS, each with a stable id, and (2) EVIDENCE: an
-ordered walkthrough of the running app. Each step lists every accessibility
-element actually present on that screen as `role|label|value`. Elements the app
-rendered but scrolled out of view are prefixed `(offscreen)` — those still
-EXIST. A step marked `reachable:false` means the walkthrough could not find
-anything to tap for it.
+You are given (1) REQUIREMENTS, each with a stable id, and (2) EVIDENCE from a
+running build, in THREE channels. Use whichever channel can actually carry the
+requirement:
+
+  SCREENS — an ordered walkthrough. Each step lists every accessibility element
+    present as `role|label|value`. Elements rendered but scrolled out of view are
+    prefixed `(offscreen)` and still EXIST. `reachable:false` means the
+    walkthrough found nothing to tap for that step.
+
+  TESTS — the app's unit suite, one line per test as `passed|failed
+    Suite.testName`. Test names here are written as sentences describing the
+    behaviour they pin. A PASSING test IS evidence that a rule is enforced, and
+    for requirements about BEHAVIOUR rather than controls — "replanning accounts
+    for elapsed time", "insert a break after 90 minutes" — it is the only
+    evidence that can exist, because no screenshot can show a rule. Weigh it
+    exactly as heavily as a visible control.
+
+  NOTIFICATIONS — what the app actually scheduled and delivered on the device.
+    A notification is not in the app's accessibility tree, so this channel is
+    the ONLY way to see one. An entry here is proof it fires.
 
 Rule that overrides your instinct to be generous:
 THE EVIDENCE IS COMPLETE FOR WHAT IT COVERS. If a requirement describes a
@@ -45,8 +59,12 @@ control, and no element in ANY step plausibly corresponds to it, the verdict is
 "absent". Do not assume it exists on a screen you were not shown. Do not credit
 a requirement because the app "probably" has it somewhere.
 
-Only when a requirement concerns a screen the walkthrough never visited at all
-should you answer "unknown" — and then name the screen you would need.
+Before answering "absent", check all three channels. A rule with a passing test
+is present even if no screen shows it. A notification in the store is present
+even though no screen contains it.
+
+Only when a requirement concerns something NO channel covers should you answer
+"unknown" — and then name the evidence you would need.
 
 Verdicts:
   present  — a specific element (quote it) satisfies the requirement
@@ -70,7 +88,7 @@ def keychain(service: str) -> str:
         return ""
 
 
-def evidence_block(walk: dict, budget: int = 90_000) -> str:
+def evidence_block(walk: dict, budget: int = 60_000) -> str:
     """Render the walkthrough compactly enough to fit beside the requirements.
 
     Truncation is REPORTED, never silent: a judge that quietly saw half the app
@@ -122,9 +140,16 @@ def main() -> None:
     if not spec_path.exists():
         sys.exit(f"No requirement register at {spec_path}")
 
-    content = (f"# REQUIREMENTS\n\n{spec_path.read_text()}\n\n"
-               f"# EVIDENCE — {walk['stepCount']} steps captured from the running app\n\n"
-               f"{evidence_block(walk)}")
+    tests = walk.get("tests", [])
+    notifications = walk.get("notifications", {})
+    content = (
+        f"# REQUIREMENTS\n\n{spec_path.read_text()}\n\n"
+        f"# EVIDENCE — CHANNEL 1: SCREENS ({walk['stepCount']} steps)\n\n"
+        f"{evidence_block(walk)}\n\n"
+        f"# EVIDENCE — CHANNEL 2: TESTS ({len(tests)} in the suite)\n\n"
+        + ("\n".join(tests) if tests else "(not captured)")
+        + "\n\n# EVIDENCE — CHANNEL 3: NOTIFICATIONS scheduled/delivered on the device\n\n"
+        + (json.dumps(notifications, indent=1) if notifications else "(not captured)"))
 
     verdict = call_gpt(key, content)
     (run / "conformance.json").write_text(json.dumps(verdict, indent=2))

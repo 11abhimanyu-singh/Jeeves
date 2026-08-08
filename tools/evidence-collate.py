@@ -120,15 +120,33 @@ def main() -> None:
     ordered = [records[i] for i in sorted(records)]
     unreachable = [r["label"] for r in ordered if not r.get("reachable")]
 
+    # Rules and notifications are evidence the screen cannot carry. Folding them
+    # into the same file means the judge sees one corpus, not three.
+    tests: list[str] = []
+    tests_file = run / "tests.txt"
+    if tests_file.exists():
+        tests = [line for line in tests_file.read_text().splitlines() if line.strip()]
+
+    notifications = {}
+    notif_file = run / "notifications.json"
+    if notif_file.exists():
+        notifications = json.loads(notif_file.read_text())
+
     out = {
         "run": run.name,
         "steps": ordered,
         "unreachable": unreachable,
         "stepCount": len(ordered),
+        "tests": tests,
+        "testCount": len(tests),
+        "testFailures": [t for t in tests if t.startswith("failed")],
+        "notifications": notifications,
     }
     (run / "walkthrough.json").write_text(json.dumps(out, indent=2))
 
-    print(f"{len(ordered)} steps → {run/'walkthrough.json'}")
+    print(f"{len(ordered)} steps, {len(tests)} tests, "
+          f"{len(notifications.get('pending', []))}+{len(notifications.get('delivered', []))} notifications "
+          f"→ {run/'walkthrough.json'}")
     if unreachable:
         # Never silent: an unreachable step is a finding, not a gap in the data.
         print(f"UNREACHABLE ({len(unreachable)}): {', '.join(unreachable)}")

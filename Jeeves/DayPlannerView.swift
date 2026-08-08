@@ -716,6 +716,7 @@ struct DayPlannerView: View {
         // from 08:00. The coordinator owns it now; this hands over the day's
         // committed plan and lets it decide.
         let selection = selectedPlanState?.activitySelection ?? .routine
+        let overrides = selectedPlanState?.durationOverrides ?? [:]
         planningStartedAt = Date()
         planningTask = Task {
             // Hold a background assertion so planning survives the user
@@ -728,7 +729,8 @@ struct DayPlannerView: View {
                     events: dayEvents,
                     locations: locations,
                     prepSessions: prepSessions,
-                    routine: Baseline.routine(from: routineActivities, selection: selection, on: date),
+                    routine: Baseline.routine(from: routineActivities, selection: selection, on: date,
+                                              durationOverrides: overrides),
                     gymSession: Baseline.gymSession(from: routineActivities),
                     adherenceNote: AdherenceHistory.planningNote(context: modelContext, for: date),
                     planDate: date,

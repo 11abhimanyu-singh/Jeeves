@@ -102,6 +102,9 @@ enum EvidenceSeed {
                                note: "After the 10-minute break", isAnchor: false, kind: "activity"),
                 GeneratedBlock(title: "Lunch", startTime: "12:55", endTime: "13:25",
                                note: "Inside the 12:30–14:00 window", isAnchor: false, kind: "lunch"),
+                GeneratedBlock(title: "Free time", startTime: "13:25", endTime: "17:30",
+                               note: "Genuinely open — Product Sense fell below the 30-minute floor and was dropped rather than stubbed in",
+                               isAnchor: false, kind: "free"),
                 GeneratedBlock(title: "Commute — Home to Gym", startTime: "17:30", endTime: "18:00",
                                note: "20 min drive + 10 min parking", isAnchor: false, kind: "commute"),
                 GeneratedBlock(title: "Gym", startTime: "18:00", endTime: "20:05",
@@ -181,6 +184,14 @@ enum EvidenceSeed {
     private static func seedEvents(_ context: ModelContext, today: Date) {
         context.insert(DailyEvent(date: today, title: "Dentist", startMinute: 15 * 60,
                                   endMinute: 16 * 60, destinationAddress: "HSR Layout, Bengaluru"))
+        // An online meeting that runs past midnight. It is a MEETING, not a
+        // journey, and the day it crosses into must not sprout travel — a
+        // distinction with no evidence unless the fixture creates one.
+        let cal = Calendar.current
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: today) ?? today
+        context.insert(DailyEvent(date: today, title: "Design review (online)",
+                                  startMinute: 23 * 60, endMinute: 24 * 60 + 30,
+                                  destinationAddress: "", spanEndDate: tomorrow))
     }
 
     // MARK: wipe

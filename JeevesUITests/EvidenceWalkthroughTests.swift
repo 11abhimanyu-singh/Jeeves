@@ -90,11 +90,18 @@ final class EvidenceWalkthroughTests: XCTestCase {
         rec.step("settings.mid") { self.scrollDownOnce(); self.scrollDownOnce(); return true }
         rec.step("settings.scrolled") { self.scrollToBottom(); return true }
 
-        // The routine catalog is where an activity's DURATION lives — the
-        // requirement the user found missing from the morning card.
+        // The routine catalog carries the WEEKDAY CHIPS and each activity's
+        // DURATION — two requirements that were graded "unknown" purely because
+        // this screen was never reached.
         rec.step("settings.routine") { self.tapAny("Routine") }
+        rec.step("settings.routine.scrolled") { self.scrollToBottom(); return true }
         rec.step("settings.routine.activity") { self.tapAny("Chores") }
         dismissSheet()
+
+        // The calendar sheet: whether one button syncs every account.
+        rec.step("settings.calendars") {
+            self.tapAny("Menu") && self.tapAny("Settings") && self.tapAny("Choose calendars…")
+        }
         dismissSheet()
 
         // MARK: chat and the morning offer.
@@ -124,8 +131,14 @@ final class EvidenceWalkthroughTests: XCTestCase {
         dismissSheet()
 
         // MARK: tasks + fitness + library detail.
+        // The reminder editor carries Once / Daily / Weekly / Every X Days —
+        // graded "unknown" last run because the sheet never opened.
         rec.step("tasks.reminders") { self.tapAny("Tasks") }
         rec.step("tasks.add_reminder") { self.tapAny("New reminder") }
+        rec.step("tasks.add_reminder.scrolled") { self.scrollToBottom(); return true }
+        dismissSheet()
+        rec.step("tasks.todos") { self.tapAny("To-dos") }
+        rec.step("tasks.add_todo") { self.tapAny("New to-do") }
         dismissSheet()
 
         rec.step("fitness") { self.tapAny("Fitness") }

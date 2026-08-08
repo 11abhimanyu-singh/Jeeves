@@ -28,6 +28,10 @@ struct MorningPickerCard: View {
 
     @State private var ticked: Set<String> = []
     @State private var binned: Set<String> = []
+    /// Planner name → minutes, for TODAY only. Absent means "use the routine's
+    /// own duration", which is why this is a sparse map rather than a copy of
+    /// every row's length.
+    @State private var minutes: [String: Int] = [:]
     @State private var gymOn = false
     @State private var gymTime = Date()
     @State private var loaded = false
@@ -45,8 +49,29 @@ struct MorningPickerCard: View {
             .sorted { $0.startMinute < $1.startMinute }
     }
 
+    /// What this row will actually run for today.
+    private func length(_ item: MorningPrompt.Candidate) -> Int {
+        minutes[item.name] ?? item.minutes
+    }
+
     private var pickedMinutes: Int {
-        candidates.filter { ticked.contains($0.name) }.map(\.minutes).reduce(0, +)
+        candidates.filter { ticked.contains($0.name) }.map(length).reduce(0, +)
+    }
+
+    /// The step, and the floor. 30 minutes is the planner's own minimum block
+    /// (PlanRules) — letting the card set 15 would produce a block the packer
+    /// would then refuse to schedule, which is a worse answer than not offering
+    /// it.
+    private static let step = 15
+    private static let floorMinutes = 30
+    private static let ceilingMinutes = 240
+
+    private func nudge(_ item: MorningPrompt.Candidate, by delta: Int) {
+        let next = min(Self.ceilingMinutes, max(Self.floorMinutes, length(item) + delta))
+        // Back to the routine's own number = no override, so a row nudged and
+        // then nudged back does not persist a value identical to the default.
+        if next == item.minutes { minutes.removeValue(forKey: item.name) }
+        else { minutes[item.name] = next }
     }
     private var freeMinutes: Int {
         MorningPrompt.freeMinutes(gymAt: gymOn ? gymMinute : nil,
@@ -121,8 +146,21 @@ struct MorningPickerCard: View {
                 }
             }
             Spacer(minLength: 4)
-            Text("\(item.minutes)m").font(.ui(11.5)).foregroundStyle(Color.textMuted)
+
+            // Buttons, not a Stepper: a Stepper is the same class of control as
+            // the Toggle that was completely dead to touch in this card, and
+            // this row already proves Buttons work here.
+            stepButton("minus", enabled: on && length(item) > Self.floorMinutes) {
+                nudge(item, by: -Self.step)
+            }
+            Text("\(length(item))m")
+                .font(.ui(11.5, weight: minutes[item.name] == nil ? .regular : .semibold))
+                .foregroundStyle(minutes[item.name] == nil ? Color.textMuted : Color.accentDeep)
                 .monospacedDigit()
+                .frame(minWidth: 34)
+            stepButton("plus", enabled: on && length(item) < Self.ceilingMinutes) {
+                nudge(item, by: Self.step)
+            }
 
             // Ticking off says "not today"; the bin says "not on this list".
             // It is today's list only — tomorrow the cadence puts it back.
@@ -136,6 +174,19 @@ struct MorningPickerCard: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    private func stepButton(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.ui(11, weight: .bold))
+                .foregroundStyle(enabled ? Color.accent : Color.textMuted.opacity(0.35))
+                .frame(width: 30, height: 34)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(symbol == "plus" ? "Add 15 minutes" : "Take off 15 minutes")
     }
 
     /// The gym hours worth one tap. Anything else is the picker underneath —
@@ -211,6 +262,7 @@ struct MorningPickerCard: View {
             ticked = Set(MorningPrompt.candidates(routine: routine, on: day)
                 .filter(\.dueToday).map(\.name))
         }
+        minutes = state?.durationOverrides ?? [:]
         if let state {
             gymOn = state.hasGymToday
             if let m = state.gymMinute,
@@ -236,6 +288,9 @@ struct MorningPickerCard: View {
         // absence, because from the planner's side they mean the same thing:
         // not part of today.
         s.activitySelection = .only(ticked)
+        // Only for rows still on the list — a binned row's nudge is meaningless
+        // and would otherwise sit in the store forever.
+        s.durationOverrides = minutes.filter { ticked.contains($0.key) }
         s.hasGymToday = gymOn
         s.gymMinute = gymOn ? gymMinute : nil
         context.saveOrLog("morning.confirm")

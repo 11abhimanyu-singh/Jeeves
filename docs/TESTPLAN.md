@@ -1,6 +1,12 @@
 # Jeeves permanent test plan
 
-Three layers, run in this order. A release is clean only when all three are.
+Four layers, run in this order. A release is clean only when all four are.
+
+Layers 1–3 ask whether the app is HEALTHY. Layer 4 asks whether it is COMPLETE,
+which no other layer can: every judge in layers 2–3 grades an artifact Claude
+wrote, so a requirement that was agreed and never built produces no artifact and
+no finding. Layer 4 grades machine-captured evidence against a register
+extracted from the user's own messages.
 
 ## 1. Deterministic (free, every run)
 
@@ -15,6 +21,28 @@ python3 tools/diagnose.py <workdir> --pull               # store-audit + traject
 - **trajectory-audit**: story vs state over every chat session — duplicate
   legs/trips, numbers not traceable to tool results, claimed actions absent
   from the store, unanswered turns, self-date confusion.
+
+## 1b. Conformance — did we build what was agreed? (weekly)
+
+```bash
+tools/capture-evidence.sh                       # ~8 min, unattended, no key
+python3 tools/spec-extract.py --days 7          # GPT reads the user's own messages
+python3 tools/spec-diff.py                      # merge with docs/SPEC.claude.md
+python3 tools/screen-judge.py evidence/<run>    # exits non-zero on a real gap
+```
+
+- **capture-evidence.sh** erases a simulator, walks the app under
+  `JeevesUITests`, and records THREE channels: the accessibility hierarchy plus
+  a PNG per screen, the unit suite's pass/fail lines, and the notification store.
+  Three channels because most requirements cannot be seen in one — a rule is
+  only visible in a test, a notification only in the daemon's store.
+- **The register is written twice.** `SPEC.claude.md` by hand;
+  `SPEC.gpt.md` by GPT from the transcripts; `spec-diff.py` merges them and
+  marks every ONE-SIDED entry. On its first run that flag caught nine
+  requirements the hand-written register had dropped.
+- **A step never fails the walk.** An unreachable screen records
+  `reachable:false` and the walk continues, because losing forty-five screens to
+  one missing control is how you end up with no evidence at all.
 
 ## 2. Chat trajectories (`tools/scenarios-chat/dialogues.json`)
 

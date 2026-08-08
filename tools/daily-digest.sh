@@ -32,6 +32,7 @@ set -uo pipefail
 # would have failed the next unattended run with nobody at the keyboard to see
 # it. A self-locating path survives the repo being moved again.
 TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DOCS="$(cd "$TOOLS/../docs" && pwd 2>/dev/null || echo "$TOOLS/../docs")"
 DIGEST="/tmp/jeeves-digest.md"
 PREV="/tmp/jeeves-digest-prev.md"
 ICLOUD="$HOME/Library/Mobile Documents/iCloud~abhimanyusingh~me~Jeeves/Documents"
@@ -110,6 +111,34 @@ if [ "$(date +%u)" = "7" ]; then
   else
     echo "cross-check: findings or partial (exit $?) — read the TIER 1 and SUMMARY sections above;"
     echo "             a failed PULL alone is expected when the phone isn't cabled"
+  fi
+fi
+
+# CONFORMANCE: is the app still what the user asked for?
+#
+# Every other check here asks whether the app is HEALTHY. This one asks whether
+# it is COMPLETE — and it is the only check that can catch a requirement that
+# was agreed and never built, because it grades captured evidence against a
+# register extracted from the user's own messages rather than against anything
+# Claude wrote.
+#
+# Weekly, on the same day as the scenario cross-check: it drives a simulator for
+# ~8 minutes and costs a judge call, and the answer only changes when the code
+# does.
+if [ "$(date +%u)" = "7" ]; then
+  echo
+  echo "=== CONFORMANCE ==="
+  if [ -x "$TOOLS/capture-evidence.sh" ]; then
+    RUN=$("$TOOLS/capture-evidence.sh" 2>&1 | tail -1 | sed -E 's/^==> //')
+    if [ -d "$RUN" ]; then
+      # Exits non-zero when something agreed is missing, which is a finding and
+      # not an error — report it either way rather than letting set -e swallow it.
+      python3 "$TOOLS/screen-judge.py" "$RUN" "$REPO_DOCS/SPEC.md" 2>&1 || true
+    else
+      echo "conformance: capture produced no run directory — see above"
+    fi
+  else
+    echo "conformance: tools/capture-evidence.sh missing or not executable"
   fi
 fi
 
