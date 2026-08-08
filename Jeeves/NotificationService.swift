@@ -100,11 +100,24 @@ enum NotificationService {
         // Cheap when already decided: ensureAuthorized only prompts on
         // .notDetermined, and returns the stored answer otherwise.
         //
-        // Except under an evidence run, where the system alert would sit on top
-        // of the first screenshot. It cannot be dismissed from outside either —
-        // `simctl privacy` has no `notifications` service — so the only way to
-        // keep it off the glass is not to ask.
-        guard !EvidenceSeed.isActive else { return }
+        // Under an evidence run, ask PROVISIONALLY instead.
+        //
+        // Skipping the request outright kept the system alert off the first
+        // screenshot, which was the point — but it also meant nothing was ever
+        // authorized, so nothing was ever scheduled, so the capture's
+        // notification channel came back empty and the judge could not tell "the
+        // 07:00 offer does not exist" from "the harness disabled it". A blind
+        // spot I built into my own instrument.
+        //
+        // `.provisional` is the way out: it is granted WITHOUT any user
+        // interaction and shows no alert, and everything schedules and delivers
+        // exactly as normal (quietly, to the notification centre) — which is
+        // precisely where tools/notification-dump.py reads from.
+        if EvidenceSeed.isActive {
+            Task { _ = try? await UNUserNotificationCenter.current()
+                .requestAuthorization(options: [.alert, .sound, .badge, .provisional]) }
+            return
+        }
         Task { _ = await ensureAuthorized() }
     }
 
