@@ -145,4 +145,33 @@ final class ReminderDraftTests: XCTestCase {
             XCTAssertEqual(p.d, 6, "\(recurrence.label) repeats from now — a start date means nothing to it")
         }
     }
+
+    // MARK: the badge names the cadence
+
+    /// `ReminderRecurrence.everyNDays.label` is the literal string "Every…" —
+    /// correct beside the editor's Stepper, useless in a list row, where it
+    /// named neither the cadence nor the interval. tools/visual-judge.py filed
+    /// it as a clipped label and a layout fix was attempted; the text was never
+    /// clipped. This is the checker that keeps the row honest.
+    func testTheRowBadgeNamesTheActualInterval() {
+        let r = Reminder(title: "Water the plants", fireAt: at(2026, 8, 8, 8, 0),
+                         recurrence: .everyNDays, intervalDays: 3)
+        XCTAssertEqual(RemindersListView.cadence(r), "Every 3 days")
+        XCTAssertFalse(RemindersListView.cadence(r).contains("…"),
+                       "the row has no Stepper to supply the number, so it must say it")
+    }
+
+    func testEveryOneDayIsSingular() {
+        let r = Reminder(title: "Stretch", fireAt: at(2026, 8, 8, 8, 0),
+                         recurrence: .everyNDays, intervalDays: 1)
+        XCTAssertEqual(RemindersListView.cadence(r), "Every 1 day")
+    }
+
+    /// The other four recurrences already read correctly and must not change.
+    func testTheFixedRecurrencesKeepTheirOwnWords() {
+        for recurrence in [ReminderRecurrence.once, .daily, .weekdays, .weekly] {
+            let r = Reminder(title: "x", fireAt: at(2026, 8, 8, 8, 0), recurrence: recurrence)
+            XCTAssertEqual(RemindersListView.cadence(r), recurrence.label)
+        }
+    }
 }

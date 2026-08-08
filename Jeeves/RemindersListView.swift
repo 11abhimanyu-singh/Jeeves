@@ -119,9 +119,14 @@ struct RemindersListView: View {
                                 .font(.ui(12, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(Color.accentDeep)
                             if r.recurrence != .once {
-                                Text(r.recurrence.label.uppercased())
+                                // lineLimit+fixedSize keeps DAILY / WEEKDAYS /
+                                // WEEKLY from wrapping mid-word in this tight
+                                // row; `cadence` is what makes the badge say
+                                // anything at all for "every N days".
+                                Text(Self.cadence(r).uppercased())
                                     .font(.ui(9, weight: .bold)).kerning(0.4)
                                     .foregroundStyle(Color.sageDeep)
+                                    .lineLimit(1).fixedSize()
                                     .padding(.horizontal, 6).padding(.vertical, 3)
                                     .background(Capsule().fill(Color.sage.opacity(0.20)))
                             }
@@ -149,6 +154,25 @@ struct RemindersListView: View {
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.surface))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.textPrimary.opacity(0.06), lineWidth: 1))
+    }
+
+    /// What a row's recurrence badge says.
+    ///
+    /// `ReminderRecurrence.everyNDays.label` is the literal string "Every…" —
+    /// the ellipsis is source text (Reminder.swift:36), not truncation. That is
+    /// right in the EDITOR, where a Stepper sits beside the chip and supplies
+    /// the number. A list row has no Stepper, so for three consecutive runs the
+    /// badge on "Water the plants" read "EVERY…" and named no cadence and no
+    /// interval — the one recurrence that needs both.
+    ///
+    /// tools/visual-judge.py caught it and called it a clipped label; it was
+    /// never clipped. The accessibility label is the proof, because SwiftUI
+    /// reports the FULL string there however the text is drawn: the dump reads
+    /// `Water the plants, 8:00 AM, EVERY…`. A layout fix could never have
+    /// touched this, and the first one attempted here did not.
+    static func cadence(_ r: Reminder) -> String {
+        guard r.recurrence == .everyNDays else { return r.recurrence.label }
+        return "Every \(r.intervalDays) day\(r.intervalDays == 1 ? "" : "s")"
     }
 
     /// Remove a reminder entirely — and its pending notification with it.
@@ -254,7 +278,7 @@ struct RemindersListView: View {
 
     private func chipRow(_ labels: [String], selected: @escaping (Int) -> Bool,
                          pick: @escaping (Int) -> Void) -> some View {
-        ChipScrollRow(labels: labels, selected: selected, pick: pick)
+        ChipWrapRow(labels: labels, selected: selected, pick: pick)
     }
 
     // MARK: Helpers + mutations
@@ -399,7 +423,7 @@ struct ReminderEditSheet: View {
                     // hand-copied duplicate of it, which is why the fifth
                     // recurrence broke both screens and fixing one would have
                     // left the other reading "Weekda / ys".
-                    ChipScrollRow(labels: ReminderRecurrence.allCases.map(\.label),
+                    ChipWrapRow(labels: ReminderRecurrence.allCases.map(\.label),
                                   selected: { ReminderRecurrence.allCases[$0] == recurrence },
                                   pick: { recurrence = ReminderRecurrence.allCases[$0] })
                 }
@@ -444,7 +468,49 @@ struct ReminderEditSheet: View {
 }
 
 
-/// Chips that never break a word.
+/// Lays children out left to right, starting a new line when the next one will
+/// not fit. Each child is proposed its own ideal size, so nothing is ever
+/// squeezed narrow enough to wrap its text.
+///
+/// LIMIT: a single child wider than the whole container still overflows —
+/// nothing here can divide a word that does not fit on a line by itself.
+struct WrapLayout: Layout {
+    var spacing: CGFloat = 7
+    var lineSpacing: CGFloat = 7
+
+    private func flow(_ subviews: Subviews, width: CGFloat,
+                      place: ((LayoutSubview, CGPoint, CGSize) -> Void)? = nil) -> CGSize {
+        var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0, widest: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > 0, x + spacing + size.width > width {
+                y += lineHeight + lineSpacing
+                x = 0
+                lineHeight = 0
+            }
+            if x > 0 { x += spacing }
+            place?(view, CGPoint(x: x, y: y), size)
+            x += size.width
+            widest = max(widest, x)
+            lineHeight = max(lineHeight, size.height)
+        }
+        return CGSize(width: widest, height: y + lineHeight)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        flow(subviews, width: proposal.width ?? .infinity)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize,
+                       subviews: Subviews, cache: inout ()) {
+        _ = flow(subviews, width: bounds.width) { view, point, size in
+            view.place(at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y),
+                       proposal: ProposedViewSize(size))
+        }
+    }
+}
+
+/// Chips that neither break a word nor run off the edge.
 ///
 /// This started as a plain HStack sized for four, hand-copied into the edit
 /// sheet. A fifth repeat option ("Every…") and a fifth time option ("Other…")
@@ -452,35 +518,33 @@ struct ReminderEditSheet: View {
 /// is to wrap its label — so both sheets read "Weekda / ys", "Weekl / y",
 /// "Every / …".
 ///
-/// It scrolls horizontally now, and it is ONE component rather than two
-/// copies. A row that can always take one more chip is the only version that
-/// survives the next option being added, a larger Dynamic Type setting, or a
-/// longer word in another language. `lineLimit(1)` with `fixedSize()` is the
-/// guarantee that nothing wraps; the scroll is what keeps it reachable.
-struct ChipScrollRow: View {
+/// Scrolling it horizontally fixed the wrap and bought a clip: tools/visual-judge.py
+/// came back with "Ot" — the "Other…" chip, the escape hatch to any time at all,
+/// sliced by the screen edge and reachable only by a swipe nothing advertised.
+/// Wrapping to a second line gives up neither. It is still ONE component rather
+/// than two copies, and it still survives the next option being added or a
+/// larger Dynamic Type setting — now by growing downward, where there is room.
+struct ChipWrapRow: View {
     let labels: [String]
     let selected: (Int) -> Bool
     let pick: (Int) -> Void
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 7) {
-                ForEach(Array(labels.enumerated()), id: \.offset) { i, label in
-                    let on = selected(i)
-                    Button { pick(i) } label: {
-                        Text(label).font(.ui(12.5, weight: .semibold))
-                            .lineLimit(1).fixedSize()
-                            .foregroundStyle(on ? Color.accentDeep : Color.textSoft)
-                            .padding(.horizontal, 12).padding(.vertical, 9)
-                            .background(Capsule().fill(on ? Color.accent.opacity(0.15) : Color.surface))
-                            .overlay(Capsule().stroke(on ? Color.accent : Color.textPrimary.opacity(0.08), lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(on ? [.isSelected] : [])
+        WrapLayout(spacing: 7, lineSpacing: 7) {
+            ForEach(Array(labels.enumerated()), id: \.offset) { i, label in
+                let on = selected(i)
+                Button { pick(i) } label: {
+                    Text(label).font(.ui(12.5, weight: .semibold))
+                        .lineLimit(1).fixedSize()
+                        .foregroundStyle(on ? Color.accentDeep : Color.textSoft)
+                        .padding(.horizontal, 12).padding(.vertical, 9)
+                        .background(Capsule().fill(on ? Color.accent.opacity(0.15) : Color.surface))
+                        .overlay(Capsule().stroke(on ? Color.accent : Color.textPrimary.opacity(0.08), lineWidth: 1))
                 }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? [.isSelected] : [])
             }
-            .padding(.vertical, 1)   // room for the capsule stroke
         }
-        .scrollBounceBehavior(.basedOnSize)
+        .padding(.vertical, 1)   // room for the capsule stroke
     }
 }

@@ -105,6 +105,13 @@ struct ActivityPickerSheet: View {
             }
             .padding(.top, 6)
 
+            // The list ends flush against the footer, so a row half-cut by the
+            // scroll edge read as running INTO the overbooked warning —
+            // tools/visual-judge.py filed it as text overlapping "Interview prep
+            // — Strategy". Nothing actually overlaps; there was simply no line
+            // saying where the scrolling stops and the fixed footer starts.
+            Divider().overlay(Color.textPrimary.opacity(0.14))
+
             footer
         }
         .background(Color.bg)

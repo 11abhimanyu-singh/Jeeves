@@ -107,6 +107,14 @@ final class UIContractTests: XCTestCase {
         return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
     }
 
+    /// The live value of a palette token, so an assertion tracks the app
+    /// instead of a hex someone typed here once.
+    private func hex(_ color: Color) -> String {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a)
+        return String(format: "%02X%02X%02X", Int(r * 255), Int(g * 255), Int(b * 255))
+    }
+
     func testForegroundTokensClearAAOnEverySurface() {
         // accent (#C67139) and sage (#7A8A5E) failed on cards at 2.69 and
         // 2.79; the deep variants replaced them everywhere they carried text.
@@ -127,8 +135,13 @@ final class UIContractTests: XCTestCase {
 
     func testDisabledButtonKeepsItsLabelReadable() {
         // The disabled Save filled with textMuted at 50% alpha and kept white
-        // text — around 2.2:1. Solid textMuted is 5.6:1.
-        XCTAssertGreaterThanOrEqual(contrast("FFFFFF", "6E6759"), 4.5,
+        // text — around 2.2:1. Solid textMuted clears the bar comfortably.
+        //
+        // The hex lives in ONE place. This assertion used to hardcode "6E6759",
+        // and when the palette moved to "625B4F" it went on passing while
+        // testing a colour the app no longer contains — a green test for a
+        // constant nothing renders.
+        XCTAssertGreaterThanOrEqual(contrast(hex(.textMuted), "FFFFFF"), 4.5,
                                     "white on a disabled button must stay readable")
     }
 

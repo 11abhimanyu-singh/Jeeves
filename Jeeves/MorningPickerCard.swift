@@ -167,67 +167,153 @@ struct MorningPickerCard: View {
 
     // MARK: rows
 
+    /// One activity, its duration, and the controls that change both.
+    ///
+    /// tools/visual-judge.py caught "Photography" rendering as "Photograph / y",
+    /// a word cut in half. Neither side of that could give way: the targets went
+    /// to 44pt to fix a real accessibility finding, and a broken word is not a
+    /// layout.
+    ///
+    /// So the row stops insisting on one line. `ViewThatFits` measures the
+    /// single-line arrangement — the name there is `lineLimit(1).fixedSize()`,
+    /// so it reports the width it actually wants rather than quietly wrapping —
+    /// and when that does not fit, the name takes its own line with the controls
+    /// beneath. This also holds at large Dynamic Type, where no fixed column
+    /// division could.
+    ///
+    /// BE CLEAR ABOUT THE COST, because the first version of this comment was
+    /// not. The fixed chrome is 268pt — tickBox 44, three 9pt gaps, a 4pt
+    /// Spacer, and 193pt of controls. On the 402pt capture device the card's
+    /// content is 342pt wide, so the name gets 74pt, NOT the ~110pt originally
+    /// claimed here. Measured off the a11y frames in
+    /// evidence/20260808-193634/steps/033__chat.morning_card__a11y.json, 9 of
+    /// the day's 11 rows take the stacked branch — only "Chores" (43.3pt) and
+    /// "Lunch" (37.3pt) stay on one line. Stacking is the normal case, not the
+    /// exception, and it roughly doubles the card's height.
+    ///
+    /// That is a real trade and it is the one deliberately taken: a tall card
+    /// scrolls, and the summary and "Plan my day" stay on screen because chat
+    /// pins the newest turn. A word cut in half does not scroll. If the height
+    /// ever needs winning back, the room is in the 193pt of controls — moving
+    /// the bin into the reorder mode frees 53pt — not in the name column.
+    ///
+    /// Reordering swaps those controls for two arrows, ~97pt, so there every row
+    /// but the longest name fits on one line. That is why the stacked branch
+    /// indents its controls under the name instead of right-aligning them: one
+    /// row taking the fallback among ten that do not must still read as one row.
     private func row(_ item: MorningPrompt.Candidate) -> some View {
-        let on = ticked.contains(item.name)
-        return HStack(spacing: 9) {
-            Button {
-                if on { ticked.remove(item.name) } else { ticked.insert(item.name) }
-            } label: {
-                Image(systemName: on ? "checkmark.square.fill" : "square")
-                    .font(.ui(18)).foregroundStyle(on ? Color.accent : Color.textMuted)
-                    .frame(width: Touch.target, height: Touch.target)
-                    .contentShape(Rectangle())
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 9) {
+                tickBox(item)
+                nameColumn(item, wraps: false)
+                Spacer(minLength: 4)
+                controls(item)
             }
-            .buttonStyle(.plain)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(item.name).font(.ui(13))
-                    .foregroundStyle(on ? Color.textPrimary : Color.textMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-                if !item.dueToday {
-                    Text("not usually today").font(.ui(10.5)).foregroundStyle(Color.textSoft)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 9) {
+                    tickBox(item)
+                    nameColumn(item, wraps: true)
+                    Spacer(minLength: 4)
                 }
-            }
-            Spacer(minLength: 4)
-
-            if reordering {
-                let names = candidates.map(\.name)
-                let index = names.firstIndex(of: item.name) ?? 0
-                stepButton("arrow.up", enabled: index > 0) { move(item.name, by: -1) }
-                stepButton("arrow.down", enabled: index < names.count - 1) { move(item.name, by: 1) }
-            } else {
-
-            // Buttons, not a Stepper: a Stepper is the same class of control as
-            // the Toggle that was completely dead to touch in this card, and
-            // this row already proves Buttons work here.
-            stepButton("minus", enabled: on && length(item) > Self.floorMinutes) {
-                nudge(item, by: -Self.step)
-            }
-            Text("\(length(item))m")
-                .font(.ui(11.5, weight: minutes[item.name] == nil ? .regular : .semibold))
-                .foregroundStyle(minutes[item.name] == nil ? Color.textSoft : Color.accentDeep)
-                .monospacedDigit()
-                .frame(minWidth: 34)
-            stepButton("plus", enabled: on && length(item) < Self.ceilingMinutes) {
-                nudge(item, by: Self.step)
-            }
-
-            // Ticking off says "not today"; the bin says "not on this list".
-            // It is today's list only — tomorrow the cadence puts it back.
-            Button {
-                binned.insert(item.name)
-                ticked.remove(item.name)
-            } label: {
-                Image(systemName: "trash").font(.ui(12.5)).foregroundStyle(Color.textMuted)
-                    .frame(width: Touch.target, height: Touch.target).contentShape(Rectangle())
-                    .accessibilityLabel("Remove \(item.name) from today's list")
-            }
-            .buttonStyle(.plain)
+                // Indented under the name, NOT pushed to the trailing edge.
+                // Right-aligning them left a void where the label should be,
+                // and in reorder mode — where the chrome is small enough that
+                // every row but the longest stays on one line — that produced a
+                // single orphaned pair of arrows floating beside nothing.
+                // tools/visual-judge.py filed it as misaligned on "Interview
+                // prep — Product Sense" and was right. Sitting directly beneath
+                // the name, they read as belonging to it.
+                HStack(spacing: 9) {
+                    controls(item)
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, Touch.target + 9)
             }
         }
     }
 
-    private func stepButton(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+    private func tickBox(_ item: MorningPrompt.Candidate) -> some View {
+        let on = ticked.contains(item.name)
+        return Button {
+            if on { ticked.remove(item.name) } else { ticked.insert(item.name) }
+        } label: {
+            Image(systemName: on ? "checkmark.square.fill" : "square")
+                .font(.ui(18)).foregroundStyle(on ? Color.accent : Color.textMuted)
+                .frame(width: Touch.target, height: Touch.target)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// `wraps: false` is the measuring form — it refuses to break, so
+    /// `ViewThatFits` can tell that the single-line row is too narrow instead of
+    /// being handed a silently wrapped label that "fits".
+    @ViewBuilder
+    private func nameColumn(_ item: MorningPrompt.Candidate, wraps: Bool) -> some View {
+        let on = ticked.contains(item.name)
+        VStack(alignment: .leading, spacing: 1) {
+            Text(item.name).font(.ui(13))
+                .foregroundStyle(on ? Color.textPrimary : Color.textMuted)
+                .lineLimit(wraps ? nil : 1)
+                .fixedSize(horizontal: !wraps, vertical: true)
+            if !item.dueToday {
+                Text("not usually today").font(.ui(10.5)).foregroundStyle(Color.textSoft)
+                    .lineLimit(1).fixedSize()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func controls(_ item: MorningPrompt.Candidate) -> some View {
+        let on = ticked.contains(item.name)
+        HStack(spacing: 9) {
+            if reordering {
+                let names = candidates.map(\.name)
+                let index = names.firstIndex(of: item.name) ?? 0
+                stepButton("arrow.up", label: "Move \(item.name) up",
+                           enabled: index > 0) { move(item.name, by: -1) }
+                stepButton("arrow.down", label: "Move \(item.name) down",
+                           enabled: index < names.count - 1) { move(item.name, by: 1) }
+            } else {
+                // Buttons, not a Stepper: a Stepper is the same class of control
+                // as the Toggle that was completely dead to touch in this card,
+                // and this row already proves Buttons work here.
+                stepButton("minus", label: "\(item.name): take off 15 minutes",
+                           enabled: on && length(item) > Self.floorMinutes) {
+                    nudge(item, by: -Self.step)
+                }
+                Text("\(length(item))m")
+                    .font(.ui(11.5, weight: minutes[item.name] == nil ? .regular : .semibold))
+                    .foregroundStyle(minutes[item.name] == nil ? Color.textSoft : Color.accentDeep)
+                    .monospacedDigit()
+                    .frame(minWidth: 34)
+                stepButton("plus", label: "\(item.name): add 15 minutes",
+                           enabled: on && length(item) < Self.ceilingMinutes) {
+                    nudge(item, by: Self.step)
+                }
+
+                // Ticking off says "not today"; the bin says "not on this list".
+                // It is today's list only — tomorrow the cadence puts it back.
+                Button {
+                    binned.insert(item.name)
+                    ticked.remove(item.name)
+                } label: {
+                    Image(systemName: "trash").font(.ui(12.5)).foregroundStyle(Color.textMuted)
+                        .frame(width: Touch.target, height: Touch.target).contentShape(Rectangle())
+                        .accessibilityLabel("Remove \(item.name) from today's list")
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// `label` is required rather than derived from the symbol. It used to be
+    /// `symbol == "plus" ? "Add 15 minutes" : "Take off 15 minutes"`, so when
+    /// the reordering branch reused this helper for the two arrows, both
+    /// announced "Take off 15 minutes" — no direction, and a duration claim that
+    /// was false for both. A VoiceOver user could not tell the arrows apart.
+    private func stepButton(_ symbol: String, label: String,
+                            enabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.ui(11, weight: .bold))
@@ -237,7 +323,7 @@ struct MorningPickerCard: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
-        .accessibilityLabel(symbol == "plus" ? "Add 15 minutes" : "Take off 15 minutes")
+        .accessibilityLabel(label)
     }
 
     /// The gym hours worth one tap. Anything else is the picker underneath —
@@ -275,7 +361,7 @@ struct MorningPickerCard: View {
         if gymOn {
             Text("starts").font(.ui(12)).foregroundStyle(Color.textSoft)
                 .padding(.top, 6).padding(.bottom, 4)
-            ChipScrollRow(labels: Self.gymHours.map { GeneratedBlock.hhmm($0 * 60) },
+            ChipWrapRow(labels: Self.gymHours.map { GeneratedBlock.hhmm($0 * 60) },
                           selected: { gymMinute == Self.gymHours[$0] * 60 },
                           pick: { setGymHour(Self.gymHours[$0]) })
             HStack {

@@ -26,13 +26,22 @@ extension Color {
     static let surface = Color(hex: "EBDDC5")
     static let surfaceDeep = Color(hex: "DCD3C4")
     static let textPrimary = Color(hex: "201E1D")
-    static let textSoft = Color(hex: "645C50")
-    // Darkened from #A19786 (WCAG 2.42:1 on bg — failed AA) to clear 4.5:1 on bg
-    // (now 4.71) while staying a warm-taupe tier lighter than textSoft. On cards
-    // (surface) it reaches 4.18 — AA for large/semibold captions; use textSoft for
-    // small regular text on cards. For strict AA everywhere use #675E4E (converges
-    // toward textSoft).
-    static let textMuted = Color(hex: "6E6759")
+
+    // Every text tier clears WCAG AA (4.5:1) on ALL THREE grounds, not just on
+    // `bg`. The previous values cleared `bg` only and carried a comment asking
+    // readers to "use textSoft for small text on cards" — a rule stated in a
+    // comment is a request, and six screens declined it. `textSoft` would not
+    // have saved them either: at #645C50 it was 4.44 on surfaceDeep, a fail.
+    //
+    // Ground:            bg     surface  surfaceDeep
+    //   textPrimary     13.95    12.40      11.19
+    //   textSoft         6.89     6.13       5.53
+    //   textMuted        5.64     5.01       4.53
+    //
+    // PaletteContrastTests is the checker that makes this a rule. Change a hex
+    // here and it fails there.
+    static let textSoft = Color(hex: "554E44")
+    static let textMuted = Color(hex: "625B4F")
     static let accent = Color(hex: "C67139")
     static let accentDeep = Color(hex: "8C491A")
     static let sage = Color(hex: "7A8A5E")

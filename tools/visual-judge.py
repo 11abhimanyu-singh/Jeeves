@@ -72,6 +72,42 @@ frames. An eyeballed ratio or an eyeballed pixel count is worse than none, and
 these images have been downscaled, so any size you infer from them is wrong.
 DO NOT report taste — spacing you would have chosen differently, wording, or
 visual hierarchy. Only defects.
+
+DO NOT report SCROLL POSITION. These screens are photographs of a scrolling app
+taken mid-scroll, and every one of them has content crossing a boundary as a
+result. None of the following is a defect:
+  - text meeting the TOP edge, sliced by the fixed header above it
+  - text meeting the BOTTOM edge, sliced by the tab bar below it
+  - a row or card that simply runs past the top or bottom of the screen
+  - the round orange button in the bottom-right corner sitting over whatever
+    happens to be scrolled beneath it — it floats over content by design
+Scroll the screen in your mind: if one swipe would reveal the rest of that text
+intact, it is scroll position and you must not report it.
+
+A real clip is text cut off INSIDE its own row or card while that row still has
+visible empty space, with NO ellipsis marking it.
+
+Three more things that look like defects and are not. Each of these was reported
+against this app and each was wrong:
+
+  - AN ELLIPSIS IS NOT A CLIP. "245 min · Genuinely open — Product Sens…" is the
+    app choosing one line and saying so, with the rest one tap away. A defect is
+    text that stops mid-glyph having promised nothing. If you can see "…", it is
+    not a finding.
+
+  - WRAPPING AT A WORD BOUNDARY IS NOT A DEFECT. "Renew / passport" is a label
+    that needed two lines and took them. Report a wrap only when a WORD is
+    broken across the two lines — "Photograph / y" — which no correct layout
+    ever produces.
+
+  - A HORIZONTALLY SCROLLING STRIP MAY SHOW A PARTIAL ITEM AT ITS TRAILING EDGE.
+    Chat's suggestion chips scroll sideways on purpose, to keep one row of
+    height instead of two; the half-visible chip is the cue that there are more.
+    Report it only if the strip does not scroll.
+
+The test for all of these is the same one: name what the user loses. If they lose
+nothing — the text is marked, or complete on the next line, or one swipe away —
+it is not a finding.
 If a screen looks fine, say so and move on. An empty findings list is a valid
 and common answer.
 
@@ -293,6 +329,46 @@ def judge(key: str, batch: list[tuple[str, Path]]) -> list[dict]:
     return json.loads(body["choices"][0]["message"]["content"]).get("findings", [])
 
 
+def only_screens_the_walk_actually_reached(run: Path, shots: list[Path]) -> tuple[list[Path], dict]:
+    """Drop the steps the walk itself said were not what their label claims.
+
+    EvidenceStep records two flags per step and, until this function existed,
+    nothing on this side read either one. It cost real credibility: in run
+    20260808-171059 the walk got stuck on the "Daily routine" sheet — which
+    dismisses with a back chevron, not the Close/Done the walk knows — and
+    photographed it for twelve consecutive steps under twelve different names,
+    among them `chat`, `planner.travel` and `planner.activity_picker`. 54 steps
+    yielded 37 distinct images. This judge then dutifully reported a layout
+    finding against `tasks.add_todo` while looking at the morning chat card.
+
+    A verdict against a screenshot of the wrong screen is worse than no verdict,
+    so those steps are removed here rather than graded. The counts are printed —
+    a harness that silently drops evidence reads as "all clear" when it is not.
+    """
+    manifest = run / "walkthrough.json"
+    if not manifest.exists():
+        return shots, {}
+    try:
+        steps = json.loads(manifest.read_text()).get("steps", [])
+    except (json.JSONDecodeError, OSError):
+        return shots, {}
+
+    stale = {s["label"] for s in steps if s.get("changed") is False}
+    missing = {s["label"] for s in steps if s.get("reachable") is False}
+    dropped: dict[str, list[str]] = {}
+    kept = []
+    for shot in shots:
+        label = shot.name.split("__")[1]
+        if label in missing:
+            dropped.setdefault("the walk never reached this screen", []).append(label)
+        elif label in stale:
+            dropped.setdefault("identical to the previous step — the walk did not "
+                               "navigate, so this image is not this screen", []).append(label)
+        else:
+            kept.append(shot)
+    return kept, dropped
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("run")
@@ -305,6 +381,13 @@ def main() -> None:
     shots = sorted((run / "steps").glob("*__screen.png"))
     if not shots:
         sys.exit(f"No screenshots in {run/'steps'} — run tools/capture-evidence.sh first.")
+
+    shots, dropped = only_screens_the_walk_actually_reached(run, shots)
+    for reason, labels in dropped.items():
+        print(f"  SKIPPED  {len(labels)} step(s) — {reason}: {', '.join(labels)}")
+    if not shots:
+        sys.exit("Every step was a duplicate or unreachable — nothing to judge. "
+                 "Fix the walk before trusting any verdict from this run.")
 
     tokens = palette()
     print(f"palette: {len(tokens)} tokens from Jeeves/ContentView.swift")
@@ -352,9 +435,17 @@ def main() -> None:
                 findings.append({"step": f"batch {index}", "kind": "not-examined",
                                  "text": "", "what": f"this batch was not looked at: {exc}"})
 
+    # Never a rate that hides its denominator. "screensExamined" is the
+    # POST-filter count, so on its own it reads as full coverage of a walk that
+    # may have skipped a third of its steps — and "0 findings" out of 24 of 54
+    # screens is not the same statement as "0 findings" out of 54.
+    skipped = sorted(label for labels in dropped.values() for label in labels)
     out = {
         "run": run.name,
         "screensExamined": len(shots),
+        "screensCaptured": len(shots) + len(skipped),
+        "screensSkipped": skipped,
+        "skippedReasons": {reason: labels for reason, labels in dropped.items()},
         "measured": table,
         "measuredUnsafe": unsafe,
         "observed": seen,
@@ -363,7 +454,8 @@ def main() -> None:
     }
     (run / "visual.json").write_text(json.dumps(out, indent=2))
 
-    print(f"\nlayout findings: {len(findings)}")
+    print(f"\nlayout findings: {len(findings)}"
+          f"  (across {len(shots)} of {len(shots) + len(skipped)} captured screens)")
     for f in findings[:20]:
         print(f"  {f.get('kind','?'):13} {f.get('step','?'):28} {f.get('text','')[:40]!r} — {f.get('what','')[:70]}")
     print(f"→ {run/'visual.json'}")

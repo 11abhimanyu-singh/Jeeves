@@ -212,26 +212,70 @@ final class EvidenceWalkthroughTests: XCTestCase {
     /// far more often than they support the drag, so try those first and fall
     /// back to the gesture — then verify against the tab bar, which only exists
     /// when nothing is covering it.
+    ///
+    /// That fix was not enough, and the way it failed is the lesson. Run
+    /// 20260808-171059 stuck on Settings › Daily routine for twelve consecutive
+    /// steps, filed under `chat`, `planner.travel`, `planner.activity_picker`
+    /// and nine other names. Daily routine is a detail PUSHED inside the
+    /// Settings sheet: it closes with a back chevron carrying no text at all —
+    /// `identifier: "BackButton"`, `label: "Settings"` — so all four labels
+    /// missed, the drag could not fire on a scrolled sheet, and the walk went on
+    /// confidently photographing the wrong screen. A vocabulary of four
+    /// hard-coded words is not a way out of an arbitrary navigation stack;
+    /// unwinding one level at a time is. Back first, then close.
     @discardableResult
     private func dismissSheet() -> Bool {
-        for _ in 0..<3 {
+        for _ in 0..<6 {
             if atRoot() { return true }
-            // A sheet scrolled to its bottom will not drag-dismiss, and its
-            // Close button is off-screen — which is how Settings swallowed
-            // nineteen consecutive steps.
-            var closed = false
-            for label in ["Close", "Done", "Cancel", "Minimise chat"] {
-                let button = app.buttons[label].firstMatch
-                if button.exists && button.isHittable { button.tap(); closed = true; break }
+
+            // 1. Unwind any pushed detail first. Settings › Daily routine ›
+            //    Chores is three levels deep, and no Close is offered until the
+            //    stack is back at the sheet's own root.
+            let back = app.buttons["BackButton"].firstMatch
+            if back.exists && back.isHittable {
+                back.tap()
+                _ = app.wait(for: .runningForeground, timeout: 1)
+                continue
             }
-            if !closed {
-                let top = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06))
-                let bottom = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98))
-                top.press(forDuration: 0.05, thenDragTo: bottom)
-            }
+
+            // 2. Close the sheet — and if the button is not within reach, scroll
+            //    the sheet up and look again. This is the step that was missing.
+            //    `settings.scrolled` deliberately leaves Settings at its bottom,
+            //    which carries its Close button off the top of the screen; the
+            //    file has warned about that since the first run and still only
+            //    ever looked for the button where it already wasn't.
+            if tapCloseControl() { _ = app.wait(for: .runningForeground, timeout: 1); continue }
+            scrollToTop()
+            if tapCloseControl() { _ = app.wait(for: .runningForeground, timeout: 1); continue }
+
+            // 3. The drag, which only ever works on a sheet already at its top —
+            //    hence after the scroll, not before it.
+            let top = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06))
+            let bottom = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98))
+            top.press(forDuration: 0.05, thenDragTo: bottom)
             _ = app.wait(for: .runningForeground, timeout: 1)
         }
+        if atRoot() { return true }
+
+        // 4. LAST RESORT, and the only one that actually bounds the damage.
+        //    Three consecutive runs lost EVERY screen after Settings to a single
+        //    sheet that would not close — 18 of 54 steps in 20260808-190927,
+        //    including both screens whose layout fixes this run existed to
+        //    verify. Whatever new sheet does this next, one stuck modal must
+        //    cost one screen, not the rest of the walk. EvidenceSeed rebuilds
+        //    the same fixture on every launch, so relaunching costs determinism
+        //    nothing, and every step re-navigates from a tab or the menu anyway.
+        app.terminate()
+        app.launch()
         return atRoot()
+    }
+
+    private func tapCloseControl() -> Bool {
+        for label in ["Close", "Done", "Cancel", "Minimise chat"] {
+            let button = app.buttons[label].firstMatch
+            if button.exists && button.isHittable { button.tap(); return true }
+        }
+        return false
     }
 
     /// The tab bar is only reachable with no sheet over it, so it is the
