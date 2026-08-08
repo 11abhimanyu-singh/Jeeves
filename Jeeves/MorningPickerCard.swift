@@ -32,6 +32,14 @@ struct MorningPickerCard: View {
     /// own duration", which is why this is a sparse map rather than a copy of
     /// every row's length.
     @State private var minutes: [String: Int] = [:]
+    /// The user's order for today, by planner name. Empty until they move
+    /// something — the routine's own order is the default shape of a day.
+    @State private var order: [String] = []
+    /// Reordering is a MODE, not extra buttons on every row. The row already
+    /// carries a checkbox, a name, minus, minutes, plus and a bin; two more
+    /// arrows would be eight controls across 402 points. Swapping the
+    /// duration controls for arrows keeps every target at its full width.
+    @State private var reordering = false
     @State private var gymOn = false
     @State private var gymTime = Date()
     @State private var loaded = false
@@ -41,7 +49,25 @@ struct MorningPickerCard: View {
     @State private var planned = false
 
     private var candidates: [MorningPrompt.Candidate] {
-        MorningPrompt.candidates(routine: routine, on: day).filter { !binned.contains($0.name) }
+        let rows = MorningPrompt.candidates(routine: routine, on: day)
+            .filter { !binned.contains($0.name) }
+        guard !order.isEmpty else { return rows }
+        let rank = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
+        return rows.enumerated()
+            .sorted { ($0.element.name.rank(rank, $0.offset, order.count))
+                    < ($1.element.name.rank(rank, $1.offset, order.count)) }
+            .map(\.element)
+    }
+
+    /// Move a row one place, and remember the WHOLE order — storing only the
+    /// moved name would leave the rest ambiguous the moment the routine changes.
+    private func move(_ name: String, by delta: Int) {
+        var names = candidates.map(\.name)
+        guard let from = names.firstIndex(of: name) else { return }
+        let to = from + delta
+        guard names.indices.contains(to) else { return }
+        names.swapAt(from, to)
+        order = names
     }
     private var state: DailyPlanState? { planStates.first { $0.date == day.startOfDay } }
     private var dayEvents: [DailyEvent] {
@@ -89,6 +115,23 @@ struct MorningPickerCard: View {
                 .font(.ui(13)).foregroundStyle(Color.textSoft)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, 11)
+
+            HStack {
+                Spacer()
+                Button { reordering.toggle() } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: reordering ? "checkmark" : "arrow.up.arrow.down")
+                            .font(.ui(10.5, weight: .bold))
+                        Text(reordering ? "Done" : "Reorder").font(.ui(11.5, weight: .semibold))
+                    }
+                    .foregroundStyle(Color.accentDeep)
+                    .padding(.horizontal, 10).frame(minHeight: 30)
+                    .background(Capsule().fill(Color.accent.opacity(reordering ? 0.2 : 0.1)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(reordering ? "Finish reordering" : "Reorder activities")
+            }
+            .padding(.bottom, 6)
 
             ForEach(candidates) { item in row(item) }
 
@@ -147,6 +190,13 @@ struct MorningPickerCard: View {
             }
             Spacer(minLength: 4)
 
+            if reordering {
+                let names = candidates.map(\.name)
+                let index = names.firstIndex(of: item.name) ?? 0
+                stepButton("arrow.up", enabled: index > 0) { move(item.name, by: -1) }
+                stepButton("arrow.down", enabled: index < names.count - 1) { move(item.name, by: 1) }
+            } else {
+
             // Buttons, not a Stepper: a Stepper is the same class of control as
             // the Toggle that was completely dead to touch in this card, and
             // this row already proves Buttons work here.
@@ -173,6 +223,7 @@ struct MorningPickerCard: View {
                     .accessibilityLabel("Remove \(item.name) from today's list")
             }
             .buttonStyle(.plain)
+            }
         }
     }
 
@@ -263,6 +314,7 @@ struct MorningPickerCard: View {
                 .filter(\.dueToday).map(\.name))
         }
         minutes = state?.durationOverrides ?? [:]
+        order = state?.activityOrder ?? []
         if let state {
             gymOn = state.hasGymToday
             if let m = state.gymMinute,
@@ -291,10 +343,19 @@ struct MorningPickerCard: View {
         // Only for rows still on the list — a binned row's nudge is meaningless
         // and would otherwise sit in the store forever.
         s.durationOverrides = minutes.filter { ticked.contains($0.key) }
+        s.activityOrder = order.filter { ticked.contains($0) }
         s.hasGymToday = gymOn
         s.gymMinute = gymOn ? gymMinute : nil
         context.saveOrLog("morning.confirm")
         planned = true
         onPlan(day)
+    }
+}
+
+private extension String {
+    /// Rank for the per-day order: placed names first in their chosen order,
+    /// everything else after, keeping its original relative position.
+    func rank(_ order: [String: Int], _ fallbackIndex: Int, _ placed: Int) -> Int {
+        order[self] ?? (placed + fallbackIndex)
     }
 }

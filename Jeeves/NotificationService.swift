@@ -54,7 +54,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         // cold launch has no observer yet, a tap while the app is open has no
         // second launch. Whichever arrives first wins; the flag is cleared on
         // read so it can't fire twice.
-        if let day = info[MorningPromptService.userInfoKey] as? String {
+        if let day = MorningPromptService.offeredDay(inUserInfo: info) {
             Task { @MainActor in
                 NotificationDelegate.morningPromptTap = day
                 NotificationCenter.default.post(name: .jeevesOpenMorningPrompt, object: nil)

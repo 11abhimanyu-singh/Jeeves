@@ -254,14 +254,27 @@ def main():
     bad = [r for r in runs if r["workoutUUID"] is not None and r["workoutUUID"] not in workout_by_uuid]
     check("no run sessions pointing at a missing workout", bad, lambda r: "run workout missing")
 
+    # TWO SESSIONS OF THE SAME TYPE ON ONE DAY IS NORMAL, NOT AN ANOMALY.
+    #
+    # The user splits workouts: a water break, a phone call, the toilet — the
+    # watch ends one session and starts another, and two weightlifting rows land
+    # on the same date. That is the behaviour working, and 3-4 Aug are real
+    # examples of it.
+    #
+    # A genuine duplicate IMPORT is a different thing: identical type, identical
+    # duration AND the same start minute. Two real halves of a split session
+    # essentially never share a start time, so requiring it separates the
+    # duplicate from the perfectly ordinary.
     bad = []
     for i, a in enumerate(workouts):
         for b in workouts[i + 1:]:
-            if (a["date"] and b["date"] and day(a["date"]) == day(b["date"])
-                    and a["type"] == b["type"] and a["dur"] == b["dur"] and a["uuid"] != b["uuid"]):
+            if (a["date"] and b["date"] and a["type"] == b["type"]
+                    and a["dur"] == b["dur"] and a["uuid"] != b["uuid"]
+                    and a["date"].replace(second=0, microsecond=0)
+                        == b["date"].replace(second=0, microsecond=0)):
                 bad.append((a, b))
-    check("no cloned workouts (same day, type, duration)", bad,
-          lambda p: f"'{p[0]['title'][:30]}' x2 on {day(p[0]['date'])} ({p[0]['dur']} min)", warn=True)
+    check("no duplicate-imported workouts (same start minute, type, duration)", bad,
+          lambda p: f"'{p[0]['title'][:30]}' x2 at {p[0]['date']} ({p[0]['dur']} min)", warn=True)
 
     bad = [w for w in workouts if (w["dur"] or 0) < 0 or (w["dur"] or 0) > 600
            or (w["dist"] or 0) < 0]

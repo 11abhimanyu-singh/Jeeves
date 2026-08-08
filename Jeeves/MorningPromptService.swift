@@ -51,6 +51,18 @@ enum MorningPromptService {
         return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
+    /// The day a tapped notification is offering, or nil if this banner is
+    /// nothing to do with the morning offer.
+    ///
+    /// Pure, and separate from `NotificationDelegate`, because the delegate
+    /// cannot be exercised without a real notification: the ROUTING is the part
+    /// worth pinning, and leaving it inline meant the only evidence that
+    /// tapping the offer opens chat was that I said so.
+    static func offeredDay(inUserInfo info: [AnyHashable: Any]) -> String? {
+        guard let day = info[userInfoKey] as? String, !day.isEmpty else { return nil }
+        return day
+    }
+
     static func id(for day: Date, cal: Calendar = .current) -> String {
         idPrefix + dayKey(day, cal: cal)
     }

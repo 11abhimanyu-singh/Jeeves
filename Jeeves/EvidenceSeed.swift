@@ -83,6 +83,11 @@ enum EvidenceSeed {
         // YESTERDAY: a plan whose blocks were never answered, which is what
         // CatchUp looks for. Paired with resetting `jeeves.catchUp.lastShown`
         // via a launch argument so the sheet is actually offered.
+        //
+        // It is also the day marked OFFLINE. The offline banner is a real,
+        // persistent property of a stored plan, but a walkthrough that only
+        // ever visits an online day cannot photograph it — which is exactly why
+        // it graded "absent" while working. The walk steps back a day to see it.
         let past = DailyPlanState(date: yesterday, hasGymToday: false, gymMinute: nil)
         past.storePlan(samplePlan(), isOffline: true)
         context.insert(past)

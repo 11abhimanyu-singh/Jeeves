@@ -41,6 +41,8 @@ struct SettingsView: View {
     /// Which of the phone's calendars Jeeves reads. There is no account to
     /// connect any more — iOS owns the accounts, this owns the choice.
     @State private var showDeviceCalendars = false
+    @State private var syncing = false
+    @State private var syncMessage: String?
 
     var body: some View {
         Form {
@@ -316,6 +318,36 @@ struct SettingsView: View {
             Label("Read from this phone's calendars", systemImage: "calendar")
                 .foregroundStyle(Color.textPrimary)
             Button("Choose calendars…") { showDeviceCalendars = true }
+
+            // ONE BUTTON that actually brings the calendars in.
+            //
+            // Ticking calendars only recorded a preference; the events arrived
+            // one day at a time, from the planner, if you remembered. So
+            // "I connected my calendars" and "my calendar is in Jeeves" were
+            // different states with nothing joining them.
+            Button {
+                syncing = true
+                Task {
+                    let result = await CalendarSync.run(context: modelContext)
+                    syncMessage = result?.summary
+                        ?? "Calendar access is off — turn it on in iOS Settings → Privacy & Security → Calendars."
+                    syncing = false
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    if syncing { ProgressView().controlSize(.small) }
+                    Text(syncing ? "Syncing…" : "Sync calendars now")
+                }
+            }
+            .disabled(syncing)
+
+            // A receipt, not a checkmark: "4 added, 1 updated" is checkable
+            // against the day; "Synced!" is not.
+            if let syncMessage {
+                Text(syncMessage)
+                    .font(.ui(12.5)).foregroundStyle(Color.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         } header: {
             Text("Calendars")
         } footer: {

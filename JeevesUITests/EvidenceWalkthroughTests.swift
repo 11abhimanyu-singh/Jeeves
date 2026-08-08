@@ -98,6 +98,8 @@ final class EvidenceWalkthroughTests: XCTestCase {
         rec.step("settings.routine.activity") { self.tapAny("Chores") }
         dismissSheet()
 
+        rec.step("settings.sync_calendars") { self.tapAny("Sync calendars now") }
+
         // The calendar sheet: whether one button syncs every account.
         rec.step("settings.calendars") {
             self.tapAny("Menu") && self.tapAny("Settings") && self.tapAny("Choose calendars…")
@@ -107,6 +109,7 @@ final class EvidenceWalkthroughTests: XCTestCase {
         // MARK: chat and the morning offer.
         rec.step("chat") { self.tapAny("Ask Jeeves") }
         rec.step("chat.morning_card") { self.tapAny("Pick today") }
+        rec.step("chat.morning_card.reorder") { self.tapAny("Reorder activities") }
         rec.step("chat.morning_card.scrolled") { self.scrollToBottom(); return true }
         rec.step("chat.menu") { self.tapAny("More") }
         dismissSheet()
@@ -117,6 +120,13 @@ final class EvidenceWalkthroughTests: XCTestCase {
         rec.step("planner.editor") { self.tapAny("Edit") }
         rec.step("planner.editor.scrolled") { self.scrollToBottom(); return true }
         dismissSheet()
+
+        // Yesterday's plan is the OFFLINE one. The banner is a persistent
+        // property of the stored plan, invisible to a walk that only ever looks
+        // at an online day.
+        rec.step("planner.yesterday") { self.tapAny("Jump to a date") }
+        dismissSheet()
+        rec.step("planner.offline_marker") { self.scrollToTop(); return true }
 
         rec.step("planner.activity_picker") { self.tapAny("Choose this day's activities") }
         dismissSheet()

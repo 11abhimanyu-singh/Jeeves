@@ -79,6 +79,13 @@ final class DailyPlanState {
     /// sparse map and not a field on every row.
     var durationOverridesJSON: String? = nil
 
+    /// The order the user put today's activities in, by planner name.
+    ///
+    /// Per-day like the durations, and for the same reason: the routine's own
+    /// `sortOrder` is the DEFAULT shape of a day, not a decision about this one.
+    /// Names not listed here keep their routine order behind the ones that are.
+    var activityOrderJSON: String? = nil
+
     /// When something the plan was BUILT FROM changed after it was built.
     ///
     /// Five tools move a planner input — add/delete/edit an event, set the gym,
@@ -151,6 +158,23 @@ final class DailyPlanState {
                 return
             }
             durationOverridesJSON = String(data: data, encoding: .utf8)
+        }
+    }
+
+    /// Planner names, in the order the user chose. Empty when untouched.
+    var activityOrder: [String] {
+        get {
+            guard let json = activityOrderJSON, let data = json.data(using: .utf8),
+                  let names = try? JSONDecoder().decode([String].self, from: data)
+            else { return [] }
+            return names
+        }
+        set {
+            guard !newValue.isEmpty, let data = try? JSONEncoder().encode(newValue) else {
+                activityOrderJSON = nil
+                return
+            }
+            activityOrderJSON = String(data: data, encoding: .utf8)
         }
     }
 

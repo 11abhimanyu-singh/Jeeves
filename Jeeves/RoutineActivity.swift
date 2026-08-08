@@ -227,7 +227,8 @@ extension Baseline {
     static func routine(from activities: [RoutineActivity],
                         selection: ActivitySelection = .routine,
                         on date: Date? = nil,
-                        durationOverrides: [String: Int] = [:]) -> [BaselineActivity] {
+                        durationOverrides: [String: Int] = [:],
+                        order: [String] = []) -> [BaselineActivity] {
         let enabled = activities
             .filter { $0.enabled && $0.group != .gym }
             .sorted { $0.sortOrder < $1.sortOrder }
@@ -236,11 +237,28 @@ extension Baseline {
         // came out empty: a day the user deliberately cleared, and a day the
         // cadence simply left light, are both correct answers, and refilling
         // either with the eight hardcoded defaults would undo the whole point.
-        if enabled.isEmpty { return applying(durationOverrides, to: self.activities) }
+        if enabled.isEmpty {
+            return ordering(order, applying(durationOverrides, to: self.activities))
+        }
 
-        return applying(durationOverrides, to: enabled
+        return ordering(order, applying(durationOverrides, to: enabled
             .filter { $0.isPlanned(on: date, selection: selection) }
-            .map(\.asBaseline))
+            .map(\.asBaseline)))
+    }
+
+    /// Reorder to the user's per-day sequence. This list is the planner's FILL
+    /// ORDER, so moving a row here is what actually moves it in the day.
+    /// Anything the user did not place keeps its routine order, behind
+    /// everything they did — dropping it would silently delete work.
+    private static func ordering(_ order: [String],
+                                 _ activities: [BaselineActivity]) -> [BaselineActivity] {
+        guard !order.isEmpty else { return activities }
+        let rank = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
+        return activities.enumerated().sorted { lhs, rhs in
+            let l = rank[lhs.element.name] ?? (order.count + lhs.offset)
+            let r = rank[rhs.element.name] ?? (order.count + rhs.offset)
+            return l < r
+        }.map(\.element)
     }
 
     private static func applying(_ overrides: [String: Int],

@@ -717,6 +717,7 @@ struct DayPlannerView: View {
         // committed plan and lets it decide.
         let selection = selectedPlanState?.activitySelection ?? .routine
         let overrides = selectedPlanState?.durationOverrides ?? [:]
+        let orderNames = selectedPlanState?.activityOrder ?? []
         planningStartedAt = Date()
         planningTask = Task {
             // Hold a background assertion so planning survives the user
@@ -730,7 +731,7 @@ struct DayPlannerView: View {
                     locations: locations,
                     prepSessions: prepSessions,
                     routine: Baseline.routine(from: routineActivities, selection: selection, on: date,
-                                              durationOverrides: overrides),
+                                              durationOverrides: overrides, order: orderNames),
                     gymSession: Baseline.gymSession(from: routineActivities),
                     adherenceNote: AdherenceHistory.planningNote(context: modelContext, for: date),
                     planDate: date,
